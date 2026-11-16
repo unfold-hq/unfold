@@ -55,9 +55,11 @@ def verify(base, staging, read=read_url, site_url=None):
     assert expected['revision'] in bundle, 'Published reading bundle has a stale revision'
     links = re.findall(r'\]\(([^\s)]+)', index)
     assert links, 'The machine reading index is empty'
+    published = site_url or yaml.safe_load((root / 'mkdocs.yml').read_text())['site_url']
     for target in links:
-        assert target.startswith(base), f'Machine index leaves the site: {target}'
-        assert read(target), f'Machine index target is empty: {target}'
+        served = base + target.removeprefix(published) if target.startswith(published) else target
+        assert served.startswith(base), f'Machine index leaves the site: {target}'
+        assert read(served), f'Machine index target is empty: {target}'
     spec = importlib.util.spec_from_file_location('docs_output', root / 'scripts/docs-output.py')
     output = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(output)
