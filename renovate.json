@@ -139,18 +139,6 @@
     },
     {
       "customType": "regex",
-      "description": "Composite actions take their BuildKit, SBOM scanner and binfmt images as `with:` strings, which the github-actions manager does not read. Tag and digest are captured so the digest stays managed.",
-      "managerFilePatterns": [
-        "/^\\.github/workflows/[^/]+\\.ya?ml$/"
-      ],
-      "matchStrings": [
-        "\"(?<depName>docker\\.io/[^:\"\\s]+):(?<currentValue>[^@\"\\s]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""
-      ],
-      "datasourceTemplate": "docker",
-      "versioningTemplate": "docker"
-    },
-    {
-      "customType": "regex",
       "description": "The local MCP end-to-end compose file runs the Authentik that the nightly mcp-e2e job runs through Harbor's ghcr proxy. Naming the dependency after the workflow's image puts both pins in one update, so one pull request moves both; the proxy serves the upstream digest.",
       "managerFilePatterns": [
         "/^apps/unfold/test/e2e/authentik\\.compose\\.yaml$/"

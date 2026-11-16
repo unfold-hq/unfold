@@ -1,0 +1,43 @@
+name: Probe GHCR for a release image
+description: Ask GHCR whether ghcr.io/unfold-hq/<name>:<version> already exists; sets the exists output to true or false and fails on any other answer, so a retry never rebuilds a version it cannot see
+inputs:
+  name:
+    description: Bare image name under ghcr.io/unfold-hq, e.g. unfold
+    required: true
+  version:
+    description: Release version, which is the image tag
+    required: true
+  token:
+    description: Token that may read the package while it is still private
+    required: true
+outputs:
+  exists:
+    description: true when the tag exists, false when GHCR answered 404
+    value: ${{ steps.probe.outputs.exists }}
+runs:
+  using: composite
+  steps:
+    - id: probe
+      shell: bash
+      env:
+        GHCR_TOKEN: ${{ inputs.token }}
+        NAME: ${{ inputs.name }}
+        VERSION: ${{ inputs.version }}
+      run: |
+        set -uo pipefail
+        bearer="$(curl -sS --fail --max-time 30 -u "${GITHUB_ACTOR}:${GHCR_TOKEN}" "https://ghcr.io/token?scope=repository:unfold-hq/${NAME}:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')" || bearer=""
+        code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer ${bearer}" \
+          -H 'Accept: application/vnd.oci.image.index.v1+json' \
+          -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+          "https://ghcr.io/v2/unfold-hq/${NAME}/manifests/${VERSION}")" || true
+        [ -n "$code" ] || code=000
+        if [ "$code" = 200 ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "ghcr.io/unfold-hq/${NAME}:${VERSION} is already published; skipping the build."
+        elif [ "$code" = 404 ]; then
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+          echo "GHCR answered HTTP ${code} for ghcr.io/unfold-hq/${NAME}:${VERSION}; building."
+        else
+          echo "GHCR probe failed with HTTP $code; refusing to rebuild an unknown version." >&2
+          exit 1
+        fi

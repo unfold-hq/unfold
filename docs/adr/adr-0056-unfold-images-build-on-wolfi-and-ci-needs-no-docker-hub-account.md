@@ -31,10 +31,11 @@ Ploeg had the same problem and moved its images to Wolfi ([Ploeg ADR-0144](https
 Chosen option: "Wolfi", because it is the only option that pulls without credentials and has measured zero critical and high findings for Ploeg's images, and Ploeg already runs on it.
 
 * **Base.** Both Dockerfiles take `ARG WOLFI_BASE_IMAGE=${REGISTRY_CHAINGUARD}/chainguard/wolfi-base:latest@sha256:…`. `REGISTRY_CHAINGUARD` defaults to `cgr.dev` and can point at a mirror. The Renovate annotation above the `ARG` moves the digest. Chainguard serves only the `latest` tag free of charge, so the digest is the pin.
-* **Packages.** `apk add` installs `nodejs-24`, `npm`, `git` and the agent's tools from `https://packages.wolfi.dev/os` at build time. The package versions are not pinned, because Wolfi withdraws old package versions and a pin would break rebuilds. Renovate has no datasource for Wolfi packages. The package name holds the Node major, a build step fails unless `node --version` starts with `v24.`, and BuildKit's SBOM records what shipped. The Node patch level in an image can therefore differ from the one `mise.toml` pins for development.
+* **Packages.** `apk add` installs `nodejs-24`, `npm`, `git` and the agent's tools from `https://packages.wolfi.dev/os` at build time. The package versions are not pinned, because Wolfi withdraws old package versions and a pin would break rebuilds. Renovate has no datasource for Wolfi packages. The package name holds the Node major, a build step fails unless `node --version` starts with `v24.`, and the signed CycloneDX SBOM of each platform image records what shipped. The Node patch level in an image can therefore differ from the one `mise.toml` pins for development.
 * **Workbench image.** A `rootfs` stage runs `apk add --root /rootfs --initdb wolfi-baselayout ca-certificates-bundle nodejs-24 git`, removes `git-http-push`, adds the `node` user (uid and gid 1000) and is copied onto `FROM scratch`. The image keeps no shell and no package manager. The application tree, `/data`, the compile cache, the port, the environment and `CMD` are unchanged.
 * **Agent image.** It runs on `wolfi-base` with `apk upgrade`, then `nodejs-24`, `npm`, `bash`, `git`, `ca-certificates-bundle` and `ripgrep`, and keeps busybox and apk-tools as the Alpine dev variant did. OpenCode comes from the glibc package `opencode-linux-<arch>`, because Wolfi is glibc. Before, it came from the musl package. The npm patch for `undici` and `brace-expansion` stays as it was.
 * **CI.** No workflow reads `DOCKERHUB_USERNAME` or `DOCKERHUB_TOKEN` or signs in to `dhi.io`. `build-contexts` builds both images into the runner's image store and runs the release's CVE gate on each, so a pull request fails before merge when an image goes over its budget, instead of the release failing after its tag.
+* **No Docker Hub at all.** Nothing in CI or the release pulls from `docker.io`. The Dockerfiles carry no `# syntax=` directive, which would pull the `docker/dockerfile` frontend, so the builder's own frontend parses them. The release builds each platform natively, AMD64 on `ubuntu-24.04` and ARM64 on `ubuntu-24.04-arm`, with the runner's own Docker and its BuildKit on the containerd image store, so it pulls neither binfmt for QEMU nor a BuildKit image. It pushes each platform by digest and merges both into one tagged index with `docker buildx imagetools create`. BuildKit still attaches SLSA provenance. Its SBOM scanner is a Docker Hub image, so the release attests a CycloneDX SBOM from syft for the index and for each platform image instead, signed keyless like the rest. The nightly MCP end-to-end suite takes Postgres from the ECR Public copy of the official image (`public.ecr.aws/docker/library/postgres`), the same digest as on Docker Hub.
 
 ### Consequences
 
@@ -44,13 +45,15 @@ Chosen option: "Wolfi", because it is the only option that pulls without credent
 * Bad, because two builds of the same commit a week apart can contain different package versions. Accepted, because the gate scans what is built and the SBOM records it. apko with a lockfile would make builds reproducible, and is a re-evaluation trigger below.
 * Bad, because the images move from musl to glibc. An image built `FROM` `unfold-agent` that runs Alpine packages or musl binaries breaks, and must use Wolfi packages instead.
 * Bad, because a digest that Renovate does not move stops receiving base fixes. The workbench takes all its packages fresh at build time and the agent image runs `apk upgrade`, so this matters only for the base layer itself.
-* Neutral: the release still pulls BuildKit and binfmt anonymously from `docker.io`. No sign-in is needed for that.
+* Good, because no job depends on Docker Hub's anonymous rate limit or availability.
+* Bad, because the ARM64 build needs GitHub's `ubuntu-24.04-arm` runner, which is free only for public repositories. A private fork has to pay for it or go back to emulation.
 
 ### Confirmation
 
 * `mise run release-check-github` runs [`scripts/github-workflow-policy.test.cjs`](../../scripts/github-workflow-policy.test.cjs). It fails when a pull request job reads a secret, when `build-contexts` takes an input, signs in to a registry or names `dhi.io`, or when it stops holding both images to their CVE budget.
 * The `build-contexts` job on every pull request builds both images and fails when either goes over [`apps/unfold/ops/security/cve-budgets.yaml`](../../apps/unfold/ops/security/cve-budgets.yaml). The release repeats the gate on the pushed digests before it signs them.
 * `git grep -n -i -E 'dhi\.io|REGISTRY_DHI|DOCKERHUB' -- .github apps/unfold/Dockerfile apps/unfold/ops/agent/Dockerfile` prints nothing.
+* The same policy test fails when a workflow or action names `docker.io`, binfmt, a BuildKit image, `buildx create` or BuildKit's SBOM scanner, when either Dockerfile has a `# syntax=` directive, or when the MCP end-to-end compose file takes an image from anywhere but `ghcr.io` or `public.ecr.aws`.
 
 ## Pros and Cons of the Options
 
@@ -75,3 +78,4 @@ Chosen option: "Wolfi", because it is the only option that pulls without credent
 * Amends [application ADR 0010](../../apps/unfold/docs/adrs/0010-one-release-train-with-zero-cve-images.md): its base image choice is replaced, while its release train and zero budget stand.
 * Amends [ADR-0055](adr-0055-github-unfold-hq-is-the-project-home.md): its consequence that a fork skips the image build no longer holds.
 * 2026-11-16 — Decided by the owner: Unfold's CI must not need Docker Hub.
+* 2026-11-16 — Widened by the owner to no Docker Hub at all: the release builds each platform on its own runner without binfmt or a BuildKit image, the Dockerfiles drop their `# syntax=` directive, BuildKit's SBOM gives way to signed per-platform CycloneDX SBOMs, and the nightly suite's Postgres comes from ECR Public. The neutral consequence that the release still pulled BuildKit and binfmt from `docker.io` was removed.
