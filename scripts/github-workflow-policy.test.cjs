@@ -41,7 +41,12 @@ test('the repository runs CI only on GitHub Actions, through the eleven entry po
 test('every job runs only in unfold-hq/unfold, on a GitHub-hosted runner, so the mirror and forks stay inert', () => {
   for (const { file, name, job } of allJobs()) {
     assert.ok(String(job.if ?? '').startsWith(guard), `${file}: ${name} starts its condition with ${guard}`);
-    assert.equal(job['runs-on'], 'ubuntu-24.04', `${file}: ${name}`);
+    if (file === 'on_release_published.yml' && name === 'unfold-release-build') {
+      assert.equal(job['runs-on'], '${{ matrix.runner }}', name);
+      assert.deepEqual(job.strategy.matrix.include.filter(entry => entry.runner).map(entry => [entry.arch, entry.runner]), [['amd64', 'ubuntu-24.04'], ['arm64', 'ubuntu-24.04-arm']], 'each platform builds natively on its own GitHub-hosted runner');
+    } else {
+      assert.equal(job['runs-on'], 'ubuntu-24.04', `${file}: ${name}`);
+    }
     assert.equal(job.uses, undefined, `${file}: ${name} calls no reusable workflow`);
     assert.ok(Number(job['timeout-minutes']) > 0, `${file}: ${name} has a timeout`);
     for (const forked of [{ repository: 'someone/unfold' }, { repository: 'webgrip/unfold' }]) {
@@ -92,6 +97,18 @@ test('every action is local or pinned to a full commit, and every image is publi
     }
     for (const dependency of [job.needs ?? []].flat()) assert.ok(workflows[file].jobs[dependency], `${file}: ${name} needs a missing ${dependency}`);
     for (const [, dependency] of JSON.stringify(job).matchAll(/needs\.([a-z-]+)\./g)) assert.ok([job.needs ?? []].flat().includes(dependency), `${file}: ${name} reads undeclared dependency ${dependency}`);
+  }
+});
+
+test('no workflow, action or image build pulls from Docker Hub, so CI needs neither a Docker account nor Docker Hub\'s anonymous rate limit', () => {
+  for (const file of githubTree()) {
+    assert.doesNotMatch(text(file), /docker\.io|tonistiigi|moby\/buildkit|binfmt|setup-qemu|setup-buildx|buildx create|--privileged|--sbom|dhi\.io/, file);
+  }
+  for (const file of ['apps/unfold/Dockerfile', 'apps/unfold/ops/agent/Dockerfile']) {
+    assert.doesNotMatch(text(file), /^# syntax=/m, `${file}: a syntax directive pulls its frontend from Docker Hub`);
+  }
+  for (const [, image] of text('apps/unfold/test/e2e/authentik.compose.yaml').matchAll(/image: \$\{[A-Z_]+:-([^}]+)\}/g)) {
+    assert.match(image, /^(?:ghcr\.io|public\.ecr\.aws)\/[^@]+@sha256:[0-9a-f]{64}$/, image);
   }
 });
 
@@ -233,10 +250,28 @@ test('publication signs keyless only in on_release_published.yml at a release ta
   for (const identity of identities) assert.equal(identity, KEYLESS_SIGNER);
   const registry = text('scripts/release_registry.py').match(/^GITHUB_SIGNER = r'(.+)'$/m)[1];
   assert.equal(registry, KEYLESS_SIGNER, 'the publisher verifies the identity the workflow signs with');
-  const build = images.steps.find(step => step.id === 'build').run;
-  assert.match(build, /--label org\.opencontainers\.image\.source="\$SOURCE"/);
-  assert.match(build, /--provenance=mode=max --sbom=true/);
-  assert.equal(images.steps.find(step => step.id === 'build').env.SOURCE, 'https://github.com/unfold-hq/unfold');
+  const platforms = publisher.jobs['unfold-release-build'];
+  assert.deepEqual(images.needs, ['parse-release-tag', 'unfold-release-build']);
+  assert.deepEqual(platforms.permissions, { contents: 'read', packages: 'write' }, 'a platform build pushes by digest and signs nothing');
+  assert.deepEqual(platforms.strategy.matrix.name, images.strategy.matrix.name);
+  assert.deepEqual(platforms.strategy.matrix.arch, ['amd64', 'arm64']);
+  const buildStep = platforms.steps.find(step => step.id === 'build');
+  assert.match(buildStep.run, /docker buildx build --builder default /);
+  assert.match(buildStep.run, /--platform "linux\/\$ARCH"/);
+  assert.match(buildStep.run, /--label org\.opencontainers\.image\.source="\$SOURCE"/);
+  assert.match(buildStep.run, /--provenance=mode=max/);
+  assert.match(buildStep.run, /push-by-digest=true/);
+  assert.equal(buildStep.env.SOURCE, 'https://github.com/unfold-hq/unfold');
+  for (const name of platforms.strategy.matrix.name) {
+    for (const arch of platforms.strategy.matrix.arch) assert.equal(platforms.outputs[`${name}-${arch}`], `\${{ steps.build.outputs.${name}-${arch} }}`);
+  }
+  const merge = at(step => step.id === 'merge');
+  assert.ok(merge < digest, 'the index is tagged before its digest is resolved, gated and signed');
+  assert.match(images.steps[merge].run, /docker buildx imagetools create \\\n\s+--annotation index:org\.opencontainers\.image\.source="\$SOURCE"/);
+  assert.equal(images.steps[merge].env.SOURCE, 'https://github.com/unfold-hq/unfold');
+  const signing = images.steps[sign].run;
+  assert.match(signing, /cosign attest --yes --type cyclonedx --predicate "\$\{RUNNER_TEMP\}\/sbom\.cdx\.json" "\$REF"/);
+  assert.match(signing, /for arch in amd64 arm64; do[\s\S]+cosign attest --yes --type cyclonedx --predicate "\$\{RUNNER_TEMP\}\/sbom-\$arch\.cdx\.json" "\$IMAGE@\$platform"/, 'each platform image carries its own signed SBOM');
 });
 
 test('the chart follows every image, the extension verifies before Open VSX publishes it keylessly, and the distributor publishes the release last', () => {

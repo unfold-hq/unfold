@@ -16,7 +16,7 @@ Unfold releases under `unfold-v0.x.y-rc.N` tags ([ADR-0019](../adr/adr-0019-unfo
 
 | Artifact | Published at | Signed by |
 | --- | --- | --- |
-| Unfold application | `ghcr.io/unfold-hq/unfold` | keyless cosign, with a CycloneDX SBOM and the CVE-budget verdict attested, and BuildKit provenance and SBOM attached |
+| Unfold application | `ghcr.io/unfold-hq/unfold` | keyless cosign, with a CycloneDX SBOM and the CVE-budget verdict attested to the index, a CycloneDX SBOM attested to each platform image, and BuildKit provenance attached |
 | Unfold workspace image | `ghcr.io/unfold-hq/unfold-agent` | as above |
 | Unfold chart | `oci://ghcr.io/unfold-hq/charts/unfold` | keyless cosign |
 | Editor extension | [Open VSX `unfold-hq.unfold`](https://open-vsx.org/extension/unfold-hq/unfold); VSIX, SHA-256 file and sigstore bundle on the [GitHub release](https://github.com/unfold-hq/unfold/releases) | keyless `cosign sign-blob`, plus a GitHub build-provenance attestation |

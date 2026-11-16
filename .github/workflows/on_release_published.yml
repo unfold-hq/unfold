@@ -53,12 +53,103 @@ jobs:
           echo "version=${tag#unfold-v}" >> "$GITHUB_OUTPUT"
           echo "created=$created" >> "$GITHUB_OUTPUT"
 
-  unfold-release-images:
-    name: Unfold - Build, gate, sign and attest images (GHCR)
+  unfold-release-build:
+    name: Unfold - Build each image on its own platform (GHCR, by digest)
     needs: [parse-release-tag]
     if: github.repository == 'unfold-hq/unfold' && needs.parse-release-tag.outputs.version != ''
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      unfold-amd64: ${{ steps.build.outputs.unfold-amd64 }}
+      unfold-arm64: ${{ steps.build.outputs.unfold-arm64 }}
+      unfold-agent-amd64: ${{ steps.build.outputs.unfold-agent-amd64 }}
+      unfold-agent-arm64: ${{ steps.build.outputs.unfold-agent-arm64 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [unfold, unfold-agent]
+        arch: [amd64, arm64]
+        include:
+          - name: unfold
+            context: apps/unfold
+            dockerfile: apps/unfold/Dockerfile
+            target: app
+          - name: unfold-agent
+            context: apps/unfold/ops/agent
+            dockerfile: apps/unfold/ops/agent/Dockerfile
+            target: ''
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    env:
+      IMAGE: ghcr.io/unfold-hq/${{ matrix.name }}
+      VERSION: ${{ needs.parse-release-tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: unfold-v${{ needs.parse-release-tag.outputs.version }}
+          persist-credentials: false
+      - name: Sign in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - id: probe
+        uses: ./.github/actions/ghcr-probe
+        with:
+          name: ${{ matrix.name }}
+          version: ${{ needs.parse-release-tag.outputs.version }}
+          token: ${{ github.token }}
+      - name: Switch Docker to the containerd image store, so its own BuildKit pushes attestations and no BuildKit image is pulled
+        if: steps.probe.outputs.exists != 'true'
+        run: |
+          set -euo pipefail
+          config=/etc/docker/daemon.json
+          current="$(sudo cat "$config" 2>/dev/null || echo '{}')"
+          printf '%s' "$current" | jq '.features["containerd-snapshotter"] = true' | sudo tee "$config" > /dev/null
+          sudo systemctl restart docker
+          docker info --format '{{ json .DriverStatus }}' | grep -q io.containerd.snapshotter.v1 || { echo "Docker did not switch to the containerd image store." >&2; exit 1; }
+      - name: Build and push this platform by digest (GHCR)
+        id: build
+        if: steps.probe.outputs.exists != 'true'
+        env:
+          NAME: ${{ matrix.name }}
+          ARCH: ${{ matrix.arch }}
+          CONTEXT: ${{ matrix.context }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+          TARGET: ${{ matrix.target }}
+          IMAGE_CREATED: ${{ needs.parse-release-tag.outputs.created }}
+          SOURCE: https://github.com/unfold-hq/unfold
+        run: |
+          set -euo pipefail
+          [ "$(docker version --format '{{ .Server.Arch }}')" = "$ARCH" ] || { echo "The runner does not build $ARCH natively." >&2; exit 1; }
+          docker buildx build --builder default --progress=plain \
+            --platform "linux/$ARCH" \
+            --file "$DOCKERFILE" ${TARGET:+--target "$TARGET"} \
+            --build-arg IMAGE_CREATED="$IMAGE_CREATED" \
+            --build-arg IMAGE_VERSION="$VERSION" \
+            --build-arg IMAGE_REVISION="$GITHUB_SHA" \
+            --label org.opencontainers.image.source="$SOURCE" \
+            --label org.opencontainers.image.url="$SOURCE" \
+            --provenance=mode=max \
+            --metadata-file "${RUNNER_TEMP}/build.json" \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            "$CONTEXT"
+          digest="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/build.json")"
+          [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "no digest pushed for $IMAGE on $ARCH" >&2; exit 1; }
+          echo "${NAME}-${ARCH}=$digest" >> "$GITHUB_OUTPUT"
+
+  unfold-release-images:
+    name: Unfold - Merge, gate, sign and attest images (GHCR)
+    needs: [parse-release-tag, unfold-release-build]
+    if: github.repository == 'unfold-hq/unfold' && needs.parse-release-tag.outputs.version != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -70,15 +161,7 @@ jobs:
       fail-fast: false
       max-parallel: 1
       matrix:
-        include:
-          - name: unfold
-            context: apps/unfold
-            dockerfile: apps/unfold/Dockerfile
-            target: app
-          - name: unfold-agent
-            context: apps/unfold/ops/agent
-            dockerfile: apps/unfold/ops/agent/Dockerfile
-            target: ''
+        name: [unfold, unfold-agent]
     env:
       IMAGE: ghcr.io/unfold-hq/${{ matrix.name }}
       VERSION: ${{ needs.parse-release-tag.outputs.version }}
@@ -98,56 +181,28 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-
-      - name: Probe GHCR for an existing image
-        id: probe
-        env:
-          GHCR_TOKEN: ${{ github.token }}
-          NAME: ${{ matrix.name }}
-        run: |
-          set -uo pipefail
-          bearer="$(curl -sS --fail --max-time 30 -u "${GITHUB_ACTOR}:${GHCR_TOKEN}" "https://ghcr.io/token?scope=repository:unfold-hq/${NAME}:pull" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')" || bearer=""
-          code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 -H "Authorization: Bearer ${bearer}" \
-            -H 'Accept: application/vnd.oci.image.index.v1+json' \
-            -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
-            "https://ghcr.io/v2/unfold-hq/${NAME}/manifests/${VERSION}")" || true
-          [ -n "$code" ] || code=000
-          if [ "$code" = 200 ]; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "${IMAGE}:${VERSION} is already published; skipping the build."
-          elif [ "$code" = 404 ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "GHCR answered HTTP ${code} for ${IMAGE}:${VERSION}; building."
-          else
-            echo "GHCR probe failed with HTTP $code; refusing to rebuild an unknown version." >&2
-            exit 1
-          fi
-
-      - name: Build and push (GHCR)
-        id: build
+      - id: probe
+        uses: ./.github/actions/ghcr-probe
+        with:
+          name: ${{ matrix.name }}
+          version: ${{ needs.parse-release-tag.outputs.version }}
+          token: ${{ github.token }}
+      - name: Merge the AMD64 and ARM64 builds into one tagged index (GHCR)
+        id: merge
         if: steps.probe.outputs.exists != 'true'
         env:
-          CONTEXT: ${{ matrix.context }}
-          DOCKERFILE: ${{ matrix.dockerfile }}
-          TARGET: ${{ matrix.target }}
-          IMAGE_CREATED: ${{ needs.parse-release-tag.outputs.created }}
+          AMD64: ${{ needs.unfold-release-build.outputs[format('{0}-amd64', matrix.name)] }}
+          ARM64: ${{ needs.unfold-release-build.outputs[format('{0}-arm64', matrix.name)] }}
           SOURCE: https://github.com/unfold-hq/unfold
         run: |
           set -euo pipefail
-          docker run --privileged --rm docker.io/tonistiigi/binfmt@sha256:d3b963f787999e6c0219a48dba02978769286ff61a5f4d26245cb6a6e5567ea3 --install arm64
-          docker buildx create --name unfold-release --driver docker-container --driver-opt image=docker.io/moby/buildkit@sha256:99368f3e46177c6405b9740e4461d91cee004128daeecca78d4ceac50ec1da5c --use
-          docker buildx build --progress=plain \
-            --platform linux/amd64,linux/arm64 \
-            --file "$DOCKERFILE" ${TARGET:+--target "$TARGET"} \
-            --build-arg IMAGE_CREATED="$IMAGE_CREATED" \
-            --build-arg IMAGE_VERSION="$VERSION" \
-            --build-arg IMAGE_REVISION="$GITHUB_SHA" \
-            --label org.opencontainers.image.source="$SOURCE" \
-            --label org.opencontainers.image.url="$SOURCE" \
+          for digest in "$AMD64" "$ARM64"; do
+            [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "a platform build left no digest for $IMAGE" >&2; exit 1; }
+          done
+          docker buildx imagetools create \
             --annotation index:org.opencontainers.image.source="$SOURCE" \
             --annotation index:org.opencontainers.image.url="$SOURCE" \
-            --provenance=mode=max --sbom=true \
-            --tag "$IMAGE:$VERSION" --push "$CONTEXT"
+            --tag "$IMAGE:$VERSION" "$IMAGE@$AMD64" "$IMAGE@$ARM64"
 
       - name: Resolve the published digest
         id: digest
@@ -182,11 +237,17 @@ jobs:
           "${tools[@]}" cosign sign --yes "$REF"
           "${tools[@]}" syft scan "registry:$REF" --output "cyclonedx-json=${RUNNER_TEMP}/sbom.cdx.json"
           "${tools[@]}" cosign attest --yes --type cyclonedx --predicate "${RUNNER_TEMP}/sbom.cdx.json" "$REF"
+          for arch in amd64 arm64; do
+            platform="$(docker buildx imagetools inspect --raw "$REF" | jq -r --arg arch "$arch" '.manifests[] | select(.platform.os == "linux" and .platform.architecture == $arch) | .digest')"
+            [[ "$platform" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "$REF holds no single linux/$arch image" >&2; exit 1; }
+            "${tools[@]}" syft scan "registry:$IMAGE@$platform" --output "cyclonedx-json=${RUNNER_TEMP}/sbom-$arch.cdx.json"
+            "${tools[@]}" cosign attest --yes --type cyclonedx --predicate "${RUNNER_TEMP}/sbom-$arch.cdx.json" "$IMAGE@$platform"
+          done
           "${tools[@]}" cosign attest --yes --type https://unfoldhq.dev/attestations/cve-budget/v1 --predicate cve-budget.json "$REF"
           "${tools[@]}" cosign verify \
             --certificate-identity-regexp '^https://github\.com/unfold-hq/unfold/\.github/workflows/on_release_published\.yml@refs/tags/unfold-v0\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REF" > /dev/null
-          echo "- \`$REF\` signed keyless by this workflow, with a CycloneDX SBOM and its CVE budget attested" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`$REF\` signed keyless by this workflow, with a CycloneDX SBOM per platform and its CVE budget attested" >> "$GITHUB_STEP_SUMMARY"
 
   unfold-release-publish-chart:
     name: Unfold - Publish and sign Helm chart (GHCR)
