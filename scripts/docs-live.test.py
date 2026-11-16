@@ -75,6 +75,10 @@ class LivePublication(unittest.TestCase):
         with patch.object(live, 'read_once', side_effect=[live.HTTPException('IncompleteRead'), b'page']) as read, patch.object(live.time, 'sleep'):
             self.assertEqual(live.read_url(url), b'page')
             self.assertEqual(read.call_count, 2)
+        starting = live.HTTPError(url, 522, 'Connection timed out', {}, None)
+        with patch.object(live, 'read_once', side_effect=[starting, b'page']) as read, patch.object(live.time, 'sleep'):
+            self.assertEqual(live.read_url(url), b'page')
+            self.assertEqual(read.call_count, 2)
         refused = live.HTTPError(url, 403, 'Forbidden', {}, None)
         with patch.object(live, 'read_once', side_effect=[refused, b'page']) as read, patch.object(live.time, 'sleep'):
             with self.assertRaises(live.HTTPError):
@@ -83,7 +87,7 @@ class LivePublication(unittest.TestCase):
         with patch.object(live, 'read_once', side_effect=ConnectionResetError('reset')) as read, patch.object(live.time, 'sleep'):
             with self.assertRaises(ConnectionResetError):
                 live.read_url(url)
-            self.assertEqual(read.call_count, 3)
+            self.assertEqual(read.call_count, 6)
 
     def test_matching_publication_passes(self):
         self.assertEqual(self.verify()['human_pages'], 1)
