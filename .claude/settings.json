@@ -9,15 +9,6 @@
             "command": "python3 \"${CLAUDE_PROJECT_DIR}\"/scripts/stage-explicit-paths.py"
           }
         ]
-      },
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PROJECT_DIR}/.claude/hooks/guard-secrets/scripts/guard_secrets.py\""
-          }
-        ]
       }
     ]
   }

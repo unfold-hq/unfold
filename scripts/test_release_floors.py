@@ -132,7 +132,7 @@ class RetiredPloegPublisher(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def test_publishing_ploeg_fails_before_any_git_network_registry_or_file_side_effect(self):
-        self.forbid(publish_release, 'git', 'api', 'request', 'command', 'copy_image', 'copy_chart', 'attach_forgejo', 'mirror_release', 'link_package', 'refuse_occupied')
+        self.forbid(publish_release, 'git', 'api', 'request', 'command', 'Registry', 'verify_image', 'attach_github', 'refuse_occupied')
         self.forbid(publish_chart, 'command', 'Registry')
         with patch.dict('os.environ', {}, clear=True):
             for version in ['0.4.0-rc.36', '0.5.0-rc.1', '0.1.0', '1.0.0']:

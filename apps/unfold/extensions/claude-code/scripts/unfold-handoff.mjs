@@ -85,9 +85,8 @@ export function findSecrets(diff) {
 }
 
 /**
- * Scans what a hand-off would push. Uses `gitleaks` (or `UNFOLD_GITLEAKS_BIN`), the scanner this repository's
- * guard-secrets hook runs, with the repository's `.gitleaks.toml` when it has one, and adds the built-in check either
- * way. Answers which scanners ran and every hit.
+ * Scans what a hand-off would push. Uses `gitleaks` (or `UNFOLD_GITLEAKS_BIN`) with the repository's
+ * `.gitleaks.toml` when it has one, and adds the built-in check either way. Answers which scanners ran and every hit.
  */
 export function scanForSecrets(diff, root, options = {}) {
   const bin = options.gitleaks ?? process.env.UNFOLD_GITLEAKS_BIN ?? 'gitleaks';

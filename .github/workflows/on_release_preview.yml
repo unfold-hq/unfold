@@ -26,7 +26,6 @@ jobs:
       - name: Verify the project home, the retired repository name and the publishing identities
         shell: bash
         env:
-          UNFOLD_RELEASE_HOME: github
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 scripts/release_preflight.py
 
@@ -56,5 +55,4 @@ jobs:
         working-directory: apps
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          UNFOLD_RELEASE_FORGE: github
         run: mise exec node -- node "$GITHUB_WORKSPACE/scripts/release-config/node_modules/semantic-release/bin/semantic-release.js" --dry-run

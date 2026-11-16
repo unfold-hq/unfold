@@ -2,8 +2,8 @@
 type: reference
 audience: [contributor, agent]
 owner: unfold
-last_verified: 2026-10-17
-verified_by: "OpenHands row measured with 18 headless OpenHands 1.16.0 runs on 2026-10-11; the hook outcome reproduced with and without a mise shim under a fresh home. Load matrix from Ploeg's adapters (apps/ploeg/pkg/harness/adapters, pkg/worker/adapters.go, task.go) and the owner's staging cluster Team configuration; Claude Code rows measured with headless probes on 2.1.296 (PR #308). OpenHands, opencode and Codex rows marked inferred were read from their sources and docs, not measured. Codex app import: source-command-* folders written by the openai.chatgpt extension with external-agent-import-sync-enabled = true, checked 2026-10-17 (they stopped after setting it to false)."
+last_verified: 2026-11-16
+verified_by: "OpenHands row measured with 18 headless OpenHands 1.16.0 runs on 2026-10-11; the hook outcome reproduced with and without a mise shim under a fresh home. Load matrix from Ploeg's adapters (apps/ploeg/pkg/harness/adapters, pkg/worker/adapters.go, task.go) and the owner's staging cluster Team configuration; Claude Code rows measured with headless probes on 2.1.296 (PR #308). OpenHands, opencode and Codex rows marked inferred were read from their sources and docs, not measured. Codex app import: source-command-* folders written by the openai.chatgpt extension with external-agent-import-sync-enabled = true, checked 2026-10-17 (they stopped after setting it to false). The generation and check pipeline was run with APM 0.35.0 on 2026-11-16, and agents-check was seen failing on a hand-edited apps/unfold/AGENTS.md."
 ---
 
 # Agent instructions
@@ -15,8 +15,8 @@ Where each kind of knowledge about working on Unfold lives, and what each agent 
 | Content | Home |
 | --- | --- |
 | Commands an agent cannot guess, repository-wide traps, pointers to docs | [`.apm/instructions/repo.instructions.md`](https://github.com/unfold-hq/unfold/blob/development/.apm/instructions/repo.instructions.md), no `applyTo` |
-| Shared rules for the owner's repositories | the `baseline` package of agent-standards, pinned in `apm.yml`; see [Shared rules and skills](#shared-rules-and-skills) |
-| Rules for one application or directory | `.apm/instructions/<name>.instructions.md` with an `applyTo` glob, for example `apps-unfold`, `apps-site`, `forgejo` |
+| Conventions for every change (commits, secrets, comments, shared working tree) | [`.apm/instructions/conventions.instructions.md`](https://github.com/unfold-hq/unfold/blob/development/.apm/instructions/conventions.instructions.md), no `applyTo` |
+| Rules for one application or directory | `.apm/instructions/<name>.instructions.md` with an `applyTo` glob, for example `apps-unfold`, `apps-site`, `github` |
 | Anything that must hold every time | a test, a CI job or a hook; the file may point at it |
 | Product knowledge, flows, reasons | `docs/` and the application's `docs/`, linked from the rules with absolute forge links |
 | Decisions | ADRs ([System decisions](../adr/index.md)) |
@@ -29,17 +29,18 @@ Where each kind of knowledge about working on Unfold lives, and what each agent 
 | One person's preferences | that person's tool configuration (`~/.claude/`, `~/.codex/`), never this repository |
 | Open work | a ticket |
 
-Everything above is a source; `mise run agents-install` generates what agents read. Claude Code reads `.claude/rules` (a rule with `applyTo` loads when Claude reads a matching file) and the skills in `.claude/skills`; `CLAUDE.md` is the one line that points there and imports nothing, which also stops Claude Code from reading `AGENTS.md` and loading every rule twice. Codex, opencode, Ploeg and OpenHands read the generated `AGENTS.md`, nested where a rule concerns one directory. Rules for `.forgejo/` land in the root `AGENTS.md`, because APM does not place files in hidden directories. APM puts a rule at the root once its `applyTo` matches most folders that hold files, and `apps/unfold` holds most of this repository's folders, so `apm.yml` excludes every folder below an application's top folder from that count; each application's rules then stay in its own `AGENTS.md`. Never edit a generated file.
+Everything above is a source; `mise run agents-install` generates what agents read. Claude Code reads `.claude/rules` (a rule with `applyTo` loads when Claude reads a matching file) and the skills in `.claude/skills`; `CLAUDE.md` is the one line that points there and imports nothing, which also stops Claude Code from reading `AGENTS.md` and loading every rule twice. Codex, opencode, Ploeg and OpenHands read the generated `AGENTS.md`, nested where a rule concerns one directory. Rules for `.github/` land in `.github/AGENTS.md`. APM puts a rule at the root once its `applyTo` matches most folders that hold files, and `apps/unfold` holds most of this repository's folders, so `apm.yml` excludes every folder below an application's top folder from that count; each application's rules then stay in its own `AGENTS.md`. Never edit a generated file.
 
-## Shared rules and skills
+## How the files are generated
 
-[`apm.yml`](https://github.com/unfold-hq/unfold/blob/development/apm.yml) pins three agent-standards packages at one release tag: `baseline`, the shared rules; `secrets`, the `guard-secrets` hook and skill and the `secrets-levels` skill; and `board`, the `vikunja` MCP server through the owner's LiteLLM gateway with the `product-owner` and `product-owner-contract` skills. The `agentstd` CLI from the same tag installs and checks them; the lockfile and every generated file are committed, so Ploeg and OpenHands see them without running APM.
+Unfold owns every rule, skill and prompt it gives agents; none comes from another repository ([ADR-0057](../adr/adr-0057-unfold-owns-its-agent-instructions.md)). [Microsoft APM](https://github.com/microsoft/apm) (`apm-cli`, pinned in `mise.toml`) turns `.apm/` into the files agents read. [`apm.yml`](https://github.com/unfold-hq/unfold/blob/development/apm.yml) names the targets and has no dependencies, and `apm.lock.yaml` records the hash of every file APM deployed. The lockfile and every generated file are committed, so Ploeg and OpenHands see them without running APM.
 
-- Edit `.apm/`, never a generated file. Shared content changes in agent-standards (or the skill in ai-skills); Renovate then bumps the tag in `apm.yml` and `mise.toml` and reinstalls in the same pull request.
-- Link to repository files with absolute forge links (`link_base` in [`.agentstd.toml`](https://github.com/unfold-hq/unfold/blob/development/.agentstd.toml)): APM copies a rule to `.claude/rules` and to `AGENTS.md` files at different depths, so a relative link breaks in one of them.
-- `mise run agents-check` fails when `CLAUDE.md` imports anything, a generated file differs from `.apm` and `apm.lock.yaml`, a skill was copied in by hand, a link is relative or broken, or what loads in every session exceeds the budget in `.agentstd.toml`. It runs in the `agents-check` job of every pull request, without blocking until 2026-11-07.
-- Ploeg starts Claude Code with `disableAllHooks`, so `guard-secrets` protects interactive sessions only.
-- The `vikunja` server in `.mcp.json`, `opencode.json` and `.codex/config.toml` reads its key from `LITELLM_MCP_KEY` in your environment; the files never hold it.
+- Edit `.apm/`, then run `mise run agents-install` (`apm install --force --no-policy`, then `apm compile`) and commit what it writes. Never edit a generated file.
+- Link to repository files with absolute links to `https://github.com/unfold-hq/unfold/blob/development/`: APM copies a rule to `.claude/rules` and to `AGENTS.md` files at different depths, so a relative link breaks in one of them. A skill may link relative to its own folder.
+- `mise run agents-check` runs `apm audit --ci --no-policy`, which fails on hidden Unicode or a deployed file whose hash differs from `apm.lock.yaml`, then compiles `.apm` again and fails when a generated file (`AGENTS.md` at any depth, `apm.lock.yaml`, `.agents/`, `.claude/`, `.opencode/`) differs from what it was before, printing the diff. It compares against the files on disk, not the last commit, so it passes on uncommitted work that is already regenerated. It runs in the `agents-check` job of every pull request, and the `gate` job requires it.
+- `--no-policy` skips APM's search for an organisation policy: Unfold has none, and the repository's own rules are the policy.
+- The only hook is `.claude/settings.json`'s `stage-explicit-paths`, with its opencode twin in `.opencode/plugins/`; both are written by hand. Ploeg starts Claude Code with `disableAllHooks`, so hooks protect interactive sessions only.
+- No MCP server is configured for the repository. Add one to `apm.yml` under `dependencies.mcp`, with any key read from the environment, so APM writes it for every agent.
 
 ## Who owns a term
 
@@ -63,6 +64,6 @@ The OpenHands row was measured on 2026-10-11 with OpenHands 1.16.0, team silver'
 
 ## Adding a line
 
-Add a rule only after the same mistake happened twice, and only when no test, hook or check can enforce it. Put it in the narrowest `.apm/instructions` file that covers it, with the narrowest `applyTo`, and its reason in one clause. `mise run agents-check` checks the generated files and the session budget; `mise run docs-check` runs [`scripts/agents-files.py`](https://github.com/unfold-hq/unfold/blob/development/scripts/agents-files.py), which checks the Codex size limit, links, named commands, hidden Unicode, sentences repeated from the root file, and the `knowledge/` bundle (fields, resources, index, no copied rules). `go run ./cmd/ploeg-okf pack -title "<Work Item title>" ../../knowledge` from `apps/ploeg` shows which concepts a Work Item would receive.
+Add a rule only after the same mistake happened twice, and only when no test, hook or check can enforce it. Put it in the narrowest `.apm/instructions` file that covers it, with the narrowest `applyTo`, and its reason in one clause. `mise run agents-check` checks the generated files; `mise run docs-check` runs [`scripts/agents-files.py`](https://github.com/unfold-hq/unfold/blob/development/scripts/agents-files.py), which checks the Codex size limit, links, named commands, hidden Unicode, sentences repeated from the root file, and the `knowledge/` bundle (fields, resources, index, no copied rules). `go run ./cmd/ploeg-okf pack -title "<Work Item title>" ../../knowledge` from `apps/ploeg` shows which concepts a Work Item would receive.
 
 A rule earns its place by changing what an agent does. Probe it before and after with headless runs on the cheapest model that shows the mistake; a rule no probe needs is removed. On 2026-10-11 the Forgejo `enabled` rule took a small model from 4 of 10 correct to 10 of 10, while a mise lockfile rule changed nothing and was dropped.

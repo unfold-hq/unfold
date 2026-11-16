@@ -1,4 +1,4 @@
-# Secret scanning for this repository (the guard-secrets hook and any gitleaks run).
+# Secret scanning for this repository (any gitleaks run and the hand-off preview).
 # Default rules apply everywhere. Test fixtures are allowlisted by path so example
 # keys, published RFC test vectors and fake receiver URLs live there as plain data,
 # never split into pieces to get past the scan. Real code stays scanned.

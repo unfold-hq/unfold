@@ -25,6 +25,12 @@ HISTORY_PREFIXES = (
     'ploeg/history',
 )
 PINNED_PREFIXES = ('ploeg/',)
+REMOVED_FROM_TREE = {
+    '.forgejo/': 'c19fdd492b9c866607b6adbca933f1b597b7b86c',
+    'scripts/restore_extension_asset.py': 'c19fdd492b9c866607b6adbca933f1b597b7b86c',
+    'scripts/sign_extension_asset.py': 'c19fdd492b9c866607b6adbca933f1b597b7b86c',
+    'scripts/workflow-policy.test.cjs': 'c19fdd492b9c866607b6adbca933f1b597b7b86c',
+}
 FENCE = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[^\n]*$', re.M | re.S)
 FRONT_MATTER = re.compile(r'\A---\n(.*?\n)?---\n', re.S)
 DATE = re.compile(r'(\d{4}-\d{2}-\d{2})')
@@ -49,6 +55,17 @@ def historical(location):
     if any(part in PARKED_PARTS for part in parts) and parts[-1] not in CURRENT_POLICY_PAGES:
         return True
     return any(part in HISTORY_PARTS for part in parts)
+
+
+def removed_revision(path):
+    """Return the last commit that held a repository path removed from the tree, or None.
+
+    A record keeps its links as written; the build points one at a removed file to that commit.
+    """
+    for prefix, revision in REMOVED_FROM_TREE.items():
+        if path == prefix.rstrip('/') or (prefix.endswith('/') and path.startswith(prefix)):
+            return revision
+    return None
 
 
 def pinned(page):

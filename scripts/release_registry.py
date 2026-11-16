@@ -9,7 +9,6 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 
 
 class SafeRedirect(urllib.request.HTTPRedirectHandler):
@@ -26,12 +25,6 @@ READ_ATTEMPTS = 3
 COMMAND_TIMEOUT = 600
 TRANSIENT_STATUS = {429, 500, 502, 503, 504}
 TRANSIENT_ERRORS = (http.client.IncompleteRead, http.client.RemoteDisconnected, ConnectionError, TimeoutError, urllib.error.URLError)
-OPENBAO = 'http://openbao.security.svc.cluster.local:8200'
-SIGNING_AUDIENCE = 'openbao-cosign'
-SIGNING_ROLE = 'cosign-signer'
-SIGNING_KEY = 'hashivault://cosign-webgrip'
-PUBLIC_KEY = str(Path(__file__).resolve().parent.parent / 'ops/security/cosign.pub')
-FORGEJO_SOURCE = 'https://github.com/webgrip/unfold'
 GITHUB_SOURCE = 'https://github.com/unfold-hq/unfold'
 GITHUB_ISSUER = 'https://token.actions.githubusercontent.com'
 GITHUB_SIGNER = r'^https://github\.com/unfold-hq/unfold/\.github/workflows/on_release_published\.yml@refs/tags/unfold-v0\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$'
@@ -133,45 +126,8 @@ class Registry:
         require_same(digest(data), reference, 'blob digest')
         return data
 
-    def upload_blob(self, repository, data):
-        reference = digest(data)
-        headers = self.headers(repository, 'pull,push')
-        present, _ = request(f'https://{self.host}/v2/{repository}/blobs/{reference}', method='HEAD', headers=headers, missing=True)
-        if present is not None:
-            return
-        _, response = request(f'https://{self.host}/v2/{repository}/blobs/uploads/', method='POST', data=b'', headers=headers)
-        location = urllib.parse.urljoin(f'https://{self.host}', response['Location'])
-        if urllib.parse.urlsplit(location).netloc != self.host:
-            raise RuntimeError('Cross-host registry upload refused')
-        location += ('&' if '?' in location else '?') + urllib.parse.urlencode({'digest': reference})
-        request(location, method='PUT', data=data, headers={**headers, 'Content-Type': 'application/octet-stream'})
 
-    def upload_manifest(self, repository, version, data):
-        request(f'https://{self.host}/v2/{repository}/manifests/{version}', method='PUT', data=data, headers={**self.headers(repository, 'pull,push'), 'Content-Type': manifest_media_type(data)})
-
-
-def manifest_media_type(data):
-    return json.loads(data).get('mediaType', 'application/vnd.oci.image.manifest.v1+json')
-
-
-def copy_chart(source, target, repository, version):
-    manifest = source.manifest(repository, version)
-    expected = digest(manifest)
-    existing = target.manifest(repository, version, missing=True)
-    if existing is not None:
-        require_same(digest(existing), expected, f'{target.host}/{repository}:{version}')
-    else:
-        descriptor = json.loads(manifest)
-        if descriptor['config']['mediaType'] != 'application/vnd.cncf.helm.config.v1+json':
-            raise RuntimeError('Expected a Helm OCI artifact')
-        for blob in [descriptor['config'], *descriptor['layers']]:
-            target.upload_blob(repository, source.blob(repository, blob['digest']))
-        target.upload_manifest(repository, version, manifest)
-    require_same(digest(target.manifest(repository, version)), expected, 'copied chart')
-    return expected
-
-
-def verify_image(registry, repository, version, revision, source=FORGEJO_SOURCE):
+def verify_image(registry, repository, version, revision, source=GITHUB_SOURCE):
     raw = registry.manifest(repository, version)
     index = json.loads(raw)
     require_same(index.get('annotations', {}).get('org.opencontainers.image.source'), source, 'index source')
@@ -188,65 +144,6 @@ def verify_image(registry, repository, version, revision, source=FORGEJO_SOURCE)
             require_same(labels.get('org.opencontainers.image.' + key), expected, f'{platform} {key}')
     require_same(platforms, {'amd64', 'arm64'}, 'image platforms')
     return digest(raw)
-
-
-def signing_identity(environ=os.environ):
-    url = environ['ACTIONS_ID_TOKEN_REQUEST_URL']
-    url += ('&' if '?' in url else '?') + urllib.parse.urlencode({'audience': SIGNING_AUDIENCE})
-    data, _ = request(url, headers={'Authorization': 'Bearer ' + environ['ACTIONS_ID_TOKEN_REQUEST_TOKEN']})
-    return json.loads(data)['value']
-
-
-def signing_session(jwt):
-    data, _ = request(f'{OPENBAO}/v1/auth/forgejo/login', method='POST', data=json.dumps({'jwt': jwt, 'role': SIGNING_ROLE}).encode(), headers={'Content-Type': 'application/json'})
-    session = json.loads(data)['auth']
-    if SIGNING_ROLE not in session['policies']:
-        raise RuntimeError('Unfold did not receive the signing policy')
-    return session['client_token']
-
-
-def revoke_signing_session(token):
-    request(f'{OPENBAO}/v1/auth/token/revoke-self', method='POST', data=b'', headers={'X-Vault-Token': token})
-
-
-def verify_signed(reference):
-    command('cosign', 'verify', '--key', PUBLIC_KEY, '--insecure-ignore-tlog', reference)
-
-
-def sign_once(reference):
-    try:
-        verify_signed(reference)
-        return False
-    except RuntimeError:
-        pass
-    token = signing_session(signing_identity())
-    try:
-        command('cosign', 'sign', '--yes', '--tlog-upload=false', '--key', SIGNING_KEY, reference, env={**os.environ, 'VAULT_ADDR': OPENBAO, 'VAULT_TOKEN': token})
-    finally:
-        revoke_signing_session(token)
-    verify_signed(reference)
-    return True
-
-
-def verify_signature(reference):
-    verify_signed(reference)
-    statements = command('cosign', 'verify-attestation', '--key', PUBLIC_KEY, '--insecure-ignore-tlog', '--type', 'cyclonedx', reference)
-    if not statements:
-        raise RuntimeError(f'Missing verified SBOM for {reference}')
-
-
-def copy_image(source, target, repository, version, revision):
-    expected = verify_image(source, repository, version, revision)
-    src = f'{source.host}/{repository}@{expected}'
-    dst = f'{target.host}/{repository}:{version}'
-    verify_signature(src)
-    existing = target.manifest(repository, version, missing=True)
-    if existing is not None:
-        require_same(digest(existing), expected, dst)
-    command('regctl', 'image', 'copy', '--referrers', '--digest-tags', src, dst)
-    require_same(verify_image(target, repository, version, revision), expected, dst)
-    verify_signature(f'{target.host}/{repository}@{expected}')
-    return expected
 
 
 def verify_keyless(reference):

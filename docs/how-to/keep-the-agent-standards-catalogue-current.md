@@ -3,7 +3,7 @@ type: how-to
 audience: [owner, contributor, agent]
 owner: unfold
 last_verified: 2026-11-04
-verified_by: "Ran mise run agent-standards, scripts/agent-standards.test.py and a dry run of scripts/agent-standards-survey.py (with review dates set back to 2026-10-20) on 2026-11-04; renovate-config-validator --strict passed on renovate.json. The survey workflow has not run on Forgejo yet, and no Renovate pull request for a standard has been opened yet."
+verified_by: "Ran mise run agent-standards, scripts/agent-standards.test.py and a dry run of scripts/agent-standards-survey.py (with review dates set back to 2026-10-20) on 2026-11-04; renovate-config-validator --strict passed on renovate.json. The survey workflow has not run on GitHub yet, and no Renovate pull request for a standard has been opened yet."
 ---
 
 # Keep the agent-standards catalogue current
@@ -17,17 +17,17 @@ The [agent-standards catalogue](../../apps/unfold/docs/research/agent-standards/
 | The catalogue | [`standards.yaml`](../../apps/unfold/docs/research/agent-standards/standards.yaml) |
 | Rules, pages, list of ids | [`scripts/agent-standards.py`](../../scripts/agent-standards.py), tested by [`agent-standards.test.py`](../../scripts/agent-standards.test.py), which `mise run docs-check` runs |
 | Version watching | [`renovate.json`](../../renovate.json): the custom manager for `standards.yaml`, the `ietf-draft` datasource, and the `agent-standard` package rule |
-| The weekly survey | [`scripts/agent-standards-survey.py`](../../scripts/agent-standards-survey.py), run by [`on_agent_standards.yml`](../../.forgejo/workflows/on_agent_standards.yml) |
+| The weekly survey | [`scripts/agent-standards-survey.py`](../../scripts/agent-standards-survey.py), run by [`on_agent_standards.yml`](../../.github/workflows/on_agent_standards.yml) |
 
 ## Turn the survey on
 
 The workflow runs every Monday only when the repository variable `AGENT_STANDARDS_SURVEY_ENABLED` is `true`. Without a model it reports deterministically: feed entries newer than each entry's `reviewed` date, and new IETF drafts (revision 00 or 01) from the last ten days. With a model it also triages them into changes and candidates.
 
-1. In Forgejo, under the repository's **Settings › Actions › Variables**, set `AGENT_STANDARDS_SURVEY_ENABLED` to `true`.
+1. On GitHub, under the repository's **Settings › Secrets and variables › Actions › Variables**, set `AGENT_STANDARDS_SURVEY_ENABLED` to `true`.
 2. Optional: set the variables `AGENT_STANDARDS_MODEL_URL` (an OpenAI-compatible base URL ending in `/v1`) and `AGENT_STANDARDS_MODEL` (a model id). Then set the secret `AGENT_STANDARDS_MODEL_KEY`, a key with its own small budget.
 3. Run the workflow once by hand (**Actions › [Workflow] On Agent Standards › Run workflow**).
 
-It opens a pull request from `docs/agent-standards-survey-<ISO week>` into `development` only when it found something, using `WEBGRIP_CI_TOKEN`. In the same week it updates that branch rather than opening a second pull request.
+It opens a pull request from `docs/agent-standards-survey-<ISO week>` into `development` only when it found something, using the workflow's `GITHUB_TOKEN`. In the same week it updates that branch rather than opening a second pull request.
 
 To rehearse locally without pushing:
 

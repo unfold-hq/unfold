@@ -3,7 +3,7 @@ name: explain-a-dependency-update
 description: What a Renovate pull request on this repository touches and how to judge it, for the Run that explains a dependency update on the pull request (Ploeg ADR-0106) and for a person reviewing one. Where each kind of pin is used in Unfold, which generated files and lockfiles a bump leaves stale, which checks catch that, and what "worth adopting" means here. Use when explaining, reviewing or repairing a dependency update, a Renovate pull request, a lockfile or a stale generated file.
 metadata:
   ploeg-tags: dependency update renovate pull request release notes lockfile
-  ploeg-paths: renovate.json, mise.toml, mise.lock, apps/*/mise.toml, apps/*/package.json, apps/*/package-lock.json, apps/*/pnpm-lock.yaml, apps/*/Dockerfile, apps/unfold/ops/agent/Dockerfile, .forgejo/workflows/*.yml, apps/unfold/scripts/build-landscape.mjs
+  ploeg-paths: renovate.json, mise.toml, mise.lock, apps/*/mise.toml, apps/*/package.json, apps/*/package-lock.json, apps/*/pnpm-lock.yaml, apps/*/Dockerfile, apps/unfold/ops/agent/Dockerfile, .github/workflows/*.yml, .github/actions/*/action.yml, apps/unfold/scripts/build-landscape.mjs
 ---
 
 # Explain a dependency update in this repository
@@ -16,12 +16,12 @@ Renovate opens the pull request; a person merges it. Your explanation stands bet
 | --- | --- | --- |
 | `opencode-ai` | `apps/unfold/ops/agent/Dockerfile` (`OPENCODE_VERSION`), `apps/unfold/mise.toml`, the `unfold-agent:<version>` tag in `apps/unfold/config/*.example.json` and `apps/unfold/docs/operations/live.md` | The agent image every workspace session runs; `scripts/probe-opencode.mjs` probes its server API without a model call. Unfold sets `OPENCODE_DISABLE_AUTOUPDATE` and `OPENCODE_DISABLE_SHARE`, so update and sharing changes upstream rarely matter here |
 | `dhi.io/node`, `undici`, `brace-expansion` | `apps/unfold/ops/agent/Dockerfile` | The hardened base of the agent image and the copies patched into npm; `undici` stays below 7 and `brace-expansion` below 6 because the patch script accepts only npm's bundled major |
-| `node`, `helm`, `uv`, `mise` itself | `mise.toml`, `apps/*/mise.toml`, `.forgejo/workflows/*.yml` (`mise-action` `version:`) | Every gate and every CI job. A tool bump must relock `mise.lock`; CI installs with `--locked` and fails on a stale lock |
+| `node`, `helm`, `uv`, `mise` itself | `mise.toml`, `apps/*/mise.toml`, `.github/workflows/*.yml` (`mise-action` `version:`) | Every gate and every CI job. A tool bump must relock `mise.lock`; CI installs with `--locked` and fails on a stale lock |
 | npm dependencies of the application | `apps/unfold/package.json`, `apps/unfold/package-lock.json` | The Unfold server, the browser app and the VS Code extension; `@types/vscode` stays below the `engines.vscode` floor |
 | pnpm dependencies of the site | `apps/site/package.json`, `apps/site/pnpm-lock.yaml`, `packageManager` | The marketing site's own release train. A `packageManager` bump must relock, or `pnpm install --frozen-lockfile` fails the gate |
 | `mermaid`, `marked` | `apps/unfold/scripts/build-landscape.mjs` | The landscape explorer is generated from them; a bump without `mise run landscape` fails `ploeg-docs` with `Stale landscape` |
-| `harbor.webgrip.dev/webgrip/*` toolchain images, BuildKit, SBOM scanner, Playwright image | `mise.toml`, `scripts/docs-site.sh`, `.forgejo/workflows/*.yml` | The CI toolchain; the browser suite runs on the Playwright image |
-| Workflow actions (`actions/checkout`, `mise-action`) | `.forgejo/workflows/*.yml` | Forgejo Actions, not GitHub Actions: read `.forgejo/AGENTS.md` before judging a workflow change |
+| Toolchain images: BuildKit, binfmt, gitleaks, the Playwright image, and the documentation builder of `scripts/docs-site.sh` | `.github/workflows/*.yml`, `.github/actions/*/action.yml`, `scripts/docs-site.sh` | The CI toolchain, pinned by digest; the browser suite runs on the Playwright image |
+| Workflow actions (`actions/checkout`, `mise-action`) | `.github/workflows/*.yml`, `.github/actions/*/action.yml` | GitHub Actions, pinned to a full commit: read `.github/AGENTS.md` before judging a workflow change |
 | Ploeg | `apps/unfold/ploeg-release.json`, `apps/unfold/scripts/unified-demo/go.mod` and `go.sum` | The engine Unfold runs on: its contract bundle and Go module at one release. Its `fix(ploeg)` pull request regenerates the glossary and decision register and merges itself when green, which cuts an Unfold candidate; a term clash leaves `ploeg-glossary-conflicts.txt` and holds it |
 
 ## What to check before saying it is safe

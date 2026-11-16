@@ -33,13 +33,9 @@ const runShell = (script, env) => {
 };
 const KEYLESS_SIGNER = '^https://github\\.com/unfold-hq/unfold/\\.github/workflows/on_release_published\\.yml@refs/tags/unfold-v0\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$';
 
-test('GitHub runs every Forgejo entry point except the documentation one, plus the Ploeg pin auto-merge', () => {
-  const ported = ['on_agent_standards.yml', 'on_dns_change.yml', 'on_nightly.yml', 'on_pull_request.yml', 'on_release_preview.yml', 'on_release_published.yml', 'on_release_train.yml', 'on_schedule.yml', 'on_source_change.yml'];
-  assert.deepEqual(Object.keys(workflows).sort(), [...ported, 'on_ploeg_pin.yml'].sort());
-  if (fs.existsSync(path.join(root, '.forgejo/workflows'))) {
-    assert.deepEqual(fs.readdirSync(path.join(root, '.forgejo/workflows')).filter(file => file !== 'on_docs_change.yml').sort(), ported, 'a new Forgejo workflow is ported here too, or named an exception');
-  }
-  assert.ok(!workflows['on_docs_change.yml'], 'documentation publishing moves in its own change');
+test('the repository runs CI only on GitHub Actions, through the eleven entry points this test knows', () => {
+  assert.deepEqual(Object.keys(workflows).sort(), ['on_agent_standards.yml', 'on_dns_change.yml', 'on_docs_change.yml', 'on_nightly.yml', 'on_ploeg_pin.yml', 'on_pull_request.yml', 'on_release_preview.yml', 'on_release_published.yml', 'on_release_train.yml', 'on_schedule.yml', 'on_source_change.yml']);
+  assert.ok(!fs.existsSync(path.join(root, '.forgejo')), 'no second CI system runs from .forgejo');
 });
 
 test('every job runs only in unfold-hq/unfold, on a GitHub-hosted runner, so the mirror and forks stay inert', () => {
@@ -94,18 +90,18 @@ test('every action is local or pinned to a full commit, and every image is publi
     for (const image of [job.container?.image, ...Object.values(job.services ?? {}).map(service => service.image)].filter(Boolean)) {
       assert.match(image, /^(?:docker\.io|ghcr\.io|mcr\.microsoft\.com)\/[^@]+@sha256:[0-9a-f]{64}$/, `${file}: ${name}`);
     }
-    for (const dependency of job.needs ?? []) assert.ok(workflows[file].jobs[dependency], `${file}: ${name} needs a missing ${dependency}`);
-    for (const [, dependency] of JSON.stringify(job).matchAll(/needs\.([a-z-]+)\./g)) assert.ok(job.needs?.includes(dependency), `${file}: ${name} reads undeclared dependency ${dependency}`);
+    for (const dependency of [job.needs ?? []].flat()) assert.ok(workflows[file].jobs[dependency], `${file}: ${name} needs a missing ${dependency}`);
+    for (const [, dependency] of JSON.stringify(job).matchAll(/needs\.([a-z-]+)\./g)) assert.ok([job.needs ?? []].flat().includes(dependency), `${file}: ${name} reads undeclared dependency ${dependency}`);
   }
 });
 
-test('the workflows use only the repository secrets the move names, and the Cloudflare deploy token only in the site jobs', () => {
+test('the workflows use only the repository secrets the move names, and the Cloudflare deploy token only in the site and documentation deploy jobs', () => {
   const allowed = ['AGENT_STANDARDS_MODEL_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_DNS_READ_TOKEN', 'DOCKERHUB_TOKEN', 'DOCKERHUB_USERNAME', 'MARKETPLACE_AZURE_CLIENT_ID', 'MARKETPLACE_AZURE_TENANT_ID', 'VSCE_PAT'];
   const used = new Set();
   for (const { file, name, job } of allJobs()) {
     const secrets = [...JSON.stringify(job).matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]);
     secrets.forEach(secret => used.add(secret));
-    if (secrets.includes('CLOUDFLARE_API_TOKEN')) assert.ok(file === 'on_release_published.yml' && name.startsWith('site-'), `${file}: ${name} holds the deploy token`);
+    if (secrets.includes('CLOUDFLARE_API_TOKEN')) assert.ok((file === 'on_release_published.yml' && name.startsWith('site-')) || (file === 'on_docs_change.yml' && name === 'deploy'), `${file}: ${name} holds the deploy token`);
   }
   assert.deepEqual([...used].filter(secret => !allowed.includes(secret)), []);
 });
@@ -169,7 +165,6 @@ test('the release train versions Unfold and the site from a checked development 
     if (name === 'release') assert.ok(at(step => step.uses === './.github/actions/release-policy') > install && at(step => step.uses === './.github/actions/release-policy') < head);
     assert.equal(job.steps[release].if, "steps.head.outputs.current == 'true'");
     assert.equal(job.steps[release]['working-directory'], directory, name);
-    assert.equal(job.steps[release].env.UNFOLD_RELEASE_FORGE, 'github');
     assert.equal(job.steps[release].env.GITHUB_TOKEN, '${{ github.token }}');
     assert.match(job.steps[release].run, /scripts\/release-config\/node_modules\/semantic-release\/bin\/semantic-release\.js"$/);
     assert.equal(job.steps[dispatch].run, 'gh workflow run on_release_published.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" -f tag="$TAG"', 'a tag GITHUB_TOKEN pushes starts no workflow, but a dispatch at that tag does, and signs under the tag ref');
@@ -188,19 +183,12 @@ test('the release train versions Unfold and the site from a checked development 
 
 test('the release configuration files Unfold\'s release as a draft, so publication attaches its assets before GitHub makes it immutable', () => {
   process.env.GITHUB_TOKEN ||= 'github-workflow-policy-test';
-  const previous = process.env.UNFOLD_RELEASE_FORGE;
-  process.env.UNFOLD_RELEASE_FORGE = 'github';
-  try {
-    for (const [file, draft] of [['apps/.releaserc.cjs', true], ['apps/site/.releaserc.cjs', false]]) {
-      delete require.cache[path.join(root, file)];
-      const config = require(path.join(root, file));
-      const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github');
-      assert.deepEqual(github[1], { successComment: false, failComment: false, releasedLabels: false, draftRelease: draft }, file);
-      delete require.cache[path.join(root, file)];
-    }
-  } finally {
-    if (previous === undefined) delete process.env.UNFOLD_RELEASE_FORGE;
-    else process.env.UNFOLD_RELEASE_FORGE = previous;
+  for (const [file, draft] of [['apps/.releaserc.cjs', true], ['apps/site/.releaserc.cjs', false]]) {
+    delete require.cache[path.join(root, file)];
+    const config = require(path.join(root, file));
+    const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github');
+    assert.deepEqual(github[1], { successComment: false, failComment: false, releasedLabels: false, draftRelease: draft }, file);
+    delete require.cache[path.join(root, file)];
   }
 });
 
@@ -242,7 +230,6 @@ test('the chart follows every image, the extension verifies before Open VSX publ
   assert.deepEqual(chart.needs, ['parse-release-tag', 'unfold-release-images']);
   const publish = chart.steps.at(-1);
   assert.match(publish.run.trimEnd(), /mise exec helm cosign@[\d.]+ -- python3 scripts\/publish_chart\.py unfold "\$VERSION"$/);
-  assert.equal(publish.env.UNFOLD_RELEASE_HOME, 'github');
   for (const image of ['unfold', 'unfold-agent']) {
     assert.equal(publisher.jobs['unfold-release-images'].outputs[`${image}-digest`], `\${{ steps.digest.outputs.digest-${image} }}`);
     assert.equal(publish.env[`${image.toUpperCase().replace(/-/g, '_')}_IMAGE_DIGEST`], `\${{ needs.unfold-release-images.outputs.${image}-digest }}`);
@@ -262,7 +249,6 @@ test('the chart follows every image, the extension verifies before Open VSX publ
   const distribute = publisher.jobs['unfold-release-distribute'];
   assert.deepEqual(distribute.needs, ['parse-release-tag', 'unfold-release-images', 'unfold-release-publish-chart', 'unfold-release-publish-extension']);
   assert.equal(distribute.steps.at(-1).run, 'mise exec cosign@2.6.5 -- python3 scripts/publish_release.py unfold "$VERSION"');
-  assert.equal(distribute.steps.at(-1).env.UNFOLD_RELEASE_HOME, 'github');
   for (const [name, job] of Object.entries(publisher.jobs).filter(([name]) => name !== 'parse-release-tag' && !name.startsWith('site-'))) {
     for (const version of ['0.4.0-rc.5', '']) assert.equal(evaluate(job.if, { needs: { 'parse-release-tag': { outputs: { version } } } }), version !== '', name);
   }

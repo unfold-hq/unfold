@@ -2,8 +2,8 @@
 type: explanation
 audience: [contributor, agent]
 owner: unfold
-last_verified: 2026-10-31
-verified_by: "Board section read against the owner's Ploeg routing for the board and apps/unfold/docs/operations/working-from-clickup.md. Rest read against AGENTS.md, apps/*/AGENTS.md, .forgejo/workflows/on_pull_request.yml, scripts/verify.mjs, scripts/stage-explicit-paths.py, apps/.releaserc.cjs, the last 50 closed pull requests on Forgejo and Ploeg's writer and reviewer prompts in pkg/taskprompt/prompt.go of the pinned Ploeg release. Branch rule for development read from the Forgejo settings on 2026-10-11, and its gate from the Forgejo API on 2026-10-27."
+last_verified: 2026-11-16
+verified_by: "Board section read against the owner's Ploeg routing for the board and apps/unfold/docs/operations/working-from-clickup.md. Flow and branch rules updated on 2026-11-16 for the move to GitHub against .github/workflows/on_pull_request.yml and docs/operations/ci.md. Rest read against AGENTS.md, apps/*/AGENTS.md, scripts/verify.mjs, scripts/stage-explicit-paths.py, apps/.releaserc.cjs, the last 50 closed pull requests on Forgejo and Ploeg's writer and reviewer prompts in pkg/taskprompt/prompt.go of the pinned Ploeg release. The GitHub ruleset itself was not read."
 ---
 
 # How work on Unfold is done
@@ -21,7 +21,7 @@ Three kinds of contributor change this repository: the owner, interactive agent 
 5. **The gates.** `mise run verify` from the repository root before every push, `mise run docs-check` after a docs or `AGENTS.md` change. CI runs the same gates.
 6. **A pull request** into `development`: [Open a pull request](open-a-pull-request.md). One whole change per pull request ([ADR-0010](../adr/adr-0010-pull-requests-are-small-whole-and-explained.md) sets the size limits Unfold applies to agent work; its checks are not built yet, so here they are guidance).
 7. **Review** against the [review guide](review.md). Tools decide format, types, tests and policy; review covers intent, risk and what no test sees.
-8. **Merge** when every required check is green; Forgejo refuses the merge before that. Wait until a running `release` job on `development` has finished first: the release can tag the new head before that head's own run has tested it. Never cancel a `development` push run; its `release` job is how the merge ships.
+8. **Merge** when every required check is green; the ruleset on `development` refuses the merge before that. The hourly release train, not the merge, ships the change, and it releases only a head its own checks passed ([the release train](../operations/ci.md#the-release-train)).
 9. **Release.** Every push to `development` that touches an application cuts a release candidate ([CI and releases](../operations/ci.md)).
 
 ## The board
@@ -47,7 +47,7 @@ A task tagged with another repository is worked in that repository instead of th
 
 ## Branch rules
 
-Since 2026-10-11, `development` is protected in Forgejo: a pull request merges only when [the pull request gate](../operations/ci.md#the-pull-request-gate) passed, with no required approvals. Since 2026-10-27 the branch rule requires that one context, `* / gate (pull_request)`, and the gate waits for every pull request job except the advisory `agent-trace` and `warnings`; `warnings` is advisory because it is sometimes never scheduled when two runs overlap. Pushing stays enabled. Until 2026-10-25 the `release` job pushed its release commit straight to the branch; releases now push only a tag, so no CI job needs to push to `development` any more. A direct push does not run through the checks, so nobody pushes there. `main`, which receives only promotion pull requests, gets the same rule.
+On GitHub, a ruleset on `development` lets a pull request merge only when [the pull request gate](../operations/ci.md#the-pull-request-gate) passed, with no required approvals ([ADR-0055](../adr/adr-0055-github-unfold-hq-is-the-project-home.md)). It requires one check, `gate`, which waits for every pull request job except the advisory `agent-trace` and `warnings`. Releases push only a tag, so no CI job pushes to `development`. A direct push does not run through the checks, so nobody pushes there. `main`, which receives only promotion pull requests, gets the same rule. Before the move, the same rule held on Forgejo from 2026-10-11.
 
 ## Where things are written down
 

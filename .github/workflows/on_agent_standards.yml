@@ -32,7 +32,6 @@ jobs:
           cache: false
       - name: Survey the agent-standards sources and open a pull request when something changed
         env:
-          SURVEY_FORGE: github
           GITHUB_TOKEN: ${{ github.token }}
           AGENT_STANDARDS_MODEL_URL: ${{ vars.AGENT_STANDARDS_MODEL_URL }}
           AGENT_STANDARDS_MODEL: ${{ vars.AGENT_STANDARDS_MODEL }}

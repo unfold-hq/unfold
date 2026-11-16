@@ -5,16 +5,16 @@
   "version": "0.4.0-rc.114",
   "publisher": "unfold-hq",
   "license": "Apache-2.0",
-  "homepage": "https://forgejo.webgrip.dev/webgrip/unfold/src/branch/development/apps/unfold/extensions/vscode",
+  "homepage": "https://github.com/unfold-hq/unfold/tree/development/apps/unfold/extensions/vscode",
   "repository": {
     "type": "git",
-    "url": "https://forgejo.webgrip.dev/webgrip/unfold.git",
+    "url": "https://github.com/unfold-hq/unfold.git",
     "directory": "apps/unfold/extensions/vscode"
   },
   "bugs": {
-    "url": "https://forgejo.webgrip.dev/webgrip/unfold/issues"
+    "url": "https://github.com/unfold-hq/unfold/issues"
   },
-  "qna": "https://forgejo.webgrip.dev/webgrip/unfold/issues",
+  "qna": "https://github.com/unfold-hq/unfold/issues",
   "pricing": "Free",
   "icon": "media/icon.png",
   "galleryBanner": {

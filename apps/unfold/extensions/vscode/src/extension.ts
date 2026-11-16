@@ -37,7 +37,7 @@ function settings() { return vscode.workspace.getConfiguration('unfold'); }
 
 const openAgentsWindowCommand = 'workbench.action.openAgentsWindow';
 const agentsWindowPollMs = 20_000;
-const agentsWindowTroubleshooting = 'https://forgejo.webgrip.dev/webgrip/unfold/src/branch/development/apps/unfold/docs/operations/live.md#troubleshooting-the-agents-window';
+const agentsWindowTroubleshooting = 'https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/operations/live.md#troubleshooting-the-agents-window';
 const ploegMcpHintDismissed = 'unfold.ploegMcp.clientIdHintDismissed';
 
 class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {

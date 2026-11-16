@@ -8,6 +8,21 @@ rules = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rules)
 
 
+class RemovedFromTree(unittest.TestCase):
+    def test_a_removed_directory_or_file_names_the_last_commit_that_held_it(self):
+        for path in ['.forgejo', '.forgejo/workflows/on_release_train.yml', 'scripts/workflow-policy.test.cjs']:
+            self.assertRegex(rules.removed_revision(path) or '', r'^[0-9a-f]{40}$', path)
+
+    def test_a_path_still_in_the_tree_or_merely_alike_has_no_removal(self):
+        for path in ['.github/workflows/on_release_train.yml', '.forgejo-notes.md', 'scripts/github-workflow-policy.test.cjs']:
+            self.assertIsNone(rules.removed_revision(path), path)
+
+    def test_every_removed_path_is_absent_from_the_tree(self):
+        root = Path(__file__).resolve().parent.parent
+        for path in rules.REMOVED_FROM_TREE:
+            self.assertFalse((root / path).exists(), path)
+
+
 class HistoryClassification(unittest.TestCase):
     def test_records_are_history(self):
         for path in [

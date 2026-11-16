@@ -24,12 +24,11 @@ standards = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(standards)
 
 survey_dir = standards.catalogue_dir / 'survey'
-user_agent = 'unfold-agent-standards-survey/1 (+https://forgejo.webgrip.dev/webgrip/unfold)'
+user_agent = 'unfold-agent-standards-survey/1 (+https://github.com/unfold-hq/unfold)'
 page_chars = 2500
 source_chars = 4000
 lookback_days = 10
-forgejo = os.environ.get('FORGEJO_URL', 'https://forgejo.webgrip.dev')
-repository = os.environ.get('GITHUB_REPOSITORY', 'webgrip/unfold')
+repository = os.environ.get('GITHUB_REPOSITORY', 'unfold-hq/unfold')
 
 triage_instruction = """You maintain a catalogue of agent protocols, specifications and concepts for Unfold, a product that turns Work Items into reviewed pull requests.
 Below are the catalogue's entries and what changed in its sources since each entry was last reviewed.
@@ -161,24 +160,19 @@ def has_news(findings, candidates, triaged):
 
 
 def open_pull_request(week, path):
-    on_github = os.environ.get('SURVEY_FORGE') == 'github'
-    token = os.environ['GITHUB_TOKEN' if on_github else 'WEBGRIP_CI_TOKEN']
+    token = os.environ['GITHUB_TOKEN']
     branch = f'docs/agent-standards-survey-{week}'
     title = f'docs(research): agent standards survey {week}'
     git = lambda *args: subprocess.run(['git', *args], cwd=root, check=True)
-    git('config', 'user.name', 'github-actions[bot]' if on_github else 'unfold-agent-standards-survey')
-    git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com' if on_github else 'ci@webgrip.dev')
+    git('config', 'user.name', 'github-actions[bot]')
+    git('config', 'user.email', '41898282+github-actions[bot]@users.noreply.github.com')
     git('checkout', '-B', branch)
     git('add', str(path.relative_to(root)))
     git('commit', '-m', title)
-    host = 'github.com' if on_github else urllib.parse.urlparse(forgejo).netloc
-    user = 'x-access-token' if on_github else 'ci'
-    git('push', '--force', f'https://{user}:{token}@{host}/{repository}.git', f'HEAD:refs/heads/{branch}')
+    git('push', '--force', f'https://x-access-token:{token}@github.com/{repository}.git', f'HEAD:refs/heads/{branch}')
     body = json.dumps({'head': branch, 'base': 'development', 'title': title,
                        'body': f'Weekly agent-standards survey. Review `{path.relative_to(root)}`, edit `standards.yaml` here and run `mise run agent-standards` if a ring moves, or close this pull request.'}).encode()
-    api = f'https://api.github.com/repos/{repository}/pulls' if on_github else f'{forgejo}/api/v1/repos/{repository}/pulls'
-    authorization = f'Bearer {token}' if on_github else f'token {token}'
-    request = urllib.request.Request(api, data=body, method='POST', headers={'Authorization': authorization, 'Content-Type': 'application/json'})
+    request = urllib.request.Request(f'https://api.github.com/repos/{repository}/pulls', data=body, method='POST', headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             print(f'Opened {json.loads(response.read()).get("html_url")}')

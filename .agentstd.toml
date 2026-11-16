@@ -1,7 +1,0 @@
-link_base = "https://github.com/unfold-hq/unfold/blob/development/"
-
-[skills]
-ignore = ["openspec-*", "source-command-*"]
-
-[hooks]
-allow = ['python3 "${CLAUDE_PROJECT_DIR}"/scripts/stage-explicit-paths.py']

@@ -103,10 +103,9 @@ jobs:
       - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
         with:
           version: 2026.10.25
-          install_args: uv
+          install_args: uv pipx:apm-cli
           cache: false
-      - name: Check the agent files against the agent standard, without blocking
-        continue-on-error: true
+      - name: Check the generated agent files against .apm
         run: mise run agents-check
 
   opencode-contract:
