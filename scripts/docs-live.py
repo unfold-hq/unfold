@@ -3,8 +3,11 @@ import concurrent.futures
 import importlib.util
 import json
 import re
+import time
+from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 import yaml
@@ -13,7 +16,17 @@ root = Path(__file__).resolve().parent.parent
 USER_AGENT = 'unfold-docs-live-check (+https://github.com/unfold-hq/unfold)'
 
 
-def read_url(url):
+def read_url(url, attempts=3, pause=2.0):
+    for attempt in range(1, attempts + 1):
+        try:
+            return read_once(url)
+        except (ConnectionError, TimeoutError, URLError, HTTPException) as error:
+            if isinstance(error, HTTPError) or attempt == attempts:
+                raise
+            time.sleep(pause * attempt)
+
+
+def read_once(url):
     with urlopen(Request(url, headers={'Cache-Control': 'no-cache', 'User-Agent': USER_AGENT}), timeout=25) as response:
         assert response.status == 200, f'Unexpected response: {url} ({response.status})'
         assert response.url.rstrip('/') == url.rstrip('/'), f'Unexpected redirect: {url} -> {response.url}'

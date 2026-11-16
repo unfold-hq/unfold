@@ -61,6 +61,24 @@ class LivePublication(unittest.TestCase):
             with self.assertRaisesRegex(AssertionError, 'Unexpected redirect'):
                 live.read_url(url)
 
+    def test_a_dropped_connection_is_retried_and_an_http_error_is_not(self):
+        url = 'https://example.test/unfold/'
+        with patch.object(live, 'read_once', side_effect=[ConnectionResetError('reset'), b'page']) as read, patch.object(live.time, 'sleep'):
+            self.assertEqual(live.read_url(url), b'page')
+            self.assertEqual(read.call_count, 2)
+        with patch.object(live, 'read_once', side_effect=[live.HTTPException('IncompleteRead'), b'page']) as read, patch.object(live.time, 'sleep'):
+            self.assertEqual(live.read_url(url), b'page')
+            self.assertEqual(read.call_count, 2)
+        refused = live.HTTPError(url, 403, 'Forbidden', {}, None)
+        with patch.object(live, 'read_once', side_effect=[refused, b'page']) as read, patch.object(live.time, 'sleep'):
+            with self.assertRaises(live.HTTPError):
+                live.read_url(url)
+            self.assertEqual(read.call_count, 1)
+        with patch.object(live, 'read_once', side_effect=ConnectionResetError('reset')) as read, patch.object(live.time, 'sleep'):
+            with self.assertRaises(ConnectionResetError):
+                live.read_url(url)
+            self.assertEqual(read.call_count, 3)
+
     def test_matching_publication_passes(self):
         self.assertEqual(self.verify()['human_pages'], 1)
 
