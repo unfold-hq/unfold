@@ -277,6 +277,7 @@ test('the manifest lists every file with its row count and SHA-256, and every ro
     const schema = JSON.parse(bundle.members.get(entity.schema)!.toString('utf8'));
     assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
     assert.equal(entity.schemaVersion, 1);
+    assert.equal(schema.$id, `tag:unfoldhq.dev,2026-11-16:tenant-export:${entity.name}:${entity.schemaVersion}`, 'each schema is named by a tag URI on a domain Unfold holds');
     for (const [index, row] of rows(bundle, entity.name).entries()) validates(schema, row, `${entity.name}[${index}]`);
   }
   assert.equal(bundle.manifest.entities.find(entity => entity.name === 'session-events')!.rows, 3);

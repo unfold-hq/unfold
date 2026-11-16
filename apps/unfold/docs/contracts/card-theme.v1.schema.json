@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:webgrip:unfold:card-theme:1",
+  "$id": "https://docs.unfoldhq.dev/unfold/contracts/card-theme.v1.schema.json",
   "title": "Unfold Run card theme, format v1",
   "description": "A declarative theme on top of a shipped skin pack. The schema states the shape; the skin's manifest further limits tokens, frames, foil patterns, art presets, art kinds, inner worlds and sound banks, and Unfold refuses any value its manifest does not list. See card-themes.md.",
   "type": "object",

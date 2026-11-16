@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner, operator]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Written with the implementation on branch feat/tenant-export: src/tenant-export.ts, src/tenant-export-jobs.ts, src/tar-writer.ts and the route block in src/http.ts; test/tenant-export.test.ts passed (table classification, no secrets, Tenant isolation, checksums, a 40,000-row streamed export and the API round trip)."
+last_verified: 2026-11-16
+verified_by: "Written with the implementation on branch feat/tenant-export: src/tenant-export.ts, src/tenant-export-jobs.ts, src/tar-writer.ts and the route block in src/http.ts; test/tenant-export.test.ts passed (table classification, no secrets, Tenant isolation, checksums, a 40,000-row streamed export and the API round trip). The schema $id paragraph was checked on 2026-11-16 against src/tenant-export.ts and test/tenant-export.test.ts."
 ---
 
 # Leaving Unfold: export a Tenant
@@ -151,7 +151,7 @@ mkdir tenant && tar -xzf tenant.tar.gz -C tenant && cd tenant
 jq -r '.files[] | "\(.sha256)  \(.path)"' manifest.json | sha256sum -c -
 ```
 
-Each schema is JSON Schema 2020-12, so any validator for that draft checks a line of its file.
+Each schema is JSON Schema 2020-12, so any validator for that draft checks a line of its file. Its `$id` is `tag:unfoldhq.dev,2026-11-16:tenant-export:<entity>:<schemaVersion>`, a name that does not resolve ([ADR-0067](../adrs/0067-unfold-names-identifiers-that-do-not-resolve-with-tag-uris-on-unfoldhq-dev.md)): the schema is the file in the bundle, because each installation writes it from its own database. A bundle exported before 2026-11-16 names its schemas `urn:webgrip:unfold:tenant-export:<entity>:<schemaVersion>` with the same fields, so a tool that keys schemas by `$id` should accept both.
 
 Load the records into another system:
 

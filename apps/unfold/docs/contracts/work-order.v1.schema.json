@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:webgrip:ploeg-unfold:work-order:1",
+  "$id": "https://docs.unfoldhq.dev/unfold/contracts/work-order.v1.schema.json",
   "title": "Proposed WorkOrder revision v1",
   "description": "Design contract, not a shipped API. Immutable normalized execution proposal. Requested budget and source content confer no authorization. Secrets, runtime endpoints, credentials and dynamic state are excluded.",
   "type": "object",

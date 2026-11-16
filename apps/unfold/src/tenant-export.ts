@@ -193,7 +193,7 @@ type Schema = Record<string, unknown>;
 
 const camel = (name: string) => name.replace(/_([a-z0-9])/g, (_, letter: string) => letter.toUpperCase());
 const schemaUrl = 'https://json-schema.org/draft/2020-12/schema';
-const schemaId = (entity: string, version: number) => `urn:webgrip:unfold:tenant-export:${entity}:${version}`;
+const schemaId = (entity: string, version: number) => `tag:unfoldhq.dev,2026-11-16:tenant-export:${entity}:${version}`;
 
 function parsed(text: unknown): unknown {
   if (typeof text !== 'string') return text;
