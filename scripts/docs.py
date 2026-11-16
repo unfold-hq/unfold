@@ -189,6 +189,11 @@ def target_url(target, source):
     checked += 1
     if not destination.exists() and released_in_ploeg(destination):
         return pinned_url(destination, parts.fragment)
+    if not destination.exists() and rules.historical(mapping[source].as_posix()):
+        removed = rules.removed_revision(destination.relative_to(root).as_posix())
+        if removed:
+            kind = 'tree' if parts.path.endswith('/') else 'blob'
+            return f'https://github.com/unfold-hq/unfold/{kind}/{removed}/' + quote(destination.relative_to(root).as_posix()) + (f'#{parts.fragment}' if parts.fragment else '')
     if not destination.exists():
         if not pinned(source):
             failures.append(f'{source.relative_to(root)}: {target}')
