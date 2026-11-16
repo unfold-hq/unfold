@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import time
+from http.client import HTTPException
 from pathlib import Path, PurePosixPath
 from urllib.parse import urljoin
 from urllib.error import HTTPError, URLError
@@ -19,7 +20,7 @@ def read_url(url, attempts=3, pause=2.0):
     for attempt in range(1, attempts + 1):
         try:
             return read_once(url)
-        except (ConnectionError, TimeoutError, URLError) as error:
+        except (ConnectionError, TimeoutError, URLError, HTTPException) as error:
             if isinstance(error, HTTPError) or attempt == attempts:
                 raise
             time.sleep(pause * attempt)
