@@ -34,6 +34,7 @@ Unfold provides durable operator sessions, agent workspaces, intervention and re
 - [Background jobs](operations/background-jobs.md): the durable job queue behind webhooks, notices, billing and reports, retries, dead jobs and `GET /api/admin/jobs`
 - [Send Unfold's audit to your SIEM (OCSF)](operations/audit-siem.md): what is recorded, the hash chain, retention, signed daily checkpoints in a locked bucket, OTLP and NDJSON export
 - [Leaving Unfold: export a Tenant](operations/leaving-unfold.md): the export bundle, its formats and how to use it elsewhere
+- [Move to Unfold's own keys](operations/unfold-owned-keys.md): the labels, `_meta` keys and predicate type that move to `unfoldhq.dev`, and what to change before the next release
 - [Release procedure](operations/release.md)
 
 ## Integrate
