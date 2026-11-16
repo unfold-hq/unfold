@@ -3,7 +3,7 @@
   "version": "0.18.0",
   "description": "Reports your Claude Code sessions to Unfold, links them to Work Items, records Agent Trace attribution for their commits, and brings Unfold's messages into the session.",
   "author": {
-    "name": "Ryan Grippeling / WebGrip",
+    "name": "Unfold",
     "url": "https://unfoldhq.dev"
   },
   "homepage": "https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/claude-code",

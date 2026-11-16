@@ -392,13 +392,13 @@ export const nl: Dictionary = {
   },
   privacy: {
     title: 'Privacyverklaring',
-    version: 'Versie van 2 oktober 2026',
+    version: 'Versie van 16 november 2026',
     intro:
       'Deze verklaring gaat over het aanmeldformulier op deze site. De site plaatst geen cookies en gebruikt geen analytics of trackers.',
     sections: [
       {
         title: 'Wie is verantwoordelijk',
-        text: 'WebGrip, de onderneming van Ryan Grippeling in Enschede, is de verwerkingsverantwoordelijke. KvK-nummer 75281120. Contact: ryan@webgrip.nl.',
+        text: 'WebGrip, de onderneming van Ryan Grippeling in Enschede, is de verwerkingsverantwoordelijke. KvK-nummer 75281120. Contact: privacy@unfoldhq.dev.',
       },
       {
         title: 'Wat we bewaren',
@@ -422,11 +422,11 @@ export const nl: Dictionary = {
       },
       {
         title: 'Je rechten',
-        text: 'Je kunt vragen om je gegevens in te zien, te verbeteren of te verwijderen, om het gebruik te beperken of er bezwaar tegen te maken, en om ze in een overdraagbare vorm te krijgen. Mail naar ryan@webgrip.nl; je krijgt binnen een maand antwoord. Je kunt ook een klacht indienen bij de Autoriteit Persoonsgegevens.',
+        text: 'Je kunt vragen om je gegevens in te zien, te verbeteren of te verwijderen, om het gebruik te beperken of er bezwaar tegen te maken, en om ze in een overdraagbare vorm te krijgen. Mail naar privacy@unfoldhq.dev; je krijgt binnen een maand antwoord. Je kunt ook een klacht indienen bij de Autoriteit Persoonsgegevens.',
       },
       {
         title: 'Afmelden',
-        text: 'Mail naar ryan@webgrip.nl vanaf het adres waarmee je je aanmeldde, dan verwijderen we het. Je kunt je later altijd opnieuw aanmelden.',
+        text: 'Mail naar privacy@unfoldhq.dev vanaf het adres waarmee je je aanmeldde, dan verwijderen we het. Je kunt je later altijd opnieuw aanmelden.',
       },
       {
         title: 'Op je eigen apparaat',

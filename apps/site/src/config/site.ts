@@ -26,15 +26,15 @@ export const SITE_INDEXABLE = isIndexable(SITE_URL);
 export const SITE_NAME = 'Unfold';
 
 export const SOURCE_URL = 'https://github.com/unfold-hq/unfold';
-export const DEMO_GUIDE_URL = `${SOURCE_URL}/src/branch/development/docs/workflows/local-demo.md`;
-export const CAPABILITY_MATRIX_URL = `${SOURCE_URL}/src/branch/development/docs/reference/capability-matrix.md`;
-export const LICENSE_URL = `${SOURCE_URL}/src/branch/development/LICENSE`;
+export const DEMO_GUIDE_URL = `${SOURCE_URL}/blob/development/docs/workflows/local-demo.md`;
+export const CAPABILITY_MATRIX_URL = `${SOURCE_URL}/blob/development/docs/reference/capability-matrix.md`;
+export const LICENSE_URL = `${SOURCE_URL}/blob/development/LICENSE`;
 export const DOCS_URL = 'https://docs.unfoldhq.dev/';
-export const SELF_HOST_GUIDE_URL = `${SOURCE_URL}/src/branch/development/docs/how-to/self-host-the-whole-stack.md`;
-export const UNFOLD_AT_A_GLANCE_URL = `${SOURCE_URL}/src/branch/development/apps/unfold/docs/product/at-a-glance.md`;
-export const UNFOLD_FEATURES_URL = `${SOURCE_URL}/src/branch/development/apps/unfold/docs/features.md`;
-export const INTEGRATION_RULES_URL = `${SOURCE_URL}/src/branch/development/docs/adr/adr-0050-unfold-integrates-through-open-standards-and-registries-and-never-locks-a-customer-in.md`;
-export const PORTS_DECISION_URL = `${SOURCE_URL}/src/branch/development/apps/unfold/docs/adrs/0063-unfold-reaches-ploeg-and-trackers-through-ports-with-interchangeable-adapters.md`;
+export const SELF_HOST_GUIDE_URL = `${SOURCE_URL}/blob/development/docs/how-to/self-host-the-whole-stack.md`;
+export const UNFOLD_AT_A_GLANCE_URL = `${SOURCE_URL}/blob/development/apps/unfold/docs/product/at-a-glance.md`;
+export const UNFOLD_FEATURES_URL = `${SOURCE_URL}/blob/development/apps/unfold/docs/features.md`;
+export const INTEGRATION_RULES_URL = `${SOURCE_URL}/blob/development/docs/adr/adr-0050-unfold-integrates-through-open-standards-and-registries-and-never-locks-a-customer-in.md`;
+export const PORTS_DECISION_URL = `${SOURCE_URL}/blob/development/apps/unfold/docs/adrs/0063-unfold-reaches-ploeg-and-trackers-through-ports-with-interchangeable-adapters.md`;
 export const PLOEG_SOURCE_URL = 'https://github.com/ploeg-hq/ploeg';
 const PLOEG_DOCS = `${PLOEG_SOURCE_URL}/blob/development/docs`;
 export const PLOEG_AT_A_GLANCE_URL = `${PLOEG_DOCS}/at-a-glance.md`;
@@ -43,13 +43,13 @@ export const PLOEG_QUICKSTART_URL = `${PLOEG_DOCS}/quickstart.md`;
 export const PLOEG_VERIFY_RELEASE_URL = `${PLOEG_DOCS}/ops/verify-a-release.md`;
 export const LICENSE_ID = 'Apache-2.0';
 
-export const PRIVACY_VERSION = '2026-10-02';
+export const PRIVACY_VERSION = '2026-11-16';
 export const SIGNUP_RETENTION_MONTHS = 24;
 export const CONTROLLER = {
   name: 'WebGrip',
   person: 'Ryan Grippeling',
   city: 'Enschede',
   kvk: '75281120',
-  email: 'ryan@webgrip.nl',
+  email: 'privacy@unfoldhq.dev',
 } as const;
 export const DEMO_REPLAY_PATH = '/demo/';

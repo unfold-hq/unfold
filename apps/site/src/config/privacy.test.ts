@@ -24,10 +24,16 @@ describe('the privacy statement', () => {
   });
 
   test('shows the version that sign-ups record', () => {
-    const [year, month, day] = PRIVACY_VERSION.split('-').map(Number);
-    assert.ok(en.privacy.version.includes(`${day} October ${year}`));
-    assert.ok(nl.privacy.version.includes(`${day} oktober ${year}`));
-    assert.equal(month, 10);
+    const date = new Date(`${PRIVACY_VERSION}T00:00:00Z`);
+    const longDate = (locale: string) =>
+      date.toLocaleDateString(locale, {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
+    assert.ok(en.privacy.version.includes(longDate('en-GB')), en.privacy.version);
+    assert.ok(nl.privacy.version.includes(longDate('nl-NL')), nl.privacy.version);
   });
 });
 

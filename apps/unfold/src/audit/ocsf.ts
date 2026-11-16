@@ -142,7 +142,7 @@ export function ocsfEvent(entry: AuditEntry): OcsfEvent {
     status_id: described.outcome === 'success' ? 1 : 2, status: described.outcome === 'success' ? 'Success' : 'Failure',
     ...(described.statusCode ? { status_code: described.statusCode } : {}), ...(described.detail ? { status_detail: described.detail } : {}),
     message: described.message,
-    metadata: { version: ocsfVersion, product: { name: 'Unfold', vendor_name: 'WebGrip', uid: 'unfold', version: productVersion }, log_name: 'audit', log_provider: 'unfold', ...(profiles.length ? { profiles } : {}) },
+    metadata: { version: ocsfVersion, product: { name: 'Unfold', vendor_name: 'Unfold', uid: 'unfold', version: productVersion }, log_name: 'audit', log_provider: 'unfold', ...(profiles.length ? { profiles } : {}) },
     actor: ocsfActor(entry.actor),
     ...(sourceEndpoint ? { src_endpoint: sourceEndpoint } : {}),
     ...(origin.method || origin.userAgent ? { http_request: { ...(origin.method ? { http_method: origin.method } : {}), ...(origin.userAgent ? { user_agent: origin.userAgent } : {}) } } : {}),

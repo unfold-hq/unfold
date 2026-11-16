@@ -5,7 +5,7 @@
   "description": "Follow, ask about and steer the agent work your Unfold runs, from your editor. Spending and tool permissions always ask you first.",
   "repository": "https://github.com/unfold-hq/unfold",
   "website": "https://unfoldhq.dev",
-  "authors": ["Webgrip"],
+  "authors": ["Unfold"],
   "license": "Apache-2.0",
   "license_url": "https://github.com/unfold-hq/unfold/blob/development/LICENSE",
   "distribution": {
