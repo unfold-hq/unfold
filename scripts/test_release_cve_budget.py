@@ -1,10 +1,12 @@
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -25,8 +27,10 @@ class CveBudget(unittest.TestCase):
             budget_file = Path(directory) / 'budgets.yaml'
             budget_file.write_text(budgets)
             output = Path(directory) / 'cve-budget.json'
-            with contextlib.redirect_stdout(io.StringIO()):
+            summary = Path(directory) / 'summary.md'
+            with contextlib.redirect_stdout(io.StringIO()), mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': str(summary)}):
                 status = cve_budget.main(str(report), str(budget_file), image, 'ghcr.io/unfold-hq/unfold@sha256:' + 'a' * 64, str(output))
+            self.assertIn(f'### CVE budget: {image}', summary.read_text())
             return status, json.loads(output.read_text())
 
     def test_the_committed_budgets_enforce_zero_critical_and_high_for_both_images(self):
