@@ -77,3 +77,4 @@ The repository rule "Keep each application's package, module, image and chart id
 ## More Information
 
 * 2026-11-11 — Decided by the owner. The [CI and release guide](../operations/ci.md), [Source mirrors and release artifacts](../operations/artifacts.md) and [the cutover playbook](../operations/first-cutover.md#move-the-home-to-github-proposed) describe the GitHub setup as proposed until the cutover day; `.forgejo/` is removed in the first pull request after it.
+* 2026-11-16 — Amended by [ADR-0056](adr-0056-unfold-images-build-on-wolfi-and-ci-needs-no-docker-hub-account.md): the images build on Wolfi without a Docker Hub sign-in, so a pull request from a fork builds them too and the `DOCKERHUB_*` secrets are gone.

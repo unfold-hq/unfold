@@ -13,7 +13,7 @@ Trunk is `development`. Each accepted decision records its consequences and a tr
 | [0007](0007-thin-editor-client.md) | Thin editor client | Accepted for the v0.1 extension | accepted | 2026-09-09 |
 | [0008](0008-task-connections-and-candidate-handoff.md) | Shared task connections and portable candidate handoff | Implemented in 0.2.0; proposed for team adoption | proposed | 2026-09-09 |
 | [0009](0009-workspace-placement-is-a-session-choice.md) | Workspace placement is a per-session choice | Accepted for 0.3.0; Docker qualified locally, Kubernetes unqualified on a cluster | accepted | 2026-09-09 |
-| [0010](0010-one-release-train-with-zero-cve-images.md) | One release train, hardened images with a zero-finding budget | Accepted; first pipeline release pending estate prerequisites | accepted | 2026-09-10 |
+| [0010](0010-one-release-train-with-zero-cve-images.md) | One release train, hardened images with a zero-finding budget | Accepted; first pipeline release pending estate prerequisites; image base amended by system [ADR-0056](../../../../docs/adr/adr-0056-unfold-images-build-on-wolfi-and-ci-needs-no-docker-hub-account.md) | accepted | 2026-09-10 |
 | [0011](0011-sandboxes-dial-out-through-a-relay.md) | Sandboxes dial out through a relay | Accepted; Docker qualified, Kubernetes by fixture | accepted | 2026-09-10 |
 | [0012](0012-agent-host-protocol-host.md) | Every session is an Agent Host Protocol host | Accepted for 0.3.0; 1.138 handshake verified; speaks the 1.0 and 0.9 baselines since 2026-10-10 | accepted | 2026-09-17 |
 | [0013](0013-sandbox-crd-placement-with-warm-kata-pools.md) | Sandbox CRD placement with warm Kata pools | Accepted as an option; unqualified on the cluster | accepted | 2026-09-10 |
