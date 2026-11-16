@@ -356,7 +356,7 @@ A `tool` event carries the OpenCode part id, the tool's input as a bounded JSON 
 | `GET /api/sessions/:id/candidate/download?format=trace` | DSSE envelope with the Agent Trace 0.1.0 record |
 | `GET /api/attestations/public-key` | PEM public key of the workbench's Ed25519 attestation key; `X-Key-Id` carries its identifier |
 
-The candidate provenance predicate keeps the key `crew` for the session's Team and its Roles. It is part of a signed, versioned predicate type that verifiers parse, and renaming it would change that type, so it stays until the predicate type gets a new version. `candidate.attestation` records the key identifier and predicate types when signing succeeded; a `candidate.attestation_failed` event marks a captured but unsigned candidate.
+The candidate provenance statement's `predicateType` is `https://docs.unfoldhq.dev/unfold/contracts/agent-candidate.v2.schema.json`, the address of [its schema](agent-candidate.v2.schema.json), which describes each member of the predicate. Version 2 names the session's Team and its Roles `team`. Candidates signed by an earlier release keep version 1, `https://webgrip.dev/attestations/agent-candidate/v1`, which names them `crew`; a signed statement cannot change, so a verifier accepts both types ([ADR-0067](../adrs/0067-unfold-names-identifiers-that-do-not-resolve-with-tag-uris-on-unfoldhq-dev.md)). The Agent Trace record carries Unfold's metadata under `dev.unfoldhq.unfold` and, until the next release, also under the retiring `dev.webgrip.unfold`. `candidate.attestation` records the key identifier and predicate types when signing succeeded; a `candidate.attestation_failed` event marks a captured but unsigned candidate.
 
 ## Candidate delivery
 

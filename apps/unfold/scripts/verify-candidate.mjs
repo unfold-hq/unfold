@@ -7,6 +7,10 @@ if (!directory || !publicKeyPath) { console.error('usage: verify-candidate.mjs <
 const publicKey = createPublicKey(readFileSync(publicKeyPath));
 const keyId = createHash('sha256').update(publicKey.export({ type: 'spki', format: 'der' })).digest('hex');
 const sha256 = buffer => createHash('sha256').update(buffer).digest('hex');
+const predicateTypes = {
+  'candidate.attestation.json': ['https://docs.unfoldhq.dev/unfold/contracts/agent-candidate.v2.schema.json', 'https://webgrip.dev/attestations/agent-candidate/v1'],
+  'candidate.trace.json': ['https://agent-trace.dev/schemas/v1/trace-record.json'],
+};
 const files = { 'candidate.git.bundle': readFileSync(join(directory, 'candidate.git.bundle')), 'candidate.patch': readFileSync(join(directory, 'candidate.patch')), 'manifest.json': readFileSync(join(directory, 'manifest.json')) };
 const manifest = JSON.parse(files['manifest.json'].toString());
 const problems = [];
@@ -28,6 +32,7 @@ for (const name of ['candidate.attestation.json', 'candidate.trace.json']) {
   if (!valid) problems.push(`${name}: signature invalid for key ${keyId}`);
   if (mismatched.length) problems.push(`${name}: subjects ${mismatched.join(', ')} do not match the files on disk`);
   if (commit && commit !== manifest.headSha) problems.push(`${name}: gitCommit ${commit} differs from manifest head ${manifest.headSha}`);
+  if (!predicateTypes[name].includes(statement.predicateType)) problems.push(`${name}: predicate type ${statement.predicateType} is not one of ${predicateTypes[name].join(', ')}`);
   results.push({ file: name, predicateType: statement.predicateType, signatureValid: valid, keyid: signature?.keyid, subjects: subjects.map(subject => subject.name) });
 }
 console.log(JSON.stringify({ keyId, headSha: manifest.headSha, baseSha: manifest.baseSha, files: manifest.fileCount, results, problems }, null, 2));

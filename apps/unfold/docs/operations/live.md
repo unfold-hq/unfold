@@ -713,7 +713,9 @@ Every ready candidate ships a signed provenance statement and an Agent Trace rec
 ```sh
 node scripts/verify-candidate.mjs ./candidate unfold-attestation.pub
 cosign verify-blob-attestation --key unfold-attestation.pub --signature candidate.attestation.json \
-  --type https://webgrip.dev/attestations/agent-candidate/v1 --insecure-ignore-tlog manifest.json
+  --type https://docs.unfoldhq.dev/unfold/contracts/agent-candidate.v2.schema.json --insecure-ignore-tlog manifest.json
 ```
+
+A candidate signed by an earlier release carries the first predicate type, so verify it with `--type https://webgrip.dev/attestations/agent-candidate/v1`. The script accepts both types and refuses any other.
 
 The script recomputes the bundle, patch and manifest digests, checks both DSSE signatures against the key and confirms the attested commit matches the manifest. The key is generated on first use in the data directory; back it up with the database and treat its loss as a re-keying event ([ADR 0014](../adrs/0014-signed-candidates.md)).

@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://docs.unfoldhq.dev/unfold/contracts/agent-candidate.v2.schema.json",
+  "title": "Unfold candidate provenance predicate, v2",
+  "description": "The predicate of the in-toto Statement Unfold signs for every captured candidate. Its predicateType is this schema's $id. Version 2 is version 1 under a type Unfold owns, with the session's Team under team instead of crew. A verifier ignores members it does not know: Unfold may add members without a new version, and removes or changes one only in a new version. See api.md, Candidate export, and ADR-0067.",
+  "type": "object",
+  "required": ["producer", "session", "repository", "candidate", "workspace", "team", "runs", "spend", "harness", "files"],
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$" },
+    "nullableString": { "type": ["string", "null"] }
+  },
+  "properties": {
+    "producer": {
+      "description": "The Unfold that signed the statement.",
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": { "name": { "const": "unfold" }, "version": { "type": "string" } }
+    },
+    "session": {
+      "description": "The session that produced the candidate, and the tracker task it came from, if any.",
+      "type": "object",
+      "required": ["id", "title", "ownerId", "createdAt", "branch", "placement"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "branch": { "type": "string" },
+        "placement": { "$ref": "#/$defs/nullableString" },
+        "sourceTask": {
+          "description": "The tracker task, with Ploeg's binding when Ploeg owns its execution.",
+          "type": "object",
+          "required": ["provider", "id"],
+          "properties": { "provider": { "type": "string" }, "id": { "type": "string" }, "revision": { "type": "string" }, "url": { "type": "string" }, "nativeRevision": { "type": "string" }, "bindingRevision": { "type": "string" }, "ploeg": { "type": "object" } }
+        }
+      }
+    },
+    "repository": {
+      "description": "The repository and the commits the candidate was captured against.",
+      "type": "object",
+      "required": ["id", "url", "baseBranch", "baseSha", "snapshotBaseSha"],
+      "properties": { "id": { "type": "string" }, "url": { "type": "string" }, "baseBranch": { "type": "string" }, "baseSha": { "$ref": "#/$defs/sha" }, "snapshotBaseSha": { "$ref": "#/$defs/sha" } }
+    },
+    "candidate": {
+      "description": "The captured change, as manifest.json records it.",
+      "type": "object",
+      "required": ["headSha", "treeSha", "fileCount", "bytes", "capturedAt", "history", "scope", "verification", "publication"],
+      "properties": {
+        "headSha": { "$ref": "#/$defs/sha" },
+        "treeSha": { "$ref": "#/$defs/sha" },
+        "fileCount": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "capturedAt": { "type": "string", "format": "date-time" },
+        "history": { "type": "string" },
+        "scope": { "type": "string" },
+        "verification": { "type": "string" },
+        "publication": { "type": "string" }
+      }
+    },
+    "workspace": {
+      "description": "Where the agent ran, or null when the session had no workspace.",
+      "type": ["object", "null"],
+      "required": ["backend", "transport", "image", "container", "pod", "namespace"],
+      "properties": { "backend": { "type": "string" }, "transport": { "$ref": "#/$defs/nullableString" }, "image": { "$ref": "#/$defs/nullableString" }, "container": { "$ref": "#/$defs/nullableString" }, "pod": { "$ref": "#/$defs/nullableString" }, "namespace": { "$ref": "#/$defs/nullableString" } }
+    },
+    "team": {
+      "description": "The session's Team and the model each Role was configured with, or null when the Team is no longer configured. Version 1 named this member crew.",
+      "type": ["object", "null"],
+      "required": ["id", "roles"],
+      "properties": {
+        "id": { "type": "string" },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "name", "mode", "model"],
+            "properties": { "id": { "type": "string" }, "name": { "type": "string" }, "mode": { "type": "string" }, "model": { "$ref": "#/$defs/nullableString" } }
+          }
+        }
+      }
+    },
+    "runs": {
+      "description": "Each Run of a Role in the session, in order.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["roleId", "mode", "status", "verdict", "nativeId", "promptSha256", "costUsd", "startedAt", "finishedAt"],
+        "properties": {
+          "roleId": { "type": "string" },
+          "mode": { "type": "string" },
+          "status": { "type": "string" },
+          "verdict": { "$ref": "#/$defs/nullableString" },
+          "nativeId": { "$ref": "#/$defs/nullableString" },
+          "promptSha256": { "$ref": "#/$defs/nullableString" },
+          "costUsd": { "type": "number" },
+          "startedAt": { "$ref": "#/$defs/nullableString" },
+          "finishedAt": { "$ref": "#/$defs/nullableString" }
+        }
+      }
+    },
+    "spend": {
+      "description": "The session's budget and observed spend, in US dollars, and the gateway policy it ran under.",
+      "type": "object",
+      "required": ["budgetUsd", "spentUsd", "costStatus", "usage", "providers", "policy"],
+      "properties": { "budgetUsd": { "type": "number" }, "spentUsd": { "type": "number" }, "costStatus": { "type": "string" }, "usage": { "type": ["array", "null"], "items": { "type": "object" } }, "providers": { "type": "array", "items": { "type": "string" } }, "policy": { "type": ["object", "null"] } }
+    },
+    "harness": {
+      "description": "The agent harness that ran the session.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": { "kind": { "type": "string" } }
+    },
+    "files": {
+      "description": "Each changed file, with its Git blob when it still exists.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "status", "bytes", "blob"],
+        "properties": { "path": { "type": "string" }, "status": { "enum": ["added", "modified", "deleted"] }, "bytes": { "type": "integer", "minimum": 0 }, "blob": { "$ref": "#/$defs/nullableString" } }
+      }
+    }
+  }
+}

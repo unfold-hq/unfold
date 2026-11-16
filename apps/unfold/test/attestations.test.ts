@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { Ajv2020 } from 'ajv/dist/2020.js';
 import { SigningKey, candidateStatement, changedLineRanges, pae, verifyEnvelope, candidatePredicateType, tracePredicateType } from '../src/attestations.ts';
 import { application, createSession, request, sessionUntil } from './api-support.ts';
 import { fixture } from './task-binding-support.ts';
@@ -47,6 +48,12 @@ test('a captured candidate ships a signed provenance statement and an Agent Trac
   assert.equal(verified.valid, true);
   const statement = verified.statement as any;
   assert.equal(statement.predicateType, candidatePredicateType);
+  const schema = JSON.parse(await readFile(new URL('../docs/contracts/agent-candidate.v2.schema.json', import.meta.url), 'utf8'));
+  assert.equal(candidatePredicateType, schema.$id, 'the predicate type is the address of its published schema');
+  const validate = new Ajv2020({ allErrors: true, strict: false }).compile(schema);
+  assert.ok(validate(statement.predicate), JSON.stringify(validate.errors));
+  assert.equal(statement.predicate.crew, undefined, 'version 2 names the Team team');
+  assert.equal(statement.predicate.team.id, created.teamId);
   assert.equal(statement.predicate.candidate.headSha, completed.candidate?.headSha);
   assert.equal(statement.predicate.repository.baseSha, completed.candidate?.baseSha);
   assert.ok(statement.subject.some((subject: any) => subject.digest.gitCommit === completed.candidate?.headSha));
@@ -57,6 +64,8 @@ test('a captured candidate ships a signed provenance statement and an Agent Trac
   assert.equal(traceStatement.predicate.version, '0.1.0');
   assert.equal(traceStatement.predicate.vcs.revision, completed.candidate?.headSha);
   assert.ok(traceStatement.predicate.files.length > 0);
+  assert.equal(traceStatement.predicate.metadata['dev.unfoldhq.unfold'].sessionId, created.id);
+  assert.deepEqual(traceStatement.predicate.metadata['dev.webgrip.unfold'], traceStatement.predicate.metadata['dev.unfoldhq.unfold'], 'the retiring key carries the same metadata for one release');
   assert.ok(traceStatement.predicate.files.every((file: any) => file.conversations[0].ranges[0].end_line >= 1 && file.conversations[0].contributor.type === 'ai'));
 
   const directory = await mkdtemp(join(tmpdir(), 'unfold-verify-'));
@@ -72,6 +81,17 @@ test('a captured candidate ships a signed provenance statement and an Agent Trac
   const report = JSON.parse(execFileSync(process.execPath, [script, directory, join(directory, 'key.pub')], { encoding: 'utf8' }));
   assert.deepEqual(report.problems, []);
   assert.equal(report.results.every((result: any) => result.signatureValid), true);
+  const signed = join(directory, 'candidate.attestation.json');
+  const original = await readFile(signed);
+  const resign = async (predicateType: string) => {
+    const statement = JSON.parse(Buffer.from(JSON.parse(original.toString()).payload, 'base64').toString('utf8'));
+    await writeFile(signed, JSON.stringify(server.app.engine.signing().sign({ ...statement, predicateType })));
+  };
+  await resign('https://webgrip.dev/attestations/agent-candidate/v1');
+  assert.deepEqual(JSON.parse(execFileSync(process.execPath, [script, directory, join(directory, 'key.pub')], { encoding: 'utf8' })).problems, [], 'a candidate signed before version 2 still verifies');
+  await resign('https://example.test/attestations/other/v1');
+  assert.throws(() => execFileSync(process.execPath, [script, directory, join(directory, 'key.pub')], { encoding: 'utf8', stdio: 'pipe' }), (error: any) => /predicate type https:\/\/example\.test/.test(error.stdout), 'an unknown predicate type fails verification');
+  await writeFile(signed, original);
   const patch = await readFile(join(directory, 'candidate.patch'));
   await writeFile(join(directory, 'candidate.patch'), Buffer.concat([patch, Buffer.from('\n')]));
   assert.throws(() => execFileSync(process.execPath, [script, directory, join(directory, 'key.pub')], { encoding: 'utf8', stdio: 'pipe' }), 'a modified patch must fail verification');
