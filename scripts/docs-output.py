@@ -4,7 +4,7 @@ import json
 import re
 import shutil
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import yaml
 
@@ -23,6 +23,18 @@ def absolute_links(markdown, url):
     return ''.join(chunks)
 
 
+def published_schemas(staging, base):
+    locations = []
+    for schema in sorted(staging.rglob('*.schema.json')):
+        identifier = json.loads(schema.read_text()).get('$id', '')
+        if urlsplit(identifier).netloc != urlsplit(base).netloc:
+            continue
+        location = schema.relative_to(staging).as_posix()
+        assert identifier == urljoin(base, location), f'Schema $id is not where the site publishes it: {location} declares {identifier}'
+        locations.append(location)
+    return locations
+
+
 def validate(site, staging):
     sources = json.loads((staging / 'docs-sources.json').read_text())
     assert re.fullmatch('[a-f0-9]{40}', sources['revision']), 'Missing source revision'
@@ -33,6 +45,9 @@ def validate(site, staging):
         assert (site / name).is_file() and (site / name).stat().st_size, f'Missing output: {name}'
     assert json.loads((site / 'docs-sources.json').read_text()) == sources, 'Mismatched source manifest'
     base = yaml.safe_load((staging.parents[1] / 'mkdocs.yml').read_text())['site_url']
+    for location in published_schemas(staging, base):
+        output = site / location
+        assert output.is_file() and output.read_bytes() == (staging / location).read_bytes(), f'Missing or stale schema: {location}'
     for target in re.findall(r'\]\(([^\s)]+)', (site / 'llms.txt').read_text()):
         assert target.startswith(base), f'Index link escapes site: {target}'
         assert (site / target.removeprefix(base).split('#')[0]).is_file(), f'Broken machine index link: {target}'

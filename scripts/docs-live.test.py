@@ -28,8 +28,26 @@ class LivePublication(unittest.TestCase):
             'pagefind/pagefind-entry.json': b'{"languages":{"en":{"page_count":1}}}',
         }
 
-    def verify(self):
-        return live.verify('https://example.test/unfold/', self.staging, lambda url: self.responses['' if url == 'https://example.test/unfold' else url.removeprefix('https://example.test/unfold/')])
+    def verify(self, base='https://example.test/unfold/'):
+        return live.verify(base, self.staging, lambda url: self.responses['' if url == base.rstrip('/') else url.removeprefix(base)], site_url='https://example.test/unfold/')
+
+    def test_schema_must_be_served_at_its_id(self):
+        schema = json.dumps({'$id': 'https://example.test/unfold/contracts/event.v1.schema.json'}).encode()
+        (self.staging / 'contracts').mkdir()
+        (self.staging / 'contracts/event.v1.schema.json').write_bytes(schema)
+        self.responses['contracts/event.v1.schema.json'] = b'{}'
+        with self.assertRaisesRegex(AssertionError, 'stale schema at its \\$id'):
+            self.verify()
+        self.responses['contracts/event.v1.schema.json'] = schema
+        self.assertEqual(self.verify()['schemas'], 1)
+
+    def test_staging_serves_the_schemas_that_production_identifies(self):
+        schema = json.dumps({'$id': 'https://example.test/unfold/contracts/event.v1.schema.json'}).encode()
+        (self.staging / 'contracts').mkdir()
+        (self.staging / 'contracts/event.v1.schema.json').write_bytes(schema)
+        self.responses['contracts/event.v1.schema.json'] = schema
+        self.responses['llms.txt'] = b'[Home](https://staging.example.test/unfold/index.md)'
+        self.assertEqual(self.verify('https://staging.example.test/unfold/')['schemas'], 1)
 
     def test_directory_redirect_must_keep_the_public_prefix(self):
         url = 'https://example.test/unfold/unfold'

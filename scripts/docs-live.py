@@ -19,7 +19,7 @@ def read_url(url):
         return response.read()
 
 
-def verify(base, staging, read=read_url):
+def verify(base, staging, read=read_url, site_url=None):
     expected = json.loads((staging / 'docs-sources.json').read_text())
     manifest = json.loads(read(urljoin(base, 'docs-sources.json')))
     assert manifest == expected, 'Published sources do not match this checkout; check the publish gate and selected revision'
@@ -47,12 +47,15 @@ def verify(base, staging, read=read_url):
     spec = importlib.util.spec_from_file_location('docs_output', root / 'scripts/docs-output.py')
     output = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(output)
+    schemas = output.published_schemas(staging, site_url or yaml.safe_load((root / 'mkdocs.yml').read_text())['site_url'])
+    for location in schemas:
+        assert read(urljoin(base, location)) == (staging / location).read_bytes(), f'Missing or stale schema at its $id: {location}'
     search = json.loads(read(urljoin(base, 'search.json')))
     assert search['items'] and not any(output.historical(item['location']) for item in search['items']), 'Published search includes history or is empty'
     pagefind = json.loads(read(urljoin(base, 'pagefind/pagefind-entry.json')))
     count = sum(language['page_count'] for language in pagefind['languages'].values())
     assert count == sum(not output.historical(page) for page in pages), 'Pagefind page count disagrees with the maintained reading scope'
-    return {'revision': expected['revision'], 'human_pages': len(pages), 'markdown_pages': len(pages), 'source_hashes': len(manifest['sources']), 'machine_index_links': len(links), 'pagefind_pages': count}
+    return {'revision': expected['revision'], 'human_pages': len(pages), 'markdown_pages': len(pages), 'source_hashes': len(manifest['sources']), 'machine_index_links': len(links), 'schemas': len(schemas), 'pagefind_pages': count}
 
 
 if __name__ == '__main__':
