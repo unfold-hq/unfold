@@ -10,10 +10,11 @@ from urllib.request import Request, urlopen
 import yaml
 
 root = Path(__file__).resolve().parent.parent
+USER_AGENT = 'unfold-docs-live-check (+https://github.com/unfold-hq/unfold)'
 
 
 def read_url(url):
-    with urlopen(Request(url, headers={'Cache-Control': 'no-cache'}), timeout=25) as response:
+    with urlopen(Request(url, headers={'Cache-Control': 'no-cache', 'User-Agent': USER_AGENT}), timeout=25) as response:
         assert response.status == 200, f'Unexpected response: {url} ({response.status})'
         assert response.url.rstrip('/') == url.rstrip('/'), f'Unexpected redirect: {url} -> {response.url}'
         return response.read()
