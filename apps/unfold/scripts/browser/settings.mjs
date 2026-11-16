@@ -74,7 +74,7 @@ export async function run({ page, assert, screenshot }) {
   const origin = await page.evaluate(() => location.origin);
   assert.equal(await connectCard.getByRole('link', { name: 'Connect VS Code', exact: true }).getAttribute('href'), `vscode://unfold-hq.unfold/connect-agents-window?origin=${encodeURIComponent(origin)}`);
   await connectCard.getByText('No Unfold extension in VS Code?', { exact: true }).click();
-  assert.equal(await connectCard.getByRole('link', { name: 'Open VSX' }).getAttribute('href'), 'https://open-vsx.org/extension/webgrip/unfold');
+  assert.equal(await connectCard.getByRole('link', { name: 'Open VSX' }).getAttribute('href'), 'https://open-vsx.org/extension/unfold-hq/unfold');
   assert.equal(await connectCard.getByRole('link', { name: 'the Extensions view in VS Code' }).getAttribute('href'), 'vscode:extension/unfold-hq.unfold');
   await connectCard.getByText('Sessions: Add Remote Agent Host…', { exact: true }).waitFor();
   assert.equal(await page.locator('#vscode-connect-address').count(), 0, 'no token is minted or shown before the click');
