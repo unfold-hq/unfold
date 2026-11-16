@@ -16,12 +16,12 @@ root = Path(__file__).resolve().parent.parent
 USER_AGENT = 'unfold-docs-live-check (+https://github.com/unfold-hq/unfold)'
 
 
-def read_url(url, attempts=3, pause=2.0):
+def read_url(url, attempts=6, pause=5.0):
     for attempt in range(1, attempts + 1):
         try:
             return read_once(url)
         except (ConnectionError, TimeoutError, URLError, HTTPException) as error:
-            if isinstance(error, HTTPError) or attempt == attempts:
+            if isinstance(error, HTTPError) and error.code < 500 or attempt == attempts:
                 raise
             time.sleep(pause * attempt)
 
