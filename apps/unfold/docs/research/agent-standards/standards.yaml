@@ -150,11 +150,11 @@ standards:
   governance: foundation
   status: stabilising
   latest:
-    version: v1.8.7 (service); API frozen at v0.1 since 2025-10-24, README still says preview
-    date: '2026-10-30'
+    version: v1.8.9 (service); API frozen at v0.1 since 2025-10-24, README still says preview
+    date: '2026-11-10'
     url: https://github.com/modelcontextprotocol/registry/releases
   watch:
-  - {kind: github-releases, ref: modelcontextprotocol/registry, current: "v1.8.7"}
+  - {kind: github-releases, ref: modelcontextprotocol/registry, current: "v1.8.9"}
   adoption:
   - 'Public registry announced in preview 2025-09-08: https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/'
   relations:
@@ -212,7 +212,7 @@ standards:
   - apps/unfold/docs/research/2026-10-30-mcp-extensions-fit.md
   watchlist:
   - T33
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-16'
 - id: mcp-server-card
   name: MCP Server Cards (SEP-2127, ext-server-card)
   disambiguation: Distinct from A2A Agent Card and AI Catalog entries
@@ -4610,11 +4610,11 @@ standards:
   governance: foundation
   status: stable
   latest:
-    version: v1.0.0
-    date: '2026-11-09'
-    url: https://github.com/kagent-dev/kagent/releases/tag/v1.0.0
+    version: v1.0.1
+    date: '2026-11-12'
+    url: https://github.com/kagent-dev/kagent/releases/tag/v1.0.1
   watch:
-  - {kind: github-releases, ref: kagent-dev/kagent, current: "v1.0.0"}
+  - {kind: github-releases, ref: kagent-dev/kagent, current: "v1.0.1"}
   adoption:
   - 'v1.0.0-rc1 notes: pre-RC API breaks, cross-namespace ModelConfig/RemoteMCPServer via allowedNamespaces: https://github.com/kagent-dev/kagent/releases/tag/v1.0.0-rc1'
   relations:
@@ -4667,7 +4667,7 @@ standards:
   - apps/ploeg/docs/adrs/0071-ploeg-keeps-its-state-in-postgresql-and-is-not-a-kubernetes-operator.md
   - apps/ploeg/docs/adrs/0110-a-team-is-ploegs-own-manifest-of-charter-crew-permissions-intake-and-skills.md
   watchlist: []
-  reviewed: '2026-11-11'
+  reviewed: '2026-11-16'
 - id: kmcp
   name: kmcp
   disambiguation: CLI + Kubernetes controller to build/deploy MCP servers as CRs (api/v1alpha1 dir; kind not stated on README)
@@ -5293,11 +5293,11 @@ standards:
   governance: foundation
   status: stabilising
   latest:
-    version: v1.0.9
-    date: '2026-10-29'
-    url: https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.9
+    version: v1.0.11
+    date: '2026-11-12'
+    url: https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.11
   watch:
-  - {kind: github-releases, ref: kubernetes-sigs/agent-sandbox, current: "v1.0.9"}
+  - {kind: github-releases, ref: kubernetes-sigs/agent-sandbox, current: "v1.0.11"}
   adoption:
   - 'v1.0.0 (2026-08-28) serves only v1beta1, removes v1alpha1, adds sandboxd (REST fs :8080, gRPC ProcessService :9090),
     Go router, NeMo Gym/Gymnasium integrations, MCP get_sandbox_status tool: https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.0'
@@ -5322,7 +5322,7 @@ standards:
   - title: Qualify warm Kata pools for Unfold sessions
     where: Unfold sandbox provisioner
     how: Unfold ADR 0013 accepted a sandbox provisioner on SandboxClaim and SandboxWarmPool, unqualified on the cluster; qualify
-      it on v1.0.9 with the relay token by TokenReview.
+      it on v1.0.11 with the relay token by TokenReview.
     effort: M
     value: Sessions start in clone time rather than VM-boot time.
   - title: Ploeg's agent-sandbox executor on a second cluster
@@ -5362,7 +5362,7 @@ standards:
   - apps/ploeg/docs/adrs/0101-a-paused-run-keeps-its-pod-and-session-for-a-bounded-time-and-is-never-retried-automatically.md
   - apps/ploeg/docs/adrs/0137-the-chart-renders-a-default-deny-networkpolicy-for-every-pod-with-an-allowlist-derived-from-its-urls.md
   watchlist: []
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-16'
 - id: kata-containers
   name: Kata Containers
   disambiguation: lightweight-VM OCI runtime (RuntimeClass handler, e.g. kata); not a sandbox API
@@ -5376,9 +5376,9 @@ standards:
     url: https://github.com/kata-containers/kata-containers/releases/tag/4.3.1
   watch:
   - {kind: github-releases, ref: kata-containers/kata-containers, current: "4.3.1"}
-  - {kind: github-releases, ref: siderolabs/extensions, current: "v1.14.5"}
+  - {kind: github-releases, ref: siderolabs/extensions, current: "v1.14.6"}
   adoption:
-  - 'Talos ships a kata-containers system extension at 4.3.1, level with upstream (KATA_CONTAINERS_VERSION, https://github.com/siderolabs/extensions/blob/main/container-runtime/vars.yaml, read 2026-11-04)'
+  - 'Talos ships a kata-containers system extension at 4.3.1, level with upstream (KATA_CONTAINERS_VERSION, https://github.com/siderolabs/extensions/blob/main/container-runtime/vars.yaml, read 2026-11-16)'
   - 'Named runtime for agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox'
   - 'OpenSandbox SandboxSnapshot supports a qemu-v1 VM-state format: https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/architecture/control-plane/operator.md'
   relations:
@@ -5432,7 +5432,7 @@ standards:
   - apps/ploeg/docs/adrs/0168-profile-p1-turns-on-the-worker-admission-policy-and-a-sandbox-team-names-its-runtime-class-there.md
   - docs/research/2026-10-24-sandbox-runtimes-and-encryption.md
   watchlist: []
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-16'
 - id: gvisor
   name: gVisor (runsc)
   disambiguation: user-space application kernel OCI runtime; RuntimeClass handler runsc
@@ -5901,11 +5901,11 @@ standards:
   governance: foundation
   status: stable
   latest:
-    version: v1.1.1 (specs-go/v1.1.1)
-    date: '2026-09-04'
-    url: https://github.com/cncf-tags/container-device-interface/releases/tag/v1.1.1
+    version: v1.1.2 (specs-go/v1.1.1)
+    date: '2026-11-12'
+    url: https://github.com/cncf-tags/container-device-interface/releases/tag/v1.1.2
   watch:
-  - {kind: github-releases, ref: cncf-tags/container-device-interface, current: "v1.1.1"}
+  - {kind: github-releases, ref: cncf-tags/container-device-interface, current: "v1.1.2"}
   adoption:
   - 'CRI-O default-on; containerd needs enable_cdi; Docker default from 28.2.0: https://github.com/cncf-tags/container-device-interface'
   - 'GPU Operator GPUCluster requires a CDI-compatible runtime: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/release-notes.html'
@@ -5949,7 +5949,7 @@ standards:
   - docs/adr/adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire.md
   - apps/ploeg/docs/adrs/0120-a-worker-container-meets-the-restricted-pod-security-standard-by-default.md
   watchlist: []
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-16'
 - id: vllm-production-stack
   name: vLLM production-stack
   disambiguation: Helm stack (vLLM engines + own router + LMCache + Grafana) from the vLLM project; not GIE/llm-d

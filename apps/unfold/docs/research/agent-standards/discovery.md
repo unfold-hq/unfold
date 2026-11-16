@@ -140,7 +140,7 @@ Not to be confused with: Not the GitHub MCP Registry or vendor marketplaces; ser
 | --- | --- |
 | Steward | MCP project (AAIF) (foundation) |
 | Status | stabilising |
-| Latest | [v1.8.7 (service); API frozen at v0.1 since 2025-10-24, README still says preview 2026-10-30](https://github.com/modelcontextprotocol/registry/releases) |
+| Latest | [v1.8.9 (service); API frozen at v0.1 since 2025-10-24, README still says preview 2026-11-10](https://github.com/modelcontextprotocol/registry/releases) |
 | Radar | **hold**: Maturity decided it: the API is still frozen at preview v0.1 with a warning of data resets, and self-hosted Unfold has no public endpoint to list; consistent with the 2026-10-13 'when a hosted offering exists'. |
 | Moves when | The registry declares GA with templated remote URLs, or a hosted Unfold endpoint goes live. |
 | Competes with | [AGNTCY Agent Directory](discovery.md#agntcy-dir), [Project NANDA Index / AgentFacts](discovery.md#nanda-index) |
@@ -149,7 +149,7 @@ Not to be confused with: Not the GitHub MCP Registry or vendor marketplaces; ser
 | Superseded by | — |
 | Decisions | [adr-0011-unfold-is-reachable-over-mcp-through-a-read-first-server](../../../../../docs/adr/adr-0011-unfold-is-reachable-over-mcp-through-a-read-first-server.md), [adr-0050-unfold-integrates-through-open-standards-and-registries-and-never-locks-a-customer-in](../../../../../docs/adr/adr-0050-unfold-integrates-through-open-standards-and-registries-and-never-locks-a-customer-in.md), [2026-09-29-mcp-access](../../../../../docs/research/2026-09-29-mcp-access.md), [2026-10-13-protocol-integration-gaps](../../../../../apps/unfold/docs/research/2026-10-13-protocol-integration-gaps.md), [2026-10-30-mcp-extensions-fit](../../../../../apps/unfold/docs/research/2026-10-30-mcp-extensions-fit.md) |
 | Watchlist | T33 |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-16 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -163,7 +163,7 @@ Not to be confused with: Not the GitHub MCP Registry or vendor marketplaces; ser
 
 **Open problems:** GA not declared; README still warns of possible breaking changes or data resets: https://github.com/modelcontextprotocol/registry
 
-**Watched:** github-releases `modelcontextprotocol/registry` at v1.8.7
+**Watched:** github-releases `modelcontextprotocol/registry` at v1.8.9
 
 ## MCP Server Cards (SEP-2127, ext-server-card) { #mcp-server-card }
 
