@@ -252,7 +252,7 @@ test('publication signs keyless only in on_release_published.yml at a release ta
   assert.equal(registry, KEYLESS_SIGNER, 'the publisher verifies the identity the workflow signs with');
   const platforms = publisher.jobs['unfold-release-build'];
   assert.deepEqual(images.needs, ['parse-release-tag', 'unfold-release-build']);
-  assert.deepEqual(platforms.permissions, { contents: 'read', packages: 'write' }, 'a platform build pushes by digest and signs nothing');
+  assert.deepEqual(platforms.permissions, { contents: 'read', packages: 'write' }, 'a platform build pushes one platform and signs nothing');
   assert.deepEqual(platforms.strategy.matrix.name, images.strategy.matrix.name);
   assert.deepEqual(platforms.strategy.matrix.arch, ['amd64', 'arm64']);
   const buildStep = platforms.steps.find(step => step.id === 'build');
@@ -260,7 +260,7 @@ test('publication signs keyless only in on_release_published.yml at a release ta
   assert.match(buildStep.run, /--platform "linux\/\$ARCH"/);
   assert.match(buildStep.run, /--label org\.opencontainers\.image\.source="\$SOURCE"/);
   assert.match(buildStep.run, /--provenance=mode=max/);
-  assert.match(buildStep.run, /push-by-digest=true/);
+  assert.match(buildStep.run, /--output "type=image,name=\$\{IMAGE\}:\$\{VERSION\}-\$\{ARCH\},push=true"/, 'the docker driver cannot push by digest, so each platform pushes under its own tag');
   assert.equal(buildStep.env.SOURCE, 'https://github.com/unfold-hq/unfold');
   for (const name of platforms.strategy.matrix.name) {
     for (const arch of platforms.strategy.matrix.arch) assert.equal(platforms.outputs[`${name}-${arch}`], `\${{ steps.build.outputs.${name}-${arch} }}`);
