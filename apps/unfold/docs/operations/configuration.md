@@ -17,7 +17,7 @@ config/live.local.json: 2 problems:
   /auths: unknown key (did you mean auth?)
 ```
 
-An unknown or misspelt key is an error, not ignored. After the schema, Unfold applies the rules that span several settings, such as live mode needing `ploeg` and `execution`, and stops at the first that fails. Add `"$schema": "https://forgejo.webgrip.dev/webgrip/unfold/raw/branch/development/apps/unfold/docs/contracts/config.v1.schema.json"` to a configuration file to have an editor check it while you type.
+An unknown or misspelt key is an error, not ignored. After the schema, Unfold applies the rules that span several settings, such as live mode needing `ploeg` and `execution`, and stops at the first that fails. Add `"$schema": "https://docs.unfoldhq.dev/unfold/contracts/config.v1.schema.json"` to a configuration file to have an editor check it while you type.
 
 A key ending in `Env` names an environment variable that holds a secret, so no secret sits in the file. Those variables are the deployment's choice and are not listed under [Environment variables](#environment-variables).
 

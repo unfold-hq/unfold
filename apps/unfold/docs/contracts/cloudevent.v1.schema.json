@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://forgejo.webgrip.dev/webgrip/unfold/raw/branch/development/apps/unfold/docs/contracts/cloudevent.v1.schema.json",
+  "$id": "https://docs.unfoldhq.dev/unfold/contracts/cloudevent.v1.schema.json",
   "title": "Unfold outbound event (CloudEvents 1.0, structured JSON mode)",
   "description": "Every event Unfold delivers to a webhook subscription. A CloudEvents 1.0.2 event in structured JSON mode with the extension attributes tenant and client. Generated from apps/unfold/src/outbound/catalogue.ts; supersedes the proposed event-envelope.v1.schema.json for published events.",
   "type": "object",

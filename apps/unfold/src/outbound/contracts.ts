@@ -3,7 +3,7 @@ import { maxAttempts, retrySchedule } from './service.ts';
 import { timestampToleranceSeconds } from './signing.ts';
 
 /** The version of the outbound events contract; it changes only with the catalogue's meaning, not with each release. */
-export const contractVersion = '1.0.0';
+export const contractVersion = '1.1.0';
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json | undefined };
 

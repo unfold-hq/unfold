@@ -2,8 +2,8 @@
 type: how-to
 audience: [operator, contributor]
 owner: unfold
-last_verified: 2026-11-11
-verified_by: "Checked against .github/workflows/on_docs_change.yml, ops/docs/wrangler.toml, scripts/docs.py, scripts/docs-output.py, scripts/docs-live.py, pyproject.toml and a local build of 1,743 output files; the Workers have not been deployed yet, so the live addresses were not checked"
+last_verified: 2026-11-16
+verified_by: "Checked against .github/workflows/on_docs_change.yml, ops/docs/wrangler.toml, scripts/docs.py, scripts/docs-output.py, scripts/docs-live.py, pyproject.toml and a local build of 1,743 output files; the Workers have not been deployed yet, so the live addresses were not checked. The contract schema row was checked on 2026-11-16 against scripts/docs-output.py, scripts/docs-live.py, their tests and a local build that serves both schemas at their $id; docs.unfoldhq.dev answered 522 then"
 ---
 
 # Publish and recover Unfold documentation
@@ -37,8 +37,9 @@ Each address is a route on the `unfoldhq.dev` zone, and a route needs a proxied 
 | [llms.txt](https://docs.unfoldhq.dev/llms.txt) | A short reading index derived from the repository's [index](../../llms.txt) |
 | [llms-full.txt](https://docs.unfoldhq.dev/llms-full.txt) | The Markdown pages selected by that index, with absolute links and the source commit |
 | [Source manifest](https://docs.unfoldhq.dev/docs-sources.json) | Source commit, repository paths, output paths and source-file hashes |
+| [Contract schemas](https://docs.unfoldhq.dev/unfold/contracts/cloudevent.v1.schema.json) | Each JSON Schema whose `$id` is on this site, served at that `$id` |
 
-Every staged Markdown page is available at its `.md` path. Structured YAML and JSON remain available alongside it. The default reading bundle stays small. History pages remain reachable through explicit links: research and evidence, ADR records, design baselines, planning and backlog pages, and OpenSpec. The [staging step](../../scripts/docs.py) classifies them by path in [the history rules](../../scripts/docs-rules.py). It gives each staged copy front matter `search: {exclude: true}` and a one-line banner, "Record from <date>; not current guidance." Zensical honors that front matter; the output check hides the same pages from Pagefind and fails if one reaches Zensical's search index. The source files stay unchanged. ADR index pages are the current view of each ledger and stay searchable. An LLM index helps discovery; it does not prove that a statement is current.
+Every staged Markdown page is available at its `.md` path. Structured YAML and JSON remain available alongside it. A JSON Schema whose `$id` is on `docs.unfoldhq.dev` is a published identifier ([Unfold ADR-0066](../../apps/unfold/docs/adrs/0066-unfold-identifies-its-published-schemas-by-their-address-on-docs-unfoldhq-dev.md)): the output check fails when that `$id` is not the schema's own path on the site or the built file differs from the source, and the live check fetches each one at its `$id`, on staging at the same path. Moving or renaming such a schema therefore fails the build; give it a new version instead. The default reading bundle stays small. History pages remain reachable through explicit links: research and evidence, ADR records, design baselines, planning and backlog pages, and OpenSpec. The [staging step](../../scripts/docs.py) classifies them by path in [the history rules](../../scripts/docs-rules.py). It gives each staged copy front matter `search: {exclude: true}` and a one-line banner, "Record from <date>; not current guidance." Zensical honors that front matter; the output check hides the same pages from Pagefind and fails if one reaches Zensical's search index. The source files stay unchanged. ADR index pages are the current view of each ledger and stay searchable. An LLM index helps discovery; it does not prove that a statement is current.
 
 A local build has 1,743 files and 72 MB, well inside the Workers static-asset limits of 20,000 files per version on the free plan and 25 MiB per file.
 
