@@ -76,6 +76,8 @@ The `opencode-contract` pull-request job runs `mise -C apps/unfold run opencode-
 
 The `opencode-ai` rule names the package's source repository, because the npm package names none and Renovate otherwise puts no release notes in the pull request. The release notes are what a person merging reads first, and what a Run that explains the update reads: once the pinned Ploeg carries [Ploeg ADR-0109](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0109-a-pull-request-someone-else-opened-is-read-by-a-team-on-the-pull-request.md) and Unfold's repository is opted in, Ploeg's reviewer explains every Renovate pull request on the pull request itself, and the repository skill [explain-a-dependency-update](../../.agents/skills/explain-a-dependency-update/SKILL.md) tells it where each pin is used here. Until then that skill only serves a person or an interactive agent reviewing one.
 
+Renovate opens a pull request as soon as it pushes a branch (`prCreation: immediate`). CI runs only on pull requests and on pushes to `development`, never on a `renovate/*` branch, so waiting for checks to pass first meant waiting for checks that never start: an update hung as a bare branch until the not-pending timeout.
+
 `rebaseWhen: conflicted` rebases a Renovate branch only when it conflicts. With the preset's `behind-base-branch`, every push to `development` rebased every open Renovate branch, and each rebase started a full pull request run.
 
 ## The Ploeg pin pull request
