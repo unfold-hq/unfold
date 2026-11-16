@@ -1,5 +1,6 @@
 import { sessionPlacement } from '../runtime/workspace.ts';
 import type { AppConfig, Session, WorkspaceBackend } from '../types.ts';
+import { unfoldMeta } from '../unfold-keys.ts';
 
 type Json = Record<string, any>;
 
@@ -52,7 +53,7 @@ function gatewayServer(config: AppConfig, subject: GatewaySubject, publicId: str
     _meta: {
       'agentHost.mcpServerSource': 'managed',
       'vscode.mcpServerDisplayName': `Gateway tools (${grant.mcp.accessGroups.join(', ')})`,
-      'dev.webgrip.unfold': { source: 'repository', repository: grant.repository.id, team: grant.mcp.litellmTeamId, accessGroups: [...grant.mcp.accessGroups], keyScope: grant.ploeg ? 'ploeg' : 'repository', clientControl: false },
+      ...unfoldMeta({ source: 'repository', repository: grant.repository.id, team: grant.mcp.litellmTeamId, accessGroups: [...grant.mcp.accessGroups], keyScope: grant.ploeg ? 'ploeg' : 'repository', clientControl: false }),
     },
   };
 }

@@ -55,7 +55,8 @@ test('the 059675b9 session reads as stopped in the Agents window: activity, an o
   const state = (await client.rpc('subscribe', { channel })).snapshot.state;
   assert.equal(state._meta['vscode.chatInputState'], undefined, 'no composer block: a message becomes a choice instead of a dead end');
   assert.equal(state.chats[0].interactivity, 'full');
-  assert.ok(state._meta['dev.webgrip.unfold'], 'Unfold\'s own facts stay');
+  assert.ok(state._meta['dev.unfoldhq.unfold'], 'Unfold\'s own facts stay');
+  assert.deepEqual(state._meta['dev.webgrip.unfold'], state._meta['dev.unfoldhq.unfold'], 'the retiring key carries the same facts for one release');
   const turns = (await client.rpc('subscribe', { channel: chat })).snapshot.state.turns;
   const parts = turns.flatMap((turn: Json) => turn.responseParts);
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'toolCall' && part.toolCall.toolName === 'unfold_run').map((part: Json) => part.toolCall.invocationMessage), ['Implementer · writes the change', 'Reviewer · reads the change and gives a verdict'], 'each Run shows as a subagent, not as a notice');

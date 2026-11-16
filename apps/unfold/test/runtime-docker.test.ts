@@ -60,7 +60,7 @@ async function fakeEngine(directory: string, options: { cloneExit?: number; agen
     if (!container) return reply(404, { message: 'no such container' });
     if (req.method === 'POST' && match[2] === 'start') {
       container.running = true;
-      if (container.spec.Labels['dev.webgrip.unfold/purpose'] === 'clone') {
+      if (container.spec.Labels['dev.unfoldhq.unfold/purpose'] === 'clone') {
         const exit = options.cloneExit ?? 0;
         await mkdir(join(directory, 'workspaces', session.id, 'repository', '.git'), { recursive: true });
         container.logs = Buffer.concat([frame(2, 'cloning into /workspace/repository with token=never-shown\n'), frame(1, JSON.stringify({ baseSha: options.baseSha ?? 'a'.repeat(40) }) + '\n')]);
@@ -106,6 +106,12 @@ test('docker container specs carry only the session credential, a hardened host 
   assert.equal(specs.agent.Env.some((entry: string) => entry.startsWith('ABSENT_VALUE=')), false);
   assert.equal(specs.clone.Env.some((entry: string) => entry.startsWith('LITELLM_API_KEY=') || entry.startsWith('OPENCODE_SERVER_')), false);
   assert.ok(specs.clone.Env.includes('REPOSITORY_URL=https://forge.example/project.git'));
+  for (const prefix of ['dev.unfoldhq.unfold', 'dev.webgrip.unfold']) {
+    assert.equal(specs.clone.Labels[`${prefix}/purpose`], 'clone', prefix);
+    assert.equal(specs.agent.Labels[`${prefix}/purpose`], 'agent', prefix);
+    for (const spec of [specs.clone, specs.agent]) assert.equal(spec.Labels[`${prefix}/repository`], repository.id, prefix);
+    for (const spec of [specs.clone, specs.agent]) assert.ok(spec.Labels[`${prefix}/session`], prefix);
+  }
   for (const spec of [specs.clone, specs.agent]) {
     assert.equal(spec.HostConfig.ReadonlyRootfs, true);
     assert.deepEqual(spec.HostConfig.CapDrop, ['ALL']);
@@ -219,6 +225,7 @@ test('docker pull transport publishes no port, hands the container a relay token
   const spec = engine.containers.get(workspaceName(session.id))!.spec;
   assert.equal(spec.ExposedPorts, undefined);
   assert.equal(spec.HostConfig.PortBindings, undefined);
+  for (const prefix of ['dev.unfoldhq.unfold', 'dev.webgrip.unfold']) assert.equal(spec.Labels[`${prefix}/transport`], 'pull', prefix);
   assert.deepEqual(spec.Cmd.slice(0, 3), ['node', '/usr/local/lib/unfold/relay-worker.mjs', '--']);
   assert.ok(spec.Env.some((entry: string) => entry === `UNFOLD_RELAY_URL=http://127.0.0.1:${(relayServer.address() as any).port}/api/relay/${session.id}`));
   const transport = manager.transport(workspace)!;

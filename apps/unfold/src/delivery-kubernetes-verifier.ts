@@ -6,11 +6,12 @@ import { digest, type DeliveryCheck, type DeliveryPolicy, type KubernetesVerifie
 import { deliveryFailure, type CanonicalCandidate } from './trusted-candidate.ts';
 import { verificationResult, type CheckResult, type VerificationResult } from './delivery-verifier.ts';
 import { archiveOwner, verificationArchive } from './delivery-archive.ts';
+import { kubernetesKeys } from './unfold-keys.ts';
 
 type KubernetesObject = Record<string, any>;
 type ChannelOutcome = { stdout: Buffer; stderr: Buffer; exitCode?: number };
 
-export const verifierPodLabels: Readonly<Record<string, string>> = { 'app.kubernetes.io/name': 'unfold-verifier', 'dev.webgrip.unfold/network': 'none' };
+export const verifierPodLabels: Readonly<Record<string, string>> = { 'app.kubernetes.io/name': 'unfold-verifier', ...kubernetesKeys({ network: 'none' }) };
 export const helperDirectory = '/unfold-verifier';
 export const helperBinary = `${helperDirectory}/busybox`;
 export const outputLimit = 1024 * 1024;
@@ -38,7 +39,7 @@ function selects(selector: KubernetesObject | undefined, labels: Readonly<Record
   return matchLabels && matchExpressions;
 }
 
-/** True when some NetworkPolicy selecting pods with these labels denies all ingress and egress, and no policy selecting them allows any traffic back. */
+/** True when some NetworkPolicy selecting pods with these labels denies all ingress and egress, and no policy selecting them allows any traffic back. A deny-all policy on either network label key isolates the pods, because they carry both. */
 export function networkIsolated(policies: KubernetesObject[], labels: Readonly<Record<string, string>> = verifierPodLabels): boolean {
   const selecting = policies.filter(policy => selects(policy.spec?.podSelector, labels));
   const allows = (policy: KubernetesObject): boolean => Boolean(policy.spec?.ingress?.length || policy.spec?.egress?.length);
@@ -65,8 +66,8 @@ export function verifierPod(candidate: CanonicalCandidate, policy: DeliveryPolic
   const securityContext = { runAsNonRoot: true, runAsUser: archiveOwner, runAsGroup: archiveOwner, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, privileged: false, capabilities: { drop: ['ALL'] }, seccompProfile: { type: 'RuntimeDefault' } };
   const resources = { requests: { ...config.resources.requests }, limits: { ...config.resources.limits } };
   return { apiVersion: 'v1', kind: 'Pod', metadata: { name, namespace: config.namespace,
-    labels: { ...verifierPodLabels, 'dev.webgrip.unfold/purpose': 'verifier', 'dev.webgrip.unfold/candidate': candidate.canonicalSha },
-    annotations: { 'dev.webgrip.unfold/policy': candidate.policySha, 'dev.webgrip.unfold/check': check.id } }, spec: {
+    labels: { ...verifierPodLabels, ...kubernetesKeys({ purpose: 'verifier', candidate: candidate.canonicalSha }) },
+    annotations: kubernetesKeys({ policy: candidate.policySha, check: check.id }) }, spec: {
     runtimeClassName: config.runtimeClassName, automountServiceAccountToken: false, enableServiceLinks: false, restartPolicy: 'Never',
     activeDeadlineSeconds: config.timeoutSeconds, terminationGracePeriodSeconds: 1,
     securityContext: { runAsNonRoot: true, runAsUser: archiveOwner, runAsGroup: archiveOwner, seccompProfile: { type: 'RuntimeDefault' } },

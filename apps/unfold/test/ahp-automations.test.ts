@@ -85,7 +85,8 @@ test('a person sees one automation per board Ploeg runs and team of theirs with 
   assert.deepEqual(silver.definition.session, { provider: 'unfold', workingDirectories: ['file:///unfold-repositories/order-service'] }, 'VS Code projects an automation only with a provider or a folder');
   assert.deepEqual(silver.definition.triggers, [{ id: 'tracker-assignment', kind: 'event', type: 'unfold.tracker-assignment', title: 'Tracker assignment', description: 'Ploeg queues a Work Item when its tracker user is assigned to a task on this board.', events: [{ id: 'task.assignee.created', title: 'Assigned to silver' }], config: { source: 'board', team: 'silver', assignee: 'silver' } }]);
   assert.ok(!silver.definition.triggers.some((trigger: Json) => trigger.kind === 'schedule'), 'no schedule: VS Code shows the route as manual');
-  assert.equal(snapshot.state._meta['dev.webgrip.unfold'].readOnly, true);
+  assert.equal(snapshot.state._meta['dev.unfoldhq.unfold'].readOnly, true);
+  assert.deepEqual(snapshot.state._meta['dev.webgrip.unfold'], snapshot.state._meta['dev.unfoldhq.unfold'], 'the retiring key carries the same facts for one release');
 
   const admin = await f.attach('admin');
   const all = (await admin.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries.map((entry: Json) => entry.resource);
@@ -97,7 +98,7 @@ test('a person sees one automation per board Ploeg runs and team of theirs with 
   const stranger = await f.attach('op-2');
   const empty = (await stranger.client.rpc('subscribe', { channel: catalogue })).snapshot.state;
   assert.deepEqual(empty.entries, []);
-  assert.match(empty._meta['dev.webgrip.unfold'].reason, /access to no Team in Ploeg/);
+  assert.match(empty._meta['dev.unfoldhq.unfold'].reason, /access to no Team in Ploeg/);
 });
 
 test('every change a client asks for is rejected, a manual run is refused, and the catalogue stays as it was', { timeout: testTimeout(60_000) }, async t => {
@@ -169,7 +170,7 @@ test('a demo workbench advertises no automations and serves VS Code an empty cat
   assert.equal(initialized._meta, undefined);
   const empty = initialized.snapshots.find((snapshot: Json) => snapshot.resource === catalogue).state;
   assert.deepEqual(empty.entries, []);
-  assert.match(empty._meta['dev.webgrip.unfold'].reason, /no live Ploeg connection/);
+  assert.match(empty._meta['dev.unfoldhq.unfold'].reason, /no live Ploeg connection/);
 
   client.notify('dispatchAction', { channel: catalogue, clientSeq: 1, action: { type: 'automation/createRequested', resource: 'ahp-automation:/nightly', definition: {} } });
   assert.match((await client.until(message => action(message, catalogue, 'automation/createRequested'))).params.rejectionReason, /budgeted work that Ploeg has not authorized/);

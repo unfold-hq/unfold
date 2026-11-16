@@ -54,7 +54,7 @@ ENV NODE_COMPILE_CACHE=/app/.node-cache
 RUN ["node", "--input-type=module", "-e", "await import('/app/src/main.ts'); const { flushCompileCache, getCompileCacheDir } = await import('node:module'); flushCompileCache(); const { readdirSync } = await import('node:fs'); const written = getCompileCacheDir() ? readdirSync(getCompileCacheDir()).length : 0; if (written < 50) throw new Error('NODE_COMPILE_CACHE wrote ' + written + ' entries; expected one per application module');"]
 LABEL org.opencontainers.image.title="Unfold" \
     org.opencontainers.image.description="Operator workbench control plane: shell-less Wolfi Node runtime with no package manager, plus git for governed delivery; agent work runs in separate workspaces." \
-    org.opencontainers.image.source="https://github.com/webgrip/unfold" \
+    org.opencontainers.image.source="https://github.com/unfold-hq/unfold" \
     org.opencontainers.image.vendor="WebGrip" \
     org.opencontainers.image.licenses="Apache-2.0" \
     org.opencontainers.image.created="${IMAGE_CREATED}" \

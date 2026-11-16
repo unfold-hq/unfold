@@ -22,6 +22,17 @@ spec:
       dev.webgrip.unfold/network: none
   policyTypes: [Ingress, Egress]
 ---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "unfold.name" . }}-verifier-isolated
+  namespace: {{ $v.namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      unfoldhq.dev/network: none
+  policyTypes: [Ingress, Egress]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:

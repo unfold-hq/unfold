@@ -8,6 +8,7 @@ import type { AppConfig, Credential, Repository, Session, Workspace } from '../t
 import { cloneProgram, workspaceName } from './kubernetes.ts';
 import { gitAccessVariables } from './git-access.ts';
 import { WorkerRelay, relayEndpoint } from './relay.ts';
+import { dockerLabels } from '../unfold-keys.ts';
 
 type DockerSettings = NonNullable<AppConfig['docker']>;
 type BasicCredentials = { username: string; password: string };
@@ -107,19 +108,19 @@ export function containerSpecs(config: AppConfig, session: Session, repository: 
   const settings = config.docker;
   if (!settings) throw new Error('Docker workspace configuration missing');
   const user = settings.user ?? (process.platform === 'linux' && typeof process.getuid === 'function' ? `${process.getuid()}:${process.getgid!()}` : undefined);
-  const labels = { 'dev.webgrip.unfold/session': workspaceName(session.id), 'dev.webgrip.unfold/repository': repository.id };
+  const labels = { session: workspaceName(session.id), repository: repository.id };
   const environment = agentEnvironment(config, credential, basic, managed, host);
   const clone = {
-    Image: settings.image, Cmd: ['node', '--input-type=module', '-e', cloneProgram], WorkingDir: containerWorkspace, Labels: { ...labels, 'dev.webgrip.unfold/purpose': 'clone' },
+    Image: settings.image, Cmd: ['node', '--input-type=module', '-e', cloneProgram], WorkingDir: containerWorkspace, Labels: dockerLabels({ ...labels, purpose: 'clone' }),
     Env: [...environment.filter(entry => !/^(LITELLM_API_KEY|OPENCODE_SERVER_)/.test(entry) && !(repository.access && entry.startsWith('GIT_CONFIG_COUNT='))), ...Object.entries(gitAccessVariables(Object.fromEntries(environment.map(entry => [entry.slice(0, entry.indexOf('=')), entry.slice(entry.indexOf('=') + 1)])), repository)).map(([key, value]) => `${key}=${value}`), `REPOSITORY_URL=${repository.url}`, `BASE_BRANCH=${repository.baseBranch}`, `WORK_BRANCH=${session.branch}`],
     HostConfig: hardenedHostConfig(settings, root), ...(user ? { User: user } : {}),
   };
   const agent = relay ? {
-    Image: settings.image, Cmd: relayServeCommand, WorkingDir: `${containerWorkspace}/repository`, Labels: { ...labels, 'dev.webgrip.unfold/purpose': 'agent', 'dev.webgrip.unfold/transport': 'pull' },
+    Image: settings.image, Cmd: relayServeCommand, WorkingDir: `${containerWorkspace}/repository`, Labels: dockerLabels({ ...labels, purpose: 'agent', transport: 'pull' }),
     Env: [...environment, `UNFOLD_RELAY_URL=${relay.url}`, `UNFOLD_RELAY_TOKEN=${relay.token}`, 'UNFOLD_RELAY_TARGET=http://127.0.0.1:4096'],
     HostConfig: hardenedHostConfig(settings, root), ...(user ? { User: user } : {}),
   } : {
-    Image: settings.image, Cmd: ['opencode', 'serve', '--hostname', '0.0.0.0', '--port', '4096'], WorkingDir: `${containerWorkspace}/repository`, Labels: { ...labels, 'dev.webgrip.unfold/purpose': 'agent' },
+    Image: settings.image, Cmd: ['opencode', 'serve', '--hostname', '0.0.0.0', '--port', '4096'], WorkingDir: `${containerWorkspace}/repository`, Labels: dockerLabels({ ...labels, purpose: 'agent' }),
     Env: environment, ExposedPorts: { '4096/tcp': {} },
     HostConfig: { ...hardenedHostConfig(settings, root), PortBindings: { '4096/tcp': [{ HostIp: '127.0.0.1', HostPort: '' }] } }, ...(user ? { User: user } : {}),
   };

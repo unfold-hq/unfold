@@ -4,8 +4,10 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { CandidateManifest } from './candidates.ts';
 import type { AppConfig, Repository, Session } from './types.ts';
+import { unfoldMeta } from './unfold-keys.ts';
 
-export const candidatePredicateType = 'https://webgrip.dev/attestations/agent-candidate/v1';
+/** The candidate provenance predicate Unfold signs: its schema's address on the documentation site (ADR-0067). */
+export const candidatePredicateType = 'https://docs.unfoldhq.dev/unfold/contracts/agent-candidate.v2.schema.json';
 export const tracePredicateType = 'https://agent-trace.dev/schemas/v1/trace-record.json';
 export const statementType = 'https://in-toto.io/Statement/v1';
 export const payloadType = 'application/vnd.in-toto+json';
@@ -107,7 +109,7 @@ export function candidateStatement(input: AttestationInput): Json {
       repository: { id: repository.id, url: repository.url, baseBranch: repository.baseBranch, baseSha: manifest.baseSha, snapshotBaseSha: manifest.snapshotBaseSha },
       candidate: { headSha: manifest.headSha, treeSha: manifest.treeSha, fileCount: manifest.fileCount, bytes: manifest.bytes, capturedAt: manifest.createdAt, history: manifest.history, scope: manifest.scope, verification: manifest.verification, publication: manifest.publication },
       workspace: workspace ? { backend: workspace.backend, transport: workspace.metadata?.transport ?? null, image: workspace.metadata?.image ?? null, container: workspace.metadata?.container ?? null, pod: workspace.metadata?.pod ?? null, namespace: workspace.metadata?.namespace ?? null } : null,
-      crew: team ? { id: team.id, roles: team.roles.map(role => ({ id: role.id, name: role.name, mode: role.mode, model: (session.model ?? role.model) ? models.get(session.model ?? role.model!)?.modelId ?? session.model ?? role.model : input.config.models[0]?.modelId ?? null })) } : null,
+      team: team ? { id: team.id, roles: team.roles.map(role => ({ id: role.id, name: role.name, mode: role.mode, model: (session.model ?? role.model) ? models.get(session.model ?? role.model!)?.modelId ?? session.model ?? role.model : input.config.models[0]?.modelId ?? null })) } : null,
       runs: session.runs.map(run => ({ roleId: run.roleId, mode: run.mode, status: run.status, verdict: run.verdict ?? null, nativeId: run.nativeId ?? null, promptSha256: run.promptSha ?? null, costUsd: run.costUsd, startedAt: run.startedAt ?? null, finishedAt: run.finishedAt ?? null })),
       spend: { budgetUsd: session.budgetUsd, spentUsd: session.spentUsd, costStatus: session.costStatus, usage: session.usage ?? null, providers: [...new Set((session.requests ?? []).map(request => request.provider).filter(Boolean))], policy: input.config.gatewayPolicy ?? null },
       harness: { kind: session.runtime },
@@ -134,7 +136,7 @@ export function traceStatement(input: AttestationInput): Json {
         related: session.runs.filter(run => run.nativeId).map(run => ({ type: 'harness_session', url: `opencode:session/${run.nativeId}` })),
       }],
     })),
-    metadata: { 'dev.webgrip.unfold': { sessionId: session.id, branch: session.branch, baseSha: manifest.baseSha, roles: session.runs.map(run => run.roleId) } },
+    metadata: unfoldMeta({ sessionId: session.id, branch: session.branch, baseSha: manifest.baseSha, roles: session.runs.map(run => run.roleId) }),
   };
   return { _type: statementType, subject: [{ name: 'manifest.json', digest: { sha256: sha256(input.manifestBytes) } }, { name: `git+${input.repository.url}`, digest: { gitCommit: manifest.headSha } }], predicateType: tracePredicateType, predicate: record };
 }

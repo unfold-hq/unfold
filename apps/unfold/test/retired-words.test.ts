@@ -41,8 +41,8 @@ const compatibleKeys: Record<string, { reason: string; files: string[] }> = {
     files: [`${unfold}/config.ts`, `${unfold}/http.ts`, `${extension}/src/client.ts`],
   },
   crew: {
-    reason: 'the card field sent beside roles for one release and read from cards stored before; the AHP configuration key older clients send; and the key of the signed candidate attestation predicate, which verifiers pin and which stays unchanged',
-    files: [`${unfold}/ahp/session-config.ts`, `${unfold}/attestations.ts`, `${unfold}/cards/cardimage-view.ts`, `${unfold}/ploeg.ts`, `${unfold}/ploeg-demo.ts`, 'apps/unfold/public/cards/card-model.js', `${extension}/src/ploeg-types.ts`, `${extension}/media/task.js`],
+    reason: 'the card field sent beside roles for one release and read from cards stored before; and the AHP configuration key older clients send',
+    files: [`${unfold}/ahp/session-config.ts`, `${unfold}/cards/cardimage-view.ts`, `${unfold}/ploeg.ts`, `${unfold}/ploeg-demo.ts`, 'apps/unfold/public/cards/card-model.js', `${extension}/src/ploeg-types.ts`, `${extension}/media/task.js`],
   },
 };
 const inputWords: Record<string, string> = {
