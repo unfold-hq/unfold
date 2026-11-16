@@ -8,7 +8,7 @@ verified_by: "Read apps/ploeg pkg/config, pkg/httpapi/{server,withdraw,operator_
 
 # Assign work to an agent
 
-Use this to hand a tracker ticket to agents. Result: Ploeg dispatches a [Run](../../apps/ploeg/docs/domain/glossary.md#run), the agent opens a pull request on branch `agent/vik-<ticket id>` for Vikunja and `agent/clickup-<ticket id>` for ClickUp, and the ticket gets a comment with the link.
+Use this to hand a ticket in {{ tracker }} to agents. Result: Ploeg dispatches a [Run](../../apps/ploeg/docs/domain/glossary.md#run), the agent opens a {{ forge.change }} on branch {{ tracker.branch }}, and the ticket gets a comment with the link.
 
 Terms: a **Work Item** is Ploeg's copy of your ticket. A **Team** is a named roster of agent **Roles**. A **Shift** is one Team's whole attempt at a Work Item, split into **Rounds**. A **Run** is one Role working once, and a **Lease** is the writer's exclusive right to push to the branch. See the [glossary](../reference/glossary.md).
 

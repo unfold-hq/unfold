@@ -88,6 +88,7 @@ Research, evidence, superseded explanations, design baselines, planning exports 
 * Link source files or symbols, never line numbers: `#L` anchors drift with the next change, and `mise run docs-check` rejects them on current pages.
 * Label unimplemented behavior "Not implemented yet". Never describe a plan as current.
 * A deterministic demo says so, and never invents model calls or spend.
+* Write for any integration a reader picked. Where the text depends on the issue tracker or forge, write a placeholder such as `{{ tracker }}`, `{{ tracker.branch }}` or `{{ forge.change }}` instead of naming a product. The build replaces it with neutral text that shows every integration's value on hover and links to [Integrations](reference/integrations.md). A reader who picks theirs under "Shown for", or opens a link with `?tracker=clickup`, sees their own values. The values live in [`integrations.yml`](integrations.yml), which `mise run docs-check` compares with Ploeg's providers; an unknown placeholder fails the build. Where the steps differ per integration, use content tabs labelled with the integration's name: they follow the same choice. Name a product only where the page is about that product.
 
 ## Generate and check
 

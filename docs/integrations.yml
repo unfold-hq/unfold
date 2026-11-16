@@ -1,0 +1,35 @@
+categories:
+  - id: tracker
+    label: Issue tracker
+    fields:
+      name: {label: Name, any: your issue tracker}
+      branch: {label: Agent branch, code: true, any: "agent/<tracker>-<ticket id>"}
+      reference: {label: Commit reference, code: true, any: "<tracker>-<ticket id>"}
+    choices:
+      - id: vikunja
+        name: Vikunja
+        branch: "agent/vik-<ticket id>"
+        reference: "VIK-<ticket id>"
+      - id: clickup
+        name: ClickUp
+        branch: "agent/clickup-<ticket id>"
+        reference: "clickup-<ticket id>"
+      - id: github
+        name: GitHub Issues
+        branch: "agent/github-<ticket id>"
+        reference: "github-<ticket id>"
+  - id: forge
+    label: Forge
+    fields:
+      name: {label: Name, any: your forge}
+      change: {label: Change for review, any: pull request}
+    choices:
+      - id: forgejo
+        name: Forgejo
+        change: pull request
+      - id: github
+        name: GitHub
+        change: pull request
+      - id: gitlab
+        name: GitLab
+        change: merge request

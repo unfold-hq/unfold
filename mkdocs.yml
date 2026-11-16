@@ -6,6 +6,14 @@ edit_uri: ''
 docs_dir: .build/docs
 site_dir: .build/site
 plugins: []
+theme:
+  features:
+    - content.tabs.link
+    - content.tooltips
+extra_css:
+  - assets/integrations.css
+extra_javascript:
+  - assets/integrations.js
 nav:
   - Start here: index.md
   - Try it:
@@ -51,6 +59,7 @@ nav:
       - Release and live test: operations/first-cutover.md
   - Reference:
       - Glossary: reference/glossary.md
+      - Integrations: reference/integrations.md
       - Ploeg words and screen words: reference/ploeg-words.md
       - Decisions: reference/decisions.md
       - Ploeg configuration: ploeg/reference/configuration.md

@@ -74,7 +74,7 @@ To clear a stuck Run, look at the named positions with a tool that shows hidden 
 
 ## Set branch rules
 
-Ploeg names the writer's branch `agent/vik-<ticket id>` for Vikunja and `agent/clickup-<ticket id>` for ClickUp ([branch.go](../../apps/ploeg/pkg/work/branch.go)) and tells the agent never to commit to the base branch and never to merge ([prompt.go](../../apps/ploeg/pkg/taskprompt/prompt.go)). Ploeg does not configure branch protection; ADR-0013 rejected changing forge settings per Shift. On the forge, set these rules yourself (recommended, not enforced by Ploeg):
+Ploeg names the writer's branch {{ tracker.branch }} ([branch.go](../../apps/ploeg/pkg/work/branch.go)) and tells the agent never to commit to the base branch and never to merge ([prompt.go](../../apps/ploeg/pkg/taskprompt/prompt.go)). Ploeg does not configure branch protection; ADR-0013 rejected changing forge settings per Shift. On the forge, set these rules yourself (recommended, not enforced by Ploeg):
 
 1. Protect the base branch: no direct pushes, merge only through a pull request with passing CI and a human approval.
 2. Allow the bot to push to `agent/*` branches.
@@ -106,7 +106,7 @@ The suite makes model calls, so the default `go test` run skips it. Set `PLOEG_C
 
 ## Verify
 
-Assign a small test ticket. Expect `target resolved` with your repository in the ploegd log, and a Run that ends `pr_opened` with a pull request from `agent/vik-<id>` (or `agent/clickup-<id>`).
+Assign a small test ticket. Expect `target resolved` with your repository in the ploegd log, and a Run that ends `pr_opened` with a {{ forge.change }} from {{ tracker.branch }}.
 
 ## If it fails
 
