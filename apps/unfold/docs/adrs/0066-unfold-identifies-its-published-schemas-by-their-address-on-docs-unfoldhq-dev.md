@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-16
 decision-makers: Ryan Grippeling
 review-by: 2027-02-16
@@ -86,3 +86,4 @@ Chosen option: **the path the documentation site already serves**. [The docs bui
 * [System ADR-0050](../../../../docs/adr/adr-0050-unfold-integrates-through-open-standards-and-registries-and-never-locks-a-customer-in.md): events leave Unfold as CloudEvents documented in AsyncAPI.
 * Revisit when Unfold registers its schemas in a schema registry, or when the documentation site moves.
 * 2026-11-16 — Proposed with its implementation; the owner asked for the move of the schema identifiers off the previous forge as a versioned contract change.
+* 2026-11-16 — Accepted by the owner.

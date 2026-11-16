@@ -145,6 +145,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0045](../../apps/unfold/docs/adrs/0045-unfold-records-the-run-card-rules-it-computes.md) | Unfold records the Run card rules it computes | 2026-10-14 | — |
 | Unfold | [0050](../../apps/unfold/docs/adrs/0050-people-write-on-the-blackboard-and-unfold-shows-questions-disagreements-and-finding-answers.md) | People write on the blackboard, and Unfold shows the questions, disagreements and finding answers waiting for them | 2026-10-18 | — |
 | Unfold | [0060](../../apps/unfold/docs/adrs/0060-the-focus-cost-export-writes-parquet-through-hyparquet-writer.md) | The FOCUS cost export writes Parquet through `hyparquet-writer` | 2026-10-30 | — |
+| Unfold | [0066](../../apps/unfold/docs/adrs/0066-unfold-identifies-its-published-schemas-by-their-address-on-docs-unfoldhq-dev.md) | Unfold identifies its published schemas by their address on docs.unfoldhq.dev | 2026-11-16 | — |
 
 ## Proposed
 
@@ -313,7 +314,6 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0063](../../apps/unfold/docs/adrs/0063-unfold-reaches-ploeg-and-trackers-through-ports-with-interchangeable-adapters.md) | Unfold reaches Ploeg and trackers through ports with interchangeable adapters | 2026-10-31 | unknown | — |
 | Unfold | [0064](../../apps/unfold/docs/adrs/0064-people-add-tracker-connections-from-the-screen-and-unfold-keeps-them-with-an-encrypted-service-account-token.md) | People add tracker connections from the screen, and Unfold keeps them with an encrypted service account token | 2026-10-31 | unknown | — |
 | Unfold | [0065](../../apps/unfold/docs/adrs/0065-unfold-tracks-agent-standards-in-a-catalogue-that-renovate-and-a-weekly-survey-keep-current.md) | Unfold tracks agent standards in a catalogue that Renovate and a weekly survey keep current | 2026-11-04 | unknown | — |
-| Unfold | [0066](../../apps/unfold/docs/adrs/0066-unfold-identifies-its-published-schemas-by-their-address-on-docs-unfoldhq-dev.md) | Unfold identifies its published schemas by their address on docs.unfoldhq.dev | 2026-11-16 | unknown | — |
 
 ## Other statuses
 
