@@ -1,11 +1,17 @@
 # syntax=docker/dockerfile:1
-ARG REGISTRY_DHI=dhi.io
-# renovate: datasource=docker depName=dhi.io/node versioning=docker
-ARG NODE_DEV_IMAGE=${REGISTRY_DHI}/node:24.22.2-alpine3.24-dev@sha256:6e0bd1034b88bc659e39419e52a5d08fc20ddc99c377fc8ca24d4dd4363a42a6
-# renovate: datasource=docker depName=dhi.io/node versioning=docker
-ARG NODE_RUNTIME_IMAGE=${REGISTRY_DHI}/node:24.22.2-alpine3.24@sha256:8c18e7e46740c3997bd33d6c3a6b9e01915e2ed9db7c9bc649fea14f55ba7dfd
+ARG REGISTRY_CHAINGUARD=cgr.dev
+# renovate: datasource=docker depName=cgr.dev/chainguard/wolfi-base versioning=docker
+ARG WOLFI_BASE_IMAGE=${REGISTRY_CHAINGUARD}/chainguard/wolfi-base:latest@sha256:2c12da5496e21e99003b3db3b9246f025e53d533c4df334205391260f1e8f85b
 
-FROM ${NODE_DEV_IMAGE} AS stage
+FROM ${WOLFI_BASE_IMAGE} AS node
+RUN printf 'https://packages.wolfi.dev/os\n' > /etc/apk/repositories \
+ && apk upgrade --no-cache \
+ && apk add --no-cache nodejs-24 npm \
+ && node --version | grep -q '^v24\.' \
+ && addgroup -g 1000 node \
+ && adduser -D -u 1000 -G node -h /home/node -s /sbin/nologin node
+
+FROM node AS stage
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
@@ -19,23 +25,26 @@ ARG IMAGE_VERSION=dev
 RUN if [ "${IMAGE_VERSION}" != dev ]; then node scripts/stamp-version.mjs "${IMAGE_VERSION}" app; fi
 RUN install -d -o node -g node -m 0700 /data && install -d /app/.node-cache && chown -R node:node /app
 
-FROM ${NODE_DEV_IMAGE} AS git
-USER root
-RUN apk add --no-cache git \
- && loader="$(ls /lib/ld-musl-*.so.1)" \
- && for file in /usr/bin/git /usr/libexec/git-core/git-remote-http; do install -D -m 0755 "$file" "/git-root$file"; done \
- && ln -s git-remote-http /git-root/usr/libexec/git-core/git-remote-https \
- && ln -s ../../bin/git /git-root/usr/libexec/git-core/git \
- && for library in $("$loader" --list /usr/bin/git; "$loader" --list /usr/libexec/git-core/git-remote-http) ; do case "$library" in /usr/lib/*) install -D -m 0644 "$library" "/git-root$library";; esac; done \
- && test -x /git-root/usr/bin/git
+FROM ${WOLFI_BASE_IMAGE} AS rootfs
+RUN printf 'https://packages.wolfi.dev/os\n' > /etc/apk/repositories \
+ && apk add --no-cache --no-scripts --root /rootfs --initdb --keys-dir /etc/apk/keys --repositories-file /etc/apk/repositories \
+      wolfi-baselayout ca-certificates-bundle nodejs-24 git \
+ && rm -rf /rootfs/var/cache/apk /rootfs/etc/apk/repositories /rootfs/usr/libexec/git-core/git-http-push \
+ && printf 'node:x:1000:1000:node:/home/node:/sbin/nologin\n' >> /rootfs/etc/passwd \
+ && printf 'node:x:1000:\n' >> /rootfs/etc/group \
+ && install -d -o 1000 -g 1000 -m 0750 /rootfs/home/node \
+ && install -d -m 1777 /rootfs/tmp \
+ && chroot /rootfs /usr/bin/git --version \
+ && chroot /rootfs /usr/bin/node --version | grep -q '^v24\.'
 
-FROM ${NODE_RUNTIME_IMAGE} AS app
+FROM scratch AS app
 ARG IMAGE_CREATED=1970-01-01T00:00:00Z
 ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=unknown
-COPY --from=stage --chown=node:node /app /app
-COPY --from=stage --chown=node:node /data /data
-COPY --from=git /git-root/ /
+COPY --from=rootfs /rootfs/ /
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+COPY --from=stage --chown=1000:1000 /app /app
+COPY --from=stage --chown=1000:1000 /data /data
 RUN ["git", "--version"]
 WORKDIR /app
 ENV UNFOLD_HOST=0.0.0.0 UNFOLD_PORT=4080 UNFOLD_DATA_DIR=/data
@@ -44,7 +53,7 @@ USER node
 ENV NODE_COMPILE_CACHE=/app/.node-cache
 RUN ["node", "--input-type=module", "-e", "await import('/app/src/main.ts'); const { flushCompileCache, getCompileCacheDir } = await import('node:module'); flushCompileCache(); const { readdirSync } = await import('node:fs'); const written = getCompileCacheDir() ? readdirSync(getCompileCacheDir()).length : 0; if (written < 50) throw new Error('NODE_COMPILE_CACHE wrote ' + written + ' entries; expected one per application module');"]
 LABEL org.opencontainers.image.title="Unfold" \
-    org.opencontainers.image.description="Operator workbench control plane: shell-less hardened Node runtime with no package manager, plus git for governed delivery; agent work runs in separate workspaces." \
+    org.opencontainers.image.description="Operator workbench control plane: shell-less Wolfi Node runtime with no package manager, plus git for governed delivery; agent work runs in separate workspaces." \
     org.opencontainers.image.source="https://github.com/webgrip/unfold" \
     org.opencontainers.image.vendor="WebGrip" \
     org.opencontainers.image.licenses="Apache-2.0" \

@@ -97,7 +97,7 @@
     "{{#if isVulnerabilityAlert}}🔒 **Security update**: prioritize review and verify the vulnerable component is actually deployed.{{/if}}",
     "{{#if isGroup}}📦 **Grouped update**: confirm the group is operationally coherent before merging.{{/if}}",
     "Merge Confidence badges are included where supported — low or neutral confidence warrants a manual impact check before merge.",
-    "`Released` is the upstream publish time. `—` means the datasource reports no release timestamp. Docker Hub is the only Docker registry that reports one, so this preset treats every other Docker registry (ghcr.io, quay.io, dhi.io and registry proxies) as `timestamp-optional`: `minimumReleaseAge` cannot hold those updates back and they are eligible as soon as checks pass. For any other datasource, a missing timestamp holds the update for as long as a soak applies. A real date means the soak is enforced: add this update type's `minimumReleaseAge` to `Released` to get the eligibility moment."
+    "`Released` is the upstream publish time. `—` means the datasource reports no release timestamp. Docker Hub is the only Docker registry that reports one, so this preset treats every other Docker registry (ghcr.io, quay.io, cgr.dev and registry proxies) as `timestamp-optional`: `minimumReleaseAge` cannot hold those updates back and they are eligible as soon as checks pass. For any other datasource, a missing timestamp holds the update for as long as a soak applies. A real date means the soak is enforced: add this update type's `minimumReleaseAge` to `Released` to get the eligibility moment."
   ],
   "ignorePaths": [
     "**/node_modules/**",
