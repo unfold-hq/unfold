@@ -43,13 +43,13 @@ export const PLOEG_QUICKSTART_URL = `${PLOEG_DOCS}/quickstart.md`;
 export const PLOEG_VERIFY_RELEASE_URL = `${PLOEG_DOCS}/ops/verify-a-release.md`;
 export const LICENSE_ID = 'Apache-2.0';
 
-export const PRIVACY_VERSION = '2026-10-02';
+export const PRIVACY_VERSION = '2026-11-16';
 export const SIGNUP_RETENTION_MONTHS = 24;
 export const CONTROLLER = {
   name: 'WebGrip',
   person: 'Ryan Grippeling',
   city: 'Enschede',
   kvk: '75281120',
-  email: 'ryan@webgrip.nl',
+  email: 'privacy@unfoldhq.dev',
 } as const;
 export const DEMO_REPLAY_PATH = '/demo/';

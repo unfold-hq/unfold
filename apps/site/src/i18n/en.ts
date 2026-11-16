@@ -389,13 +389,13 @@ export const en = {
   },
   privacy: {
     title: 'Privacy statement',
-    version: 'Version of 2 October 2026',
+    version: 'Version of 16 November 2026',
     intro:
       'This statement covers the sign-up form on this site. The site sets no cookies and has no analytics or trackers.',
     sections: [
       {
         title: 'Who is responsible',
-        text: 'WebGrip, the business of Ryan Grippeling in Enschede, the Netherlands, is the controller. Chamber of Commerce (KvK) number 75281120. Contact: ryan@webgrip.nl.',
+        text: 'WebGrip, the business of Ryan Grippeling in Enschede, the Netherlands, is the controller. Chamber of Commerce (KvK) number 75281120. Contact: privacy@unfoldhq.dev.',
       },
       {
         title: 'What we store',
@@ -419,11 +419,11 @@ export const en = {
       },
       {
         title: 'Your rights',
-        text: 'You can ask to see, correct or delete your data, to restrict its use or object to it, and to receive it in a portable form. Send an email to ryan@webgrip.nl and you get an answer within a month. You can also complain to the Dutch data protection authority, the Autoriteit Persoonsgegevens.',
+        text: 'You can ask to see, correct or delete your data, to restrict its use or object to it, and to receive it in a portable form. Send an email to privacy@unfoldhq.dev and you get an answer within a month. You can also complain to the Dutch data protection authority, the Autoriteit Persoonsgegevens.',
       },
       {
         title: 'How to withdraw',
-        text: 'Send an email to ryan@webgrip.nl from the address you signed up with, and we delete it. You can always sign up again later.',
+        text: 'Send an email to privacy@unfoldhq.dev from the address you signed up with, and we delete it. You can always sign up again later.',
       },
       {
         title: 'On your device',
