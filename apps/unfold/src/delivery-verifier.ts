@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { DockerClient, demultiplex } from './runtime/docker.ts';
 import { digest, type DeliveryPolicy, type DeliveryCheck } from './delivery-config.ts';
 import { deliveryFailure, type CanonicalCandidate } from './trusted-candidate.ts';
+import { dockerLabels } from './unfold-keys.ts';
 
 export type CheckResult = { id: string; passed: boolean; exitCode: number | null; stdoutSha256: string; stderrSha256: string; reason?: string };
 export type VerifierId = 'unfold-docker-v1' | 'unfold-kubernetes-v1';
@@ -13,7 +14,7 @@ export function verificationResult(verifierId: VerifierId, candidate: CanonicalC
 }
 
 export function verifierSpec(candidate: CanonicalCandidate, policy: DeliveryPolicy, check: DeliveryCheck): Record<string, unknown> {
-  return { Image: policy.image, Entrypoint: [], Cmd: check.argv, WorkingDir: '/candidate', User: '65532:65532', Env: ['HOME=/tmp', 'TMPDIR=/tmp', 'LANG=C.UTF-8'], Labels: { 'dev.webgrip.unfold/purpose': 'verifier', 'dev.webgrip.unfold/candidate': candidate.canonicalSha, 'dev.webgrip.unfold/policy': candidate.policySha }, HostConfig: { Binds: [`${candidate.directory}:/candidate:ro`, `${join(dirname(candidate.directory), 'policy')}:/policy:ro`], ReadonlyRootfs: true, NetworkMode: 'none', CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'], Tmpfs: { '/tmp': 'rw,nosuid,nodev,noexec,size=64m,mode=1777' }, Memory: 512 * 1024 * 1024, MemorySwap: 512 * 1024 * 1024, NanoCpus: 1e9, PidsLimit: 64, RestartPolicy: { Name: 'no' }, AutoRemove: false, LogConfig: { Type: 'local', Config: { 'max-size': '1m', 'max-file': '2' } } } };
+  return { Image: policy.image, Entrypoint: [], Cmd: check.argv, WorkingDir: '/candidate', User: '65532:65532', Env: ['HOME=/tmp', 'TMPDIR=/tmp', 'LANG=C.UTF-8'], Labels: dockerLabels({ purpose: 'verifier', candidate: candidate.canonicalSha, policy: candidate.policySha }), HostConfig: { Binds: [`${candidate.directory}:/candidate:ro`, `${join(dirname(candidate.directory), 'policy')}:/policy:ro`], ReadonlyRootfs: true, NetworkMode: 'none', CapDrop: ['ALL'], SecurityOpt: ['no-new-privileges:true'], Tmpfs: { '/tmp': 'rw,nosuid,nodev,noexec,size=64m,mode=1777' }, Memory: 512 * 1024 * 1024, MemorySwap: 512 * 1024 * 1024, NanoCpus: 1e9, PidsLimit: 64, RestartPolicy: { Name: 'no' }, AutoRemove: false, LogConfig: { Type: 'local', Config: { 'max-size': '1m', 'max-file': '2' } } } };
 }
 
 export async function verifyCandidate(candidate: CanonicalCandidate, policy: DeliveryPolicy, client = new DockerClient()): Promise<VerificationResult> {

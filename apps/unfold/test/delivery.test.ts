@@ -51,6 +51,7 @@ test('verifier uses isolated fresh containers and real exit status, never accept
   try {
     await f.fix(); await f.capture('verifier'); const candidate = await canonicalizeCandidate(f.dataDir, 'verifier', f.policy);
     const spec = verifierSpec(candidate, f.policy, f.policy.checks[0]) as any;
+    for (const prefix of ['dev.unfoldhq.unfold', 'dev.webgrip.unfold']) assert.deepEqual([spec.Labels[`${prefix}/purpose`], spec.Labels[`${prefix}/candidate`], spec.Labels[`${prefix}/policy`]], ['verifier', candidate.canonicalSha, candidate.policySha], prefix);
     assert.equal(spec.HostConfig.NetworkMode, 'none'); assert.equal(spec.User, '65532:65532'); assert.ok(spec.HostConfig.Binds.every((value: string) => value.endsWith(':ro'))); assert.equal(spec.Env.some((value: string) => /TOKEN|KEY|OPENCODE/.test(value)), false);
     class FakeDocker extends DockerClient {
       async request(path: string): Promise<any> { if (path.startsWith('/images/')) return { Id: f.policy.image }; if (path.endsWith('/json')) return { State: { Running: false, ExitCode: 1 } }; if (path.includes('/wait')) return { StatusCode: 1 }; return {}; }
