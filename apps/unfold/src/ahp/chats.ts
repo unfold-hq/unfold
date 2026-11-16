@@ -6,6 +6,7 @@ import type { ChatRecord, ChatTurn } from '../chat/types.ts';
 import type { ChatHistoryEntry, ChatService, ToolAnswer, ToolView, TurnOutcome, TurnView } from '../chat/service.ts';
 import { sessionChatCatalog } from './versions.ts';
 import { money } from '../../public/core/format.js';
+import { unfoldMeta } from '../unfold-keys.ts';
 
 type Json = Record<string, any>;
 
@@ -168,7 +169,7 @@ export class ChatSessions {
       resource: chatSessionUri(id, view.scheme), provider: chatProvider, title: this.title(id), status: this.activityBits(id) | flags.session, ...(activity ? { activity } : {}),
       createdAt: pending?.createdAt ?? chat!.createdAt, modifiedAt: pending?.createdAt ?? chat!.updatedAt,
       ...sessionChatCatalog(view.protocolVersion, this.chatSummary(id, view)),
-      _meta: { 'dev.webgrip.unfold': { kind: 'chat', team: pending?.team ?? chat!.team } },
+      _meta: unfoldMeta({ kind: 'chat', team: pending?.team ?? chat!.team }),
     };
   }
 

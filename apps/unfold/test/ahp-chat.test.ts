@@ -112,6 +112,8 @@ test('a short "test" gets an answer in a 0.9 chat, paid by one admission whose k
   const listed = (await client.rpc('listSessions', { channel: 'ahp-root://' })).items.find((item: Json) => item.resource === session);
   assert.equal(listed.provider, 'unfold-chat');
   assert.equal(listed.title, 'test', 'the title is the first message');
+  assert.equal(listed._meta['dev.unfoldhq.unfold'].kind, 'chat');
+  assert.deepEqual(listed._meta['dev.webgrip.unfold'], listed._meta['dev.unfoldhq.unfold'], 'the retiring key carries the same facts for one release');
   assert.match(listed.activity, /4,55 of Team delivery's chat allowance left/);
 });
 

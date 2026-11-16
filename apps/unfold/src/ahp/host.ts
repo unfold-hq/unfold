@@ -39,6 +39,7 @@ import type { ChatService } from '../chat/service.ts';
 import { accountDisabled } from '../identity/accounts.ts';
 import { agentHostOriginAllowed, renewedExpiry, reportUnlistedOrigin, upgradeToken } from './upgrade-auth.ts';
 import { catalogueMessage, publicError } from '../error-catalogue.ts';
+import { unfoldMeta } from '../unfold-keys.ts';
 
 export { MalformedVersion, negotiateProtocolVersion, protocolBaselines, protocolVersion, supportedVersions } from './versions.ts';
 export const provider = 'unfold';
@@ -706,7 +707,7 @@ export class AgentHost {
       ...this.project(repository, session.repositoryId),
       ...(session.candidate?.status === 'ready' ? { changes: { files: session.candidate.fileCount } } : {}),
       ...sessionChatCatalog(view.protocolVersion, this.chatSummary(session, view), session.candidate?.status === 'ready' ? { files: session.candidate.fileCount } : undefined),
-      _meta: { ...this.review.gitMeta(session), 'dev.webgrip.unfold': { status: session.status, placement: session.placement, budgetUsd: session.budgetUsd, spentUsd: session.spentUsd, costStatus: session.costStatus, candidate: session.candidate?.status } },
+      _meta: { ...this.review.gitMeta(session), ...unfoldMeta({ status: session.status, placement: session.placement, budgetUsd: session.budgetUsd, spentUsd: session.spentUsd, costStatus: session.costStatus, candidate: session.candidate?.status }) },
     };
   }
 

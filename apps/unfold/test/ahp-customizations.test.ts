@@ -32,7 +32,8 @@ test('a session whose repository grants gateway tools shows one managed, top-lev
   assert.equal(server.channel, undefined, 'no side channel: a client cannot call the tools through the host');
   assert.equal(server._meta['agentHost.mcpServerSource'], 'managed');
   assert.equal(server._meta['vscode.mcpServerDisplayName'], 'Gateway tools (observability-read-orders)');
-  assert.deepEqual(server._meta['dev.webgrip.unfold'], { source: 'repository', repository: 'order-service', team: 'agents-orders', accessGroups: ['observability-read-orders'], keyScope: 'repository', clientControl: false });
+  assert.deepEqual(server._meta['dev.unfoldhq.unfold'], { source: 'repository', repository: 'order-service', team: 'agents-orders', accessGroups: ['observability-read-orders'], keyScope: 'repository', clientControl: false });
+  assert.deepEqual(server._meta['dev.webgrip.unfold'], server._meta['dev.unfoldhq.unfold'], 'the retiring key carries the same facts for one release');
   const serialized = JSON.stringify(server);
   for (const leak of ['gateway.internal.example', 'x-litellm-api-key', 'LITELLM_API_KEY', 'Bearer']) assert.ok(!serialized.includes(leak), `the advertisement does not carry ${leak}`);
 
@@ -57,7 +58,7 @@ test('under Ploeg the server says that the key Ploeg mints is not scoped to the 
   assert.equal(server.state.kind, 'error');
   assert.equal(server.state.error.errorType, 'gateway_key_unscoped');
   assert.match(server.state.error.message, /does not yet apply the repository's MCP access groups/);
-  assert.equal(server._meta['dev.webgrip.unfold'].keyScope, 'ploeg');
+  assert.equal(server._meta['dev.unfoldhq.unfold'].keyScope, 'ploeg');
   const owned = gatewayConfig(config => { config.repositories = config.repositories.map(repository => ({ ...repository, executionOwner: 'ploeg' })); });
   assert.equal(sessionCustomizations(owned, subject({ status: undefined }), 'abc', [])[0].state.kind, 'error', 'a repository Ploeg executes, before its session is bound');
   assert.deepEqual(sessionCustomizations(owned, subject({ status: 'completed' }), 'abc', [])[0].state, { kind: 'stopped' });

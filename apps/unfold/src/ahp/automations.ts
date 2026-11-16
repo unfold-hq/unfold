@@ -2,6 +2,7 @@ import type { AppConfig, User } from '../types.ts';
 import { PloegClient, PloegError, type PloegTeam } from '../ploeg.ts';
 import { assignmentEvent, assignmentEvents, handoffUnsupported, type TaskSourceConfig } from '../tasks.ts';
 import { routedTeams, type Routing } from '../task-handoff.ts';
+import { unfoldMeta } from '../unfold-keys.ts';
 
 type Json = Record<string, any>;
 
@@ -13,7 +14,6 @@ export const isAutomationsChannel = (uri: string) => uri === automationsChannel 
 export const autonomousAutomationsMeta = 'vscode.autonomousAutomations';
 /** The event-trigger type of a tracker route: Ploeg queues a Work Item when a team's tracker user is assigned to a task on the board. */
 export const trackerAssignmentTrigger = 'unfold.tracker-assignment';
-const metaKey = 'dev.webgrip.unfold';
 
 /** Why the host refuses `automation/createRequested`, `runAutomation` and every other change from a client. */
 export const readOnlyReason = 'Unfold lists tracker routes but does not create, change or run automations: each run would start budgeted work that Ploeg has not authorized. Hand a tracker task to a Ploeg team from the Tasks page, or assign it in the tracker.';
@@ -69,7 +69,7 @@ export class TrackerAutomations {
     const routes = await this.routes(user);
     this.publish(user, routes.entries);
     if (this.available) this.start();
-    return { entries: routes.entries, _meta: { [metaKey]: { readOnly: true, reason: routes.reason ?? readOnlyReason } } };
+    return { entries: routes.entries, _meta: unfoldMeta({ readOnly: true, reason: routes.reason ?? readOnlyReason }) };
   }
 
   /** The rejection reason for any action a client dispatches on the catalogue. */
@@ -138,14 +138,14 @@ export class TrackerAutomations {
       session: { provider: 'unfold', ...(folder ? { workingDirectories: [folder] } : {}) },
       enabled: team.paused !== true,
       triggers: [{ id: 'tracker-assignment', kind: 'event', type: trackerAssignmentTrigger, title: 'Tracker assignment', description: 'Ploeg queues a Work Item when its tracker user is assigned to a task on this board.', events: [{ id: assignmentEvent(source)!, title: `Assigned to ${assignee}` }], config: { source: source.id, team: team.id, assignee } }],
-      _meta: { [metaKey]: { kind: 'trackerRoute', source: source.id, team: team.id, assignee, pinned, handoff } },
+      _meta: unfoldMeta({ kind: 'trackerRoute', source: source.id, team: team.id, assignee, pinned, handoff }),
     };
     const fingerprint = JSON.stringify(definition);
     const now = new Date().toISOString();
     const known = this.known.get(resource);
     const stamp = !known ? { fingerprint, createdAt: now, modifiedAt: now } : known.fingerprint === fingerprint ? known : { ...known, fingerprint, modifiedAt: now };
     this.known.set(resource, stamp);
-    return { resource, definition, runs: [], operations: [], createdAt: stamp.createdAt, modifiedAt: stamp.modifiedAt, _meta: { [metaKey]: { queueDepth: team.queueDepth, paused: team.paused } } };
+    return { resource, definition, runs: [], operations: [], createdAt: stamp.createdAt, modifiedAt: stamp.modifiedAt, _meta: unfoldMeta({ queueDepth: team.queueDepth, paused: team.paused }) };
   }
 
   private triggerDefinition(): Json {
