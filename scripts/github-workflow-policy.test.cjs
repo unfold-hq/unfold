@@ -33,13 +33,12 @@ const runShell = (script, env) => {
 };
 const KEYLESS_SIGNER = '^https://github\\.com/unfold-hq/unfold/\\.github/workflows/on_release_published\\.yml@refs/tags/unfold-v0\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$';
 
-test('GitHub runs every Forgejo entry point except the documentation one, plus the Ploeg pin auto-merge', () => {
-  const ported = ['on_agent_standards.yml', 'on_dns_change.yml', 'on_nightly.yml', 'on_pull_request.yml', 'on_release_preview.yml', 'on_release_published.yml', 'on_release_train.yml', 'on_schedule.yml', 'on_source_change.yml'];
+test('GitHub runs every Forgejo entry point, plus the Ploeg pin auto-merge', () => {
+  const ported = ['on_agent_standards.yml', 'on_dns_change.yml', 'on_docs_change.yml', 'on_nightly.yml', 'on_pull_request.yml', 'on_release_preview.yml', 'on_release_published.yml', 'on_release_train.yml', 'on_schedule.yml', 'on_source_change.yml'];
   assert.deepEqual(Object.keys(workflows).sort(), [...ported, 'on_ploeg_pin.yml'].sort());
   if (fs.existsSync(path.join(root, '.forgejo/workflows'))) {
-    assert.deepEqual(fs.readdirSync(path.join(root, '.forgejo/workflows')).filter(file => file !== 'on_docs_change.yml').sort(), ported, 'a new Forgejo workflow is ported here too, or named an exception');
+    assert.deepEqual(fs.readdirSync(path.join(root, '.forgejo/workflows')).sort(), ported, 'a new Forgejo workflow is ported here too, or named an exception');
   }
-  assert.ok(!workflows['on_docs_change.yml'], 'documentation publishing moves in its own change');
 });
 
 test('every job runs only in unfold-hq/unfold, on a GitHub-hosted runner, so the mirror and forks stay inert', () => {
@@ -94,18 +93,18 @@ test('every action is local or pinned to a full commit, and every image is publi
     for (const image of [job.container?.image, ...Object.values(job.services ?? {}).map(service => service.image)].filter(Boolean)) {
       assert.match(image, /^(?:docker\.io|ghcr\.io|mcr\.microsoft\.com)\/[^@]+@sha256:[0-9a-f]{64}$/, `${file}: ${name}`);
     }
-    for (const dependency of job.needs ?? []) assert.ok(workflows[file].jobs[dependency], `${file}: ${name} needs a missing ${dependency}`);
-    for (const [, dependency] of JSON.stringify(job).matchAll(/needs\.([a-z-]+)\./g)) assert.ok(job.needs?.includes(dependency), `${file}: ${name} reads undeclared dependency ${dependency}`);
+    for (const dependency of [job.needs ?? []].flat()) assert.ok(workflows[file].jobs[dependency], `${file}: ${name} needs a missing ${dependency}`);
+    for (const [, dependency] of JSON.stringify(job).matchAll(/needs\.([a-z-]+)\./g)) assert.ok([job.needs ?? []].flat().includes(dependency), `${file}: ${name} reads undeclared dependency ${dependency}`);
   }
 });
 
-test('the workflows use only the repository secrets the move names, and the Cloudflare deploy token only in the site jobs', () => {
+test('the workflows use only the repository secrets the move names, and the Cloudflare deploy token only in the site and documentation deploy jobs', () => {
   const allowed = ['AGENT_STANDARDS_MODEL_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_DNS_READ_TOKEN', 'DOCKERHUB_TOKEN', 'DOCKERHUB_USERNAME', 'MARKETPLACE_AZURE_CLIENT_ID', 'MARKETPLACE_AZURE_TENANT_ID', 'VSCE_PAT'];
   const used = new Set();
   for (const { file, name, job } of allJobs()) {
     const secrets = [...JSON.stringify(job).matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]);
     secrets.forEach(secret => used.add(secret));
-    if (secrets.includes('CLOUDFLARE_API_TOKEN')) assert.ok(file === 'on_release_published.yml' && name.startsWith('site-'), `${file}: ${name} holds the deploy token`);
+    if (secrets.includes('CLOUDFLARE_API_TOKEN')) assert.ok((file === 'on_release_published.yml' && name.startsWith('site-')) || (file === 'on_docs_change.yml' && name === 'deploy'), `${file}: ${name} holds the deploy token`);
   }
   assert.deepEqual([...used].filter(secret => !allowed.includes(secret)), []);
 });
