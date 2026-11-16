@@ -3,14 +3,14 @@ type: how-to
 audience: [owner, operator]
 owner: unfold
 last_verified: 2026-11-16
-verified_by: "Updated on 2026-11-16 for the move to GitHub against .github/workflows/on_release_preview.yml, on_release_train.yml, on_release_published.yml, scripts/release_preflight.py and scripts/publish_release.py; earlier repository claims checked against cutover-record.example.json, the Unfold /healthz route and the order-service test path; external registries, GitOps and cluster state were not re-checked"
+verified_by: "Updated on 2026-11-16 after the move to GitHub against the published release unfold-v0.4.0-rc.132 (GitHub release, anonymous GHCR pulls, Open VSX unfold-hq.unfold) and .github/workflows/on_release_preview.yml, on_release_train.yml, on_release_published.yml, scripts/release_preflight.py and scripts/publish_release.py; earlier repository claims checked against cutover-record.example.json, the Unfold /healthz route and the order-service test path; external registries, GitOps and cluster state were not re-checked"
 ---
 
 # First Unfold release and live test
 
-The project home moved from Forgejo to GitHub `unfold-hq/unfold`; [Move the home to GitHub](#move-the-home-to-github) at the end of this page records how. Releases now come only from GitHub Actions, so this playbook names GitHub settings, workflows and identities throughout.
+The project home moved from Forgejo to GitHub `unfold-hq/unfold` on 2026-11-16; [Move the home to GitHub](#move-the-home-to-github) at the end of this page records how. Releases come only from GitHub Actions, `UNFOLD_RELEASES_ENABLED` is `true`, and `unfold-v0.4.0-rc.132` is the first release published from GitHub.
 
-Use this playbook to transfer release authority to Unfold, publish the first qualified application versions, and test them in a controlled environment. The source migration is complete. Release cutover is not yet qualified: keep `UNFOLD_RELEASES_ENABLED` unset or `false` until the preparation gates below pass.
+Use this playbook to qualify a published release and test it in a controlled environment. Sections 2 to 6 are the gates for publishing a release; rerun them when the release path changes, with `UNFOLD_RELEASES_ENABLED` set back to `false` until they pass again.
 
 The [12 September readiness record](../research/2026-09-12-cutover-readiness.json) separates observed results from missing evidence. The [23 September readiness record](../research/2026-09-23-cutover-readiness.json) and its [summary](../research/2026-09-23-cutover-readiness.md) show which blockers are fixed and which owner actions remain. The [CI guide](ci.md) maps the current event entry points and publication guards. Copy the [execution record](cutover-record.example.json) for your test and replace its empty fields as each stage completes. Keep credentials, cookies, model prompts containing private data and database contents out of that record. A stage passes only when its evidence is attached; a skipped job is not a pass.
 
@@ -36,7 +36,7 @@ mise run release-check-github
 
 Record the matching successful run in [Unfold Actions](https://github.com/unfold-hq/unfold/actions). Local verification includes deterministic standalone and managed execution; it does not exercise a paid model or qualify ARM64 publication.
 
-From an up-to-date [homelab-cluster checkout](https://forgejo.webgrip.dev/webgrip/homelab-cluster), confirm the intended context before these read-only checks:
+From an up-to-date checkout of the GitOps repository that holds the environment's desired state, confirm the intended context before these read-only checks. The commands use the namespace `ploeg`; substitute yours:
 
 ```sh
 mise exec -- kubectl config current-context
@@ -47,7 +47,7 @@ mise exec -- kubectl -n ploeg get deployment unfold ploeg \
   -o 'custom-columns=NAME:.metadata.name,READY:.status.availableReplicas,IMAGE:.spec.template.spec.containers[*].image'
 ```
 
-Record the GitOps commit, both chart tags and digests, application image digests, Unfold workspace-image digest, extension version, configuration revision and persistent-volume identifiers. Get the workspace-image setting from the [Unfold HelmRelease](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/kubernetes/apps/ploeg/unfold/app/helmrelease.yaml). These recorded values are the rollback baseline; do not copy a dated version from this playbook.
+Record the GitOps commit, both chart tags and digests, application image digests, Unfold workspace-image digest, extension version, configuration revision and persistent-volume identifiers. Get the workspace-image setting from the Unfold HelmRelease in that repository. These recorded values are the rollback baseline; do not copy a dated version from this playbook.
 
 ## 2. Close the release blockers
 
@@ -128,12 +128,12 @@ Record destination failures individually. Stop before rollout if a required arti
 
 ## 7. Change the pilot through GitOps
 
-Prepare and review the desired-state change in [homelab-cluster](https://forgejo.webgrip.dev/webgrip/homelab-cluster). Pin the qualified artifacts together:
+Prepare and review the desired-state change in the environment's GitOps repository. Pin the qualified artifacts together:
 
 | Application | Values that must agree |
 | --- | --- |
 | Ploeg | Runs inside the Unfold release: the `ploeg` values of the Unfold HelmRelease below, at the version the Unfold chart carries. |
-| Unfold | [OCIRepository](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/kubernetes/apps/ploeg/unfold/app/ocirepository.yaml) chart tag and digest; [HelmRelease](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/kubernetes/apps/ploeg/unfold/app/helmrelease.yaml) workbench image tag/digest and workspace image tag/digest. |
+| Unfold | The OCIRepository's chart tag and digest; the HelmRelease's workbench image tag/digest and workspace image tag/digest. |
 
 Use the [published artifact paths](artifacts.md#published-identities). Run that repository's render/validation gate and inspect the rendered deployment before committing. Let Flux reconcile; do not use an imperative Helm upgrade or overwrite the deployment with `kubectl`.
 
@@ -195,39 +195,30 @@ Keep unattended work disabled until its separate admission, worker, accounting a
 
 ## Move the home to GitHub
 
-The procedure of the cutover day in [ADR-0055](../adr/adr-0055-github-unfold-hq-is-the-project-home.md). The transfer to `unfold-hq`, the archive of the Forgejo repository and its pull mirror were done on 2026-11-16. It takes about half a day. The owner runs every step that changes a forge, a registry or a shared remote; an agent prepares the pull requests and checks the result.
+The cutover day of [ADR-0055](../adr/adr-0055-github-unfold-hq-is-the-project-home.md), 2026-11-16. The owner ran every step that changed a forge, a registry or a shared remote; agents prepared the pull requests and checked the results. [Source mirrors and release artifacts](artifacts.md) lists where the pre-move versions stay.
 
 ### Before the day
 
-1. Claim the `unfold-hq` namespace on Open VSX with the account that owns `OVSX_PAT`, and check the token: `npx ovsx verify-pat unfold-hq -p <token>`. The next Forgejo release then publishes `unfold-hq.unfold` for the first time, which Trusted Publishing needs.
-2. Create the `unfold-hq-bot` GitHub App in the `unfold-hq` organisation with contents and pull-request write access, so Ploeg's `consumers` job can open the pin pull request there.
-3. Create the Cloudflare tokens: one that deploys the site Worker, and one that only reads the `unfoldhq.dev` zone.
-4. Move `ovsx` in `apps/unfold/extensions/vscode/package.json` to 1.4.0 or newer; the GitHub publisher refuses an older one.
-5. Merge or close every open pull request on Forgejo; they do not move.
+1. The `unfold-hq` namespace was claimed on Open VSX, so the last Forgejo release could publish `unfold-hq.unfold` for the first time, which Trusted Publishing needs.
+2. The `unfold-hq-bot` GitHub App was created in the `unfold-hq` organisation with contents and pull-request write access, so Ploeg's `consumers` job opens its pin pull request there.
+3. The Cloudflare tokens were created: one that deploys the site Worker, and one that only reads the `unfoldhq.dev` zone.
+4. `ovsx` in `apps/unfold/extensions/vscode/package.json` moved to 1.4.0 or newer; the GitHub publisher refuses an older one.
+5. Every open pull request on Forgejo was merged or closed; they did not move.
 
 ### On the day
 
-1. Freeze `development` on Forgejo and wait until the last `unfold-v…-rc.N` release is fully published.
-2. Check that the mirror is current: `git ls-remote` on Forgejo and on `github.com/webgrip/unfold` show the same `development`, `main` and tags.
-3. Push the notes once, from a checkout that has fetched them all from Forgejo: `git fetch origin '+refs/notes/*:refs/notes/*'`, then `git push https://github.com/webgrip/unfold.git 'refs/notes/*:refs/notes/*'`. Without them the version would restart and `verify-import.py` fails.
-4. Turn off Forgejo's push mirror, then transfer `webgrip/unfold` to `unfold-hq` on GitHub.
-5. Configure `unfold-hq/unfold`: Actions on; the secrets and variables in [CI and release workflows](ci.md#settings-secrets-and-variables), with `UNFOLD_RELEASES_ENABLED` left unset; auto-merge allowed; a ruleset on `development` and `main` that requires the `gate` check; private vulnerability reporting on; Open VSX Trusted Publishing for `unfold-hq/unfold` and `on_release_published.yml`; Ploeg's `RELEASE_CONSUMERS` entry pointing at `unfold-hq/unfold` with the App.
-6. Archive the Forgejo repository under a new name and create the pull mirror `webgrip/unfold-mirror` of `https://github.com/unfold-hq/unfold`, with Actions off.
-7. Point every checkout at GitHub: `git remote set-url origin git@github.com:unfold-hq/unfold.git`.
-8. Run [the release preview](../../.github/workflows/on_release_preview.yml) on `development`. Its preflight must pass before `UNFOLD_RELEASES_ENABLED` becomes `true`.
-9. Open the first pull request on GitHub: it deletes `.forgejo/`, `scripts/workflow-policy.test.cjs` and the Forgejo branches of the release scripts, and makes the documentation describe GitHub as the only forge.
-
-Until step 4 the move is undone by turning the push mirror back on. After it, transfer the repository back to `webgrip`; the archived Forgejo repository holds the full state.
+1. `development` was frozen on Forgejo until the last Forgejo release was fully published.
+2. The GitHub mirror was checked against Forgejo: the same `development`, `main` and tags.
+3. Every `refs/notes/*` ref was pushed to GitHub once, from a checkout that had fetched them all. Without them the version would have restarted and `verify-import.py` would fail.
+4. Forgejo's push mirror was turned off and the GitHub repository was transferred to `unfold-hq`.
+5. `unfold-hq/unfold` was configured: Actions on; the secrets and variables in [CI and release workflows](ci.md#settings-secrets-and-variables), with `UNFOLD_RELEASES_ENABLED` unset at first; auto-merge allowed; a ruleset on `development` and `main` that requires the `gate` check; private vulnerability reporting on; Open VSX Trusted Publishing for `unfold-hq/unfold` and `on_release_published.yml`; Ploeg's `RELEASE_CONSUMERS` entry pointing at `unfold-hq/unfold` with the App.
+6. The Forgejo repository was archived under a new name, and a one-way pull mirror of `https://github.com/unfold-hq/unfold` with Actions off took its place.
+7. Every checkout was pointed at GitHub: `git remote set-url origin git@github.com:unfold-hq/unfold.git`.
+8. [The release preview](../../.github/workflows/on_release_preview.yml) ran on `development`, and its preflight passed before `UNFOLD_RELEASES_ENABLED` became `true`.
+9. The first pull request on GitHub deleted `.forgejo/`, `scripts/workflow-policy.test.cjs` and the Forgejo branches of the release scripts, and made the documentation describe GitHub as the only forge.
 
 ### The first release from GitHub
 
-Set `UNFOLD_RELEASES_ENABLED=true` and let the next release train cut a candidate, or dispatch it. Then check:
+`unfold-v0.4.0-rc.132` is the first release published from GitHub. On 2026-11-16 its GitHub release was out of draft with the VSIX, its checksum, its sigstore bundle and `release-artifacts-unfold.json`; `ghcr.io/unfold-hq/unfold`, `ghcr.io/unfold-hq/unfold-agent` and `oci://ghcr.io/unfold-hq/charts/unfold` pulled anonymously at `0.4.0-rc.132`; and Open VSX served `unfold-hq.unfold` at that version. For a later first release, check the same and that `cosign verify` against the keyless identity in [Source mirrors and release artifacts](artifacts.md#published-identities) passes for both images and the chart, and that staging serves the site from the candidate.
 
-- `cosign verify` against the keyless identity in [Source mirrors and release artifacts](artifacts.md#published-identities) passes for both images and the chart;
-- the three GHCR packages are public and pull anonymously; the first run fails here until they are, and only its distribute job needs a rerun;
-- Open VSX serves `unfold-hq.unfold` at the release version;
-- the GitHub release is published and carries the VSIX, its checksum, its sigstore bundle and `release-artifacts-unfold.json`;
-- staging serves the site from the candidate.
-
-Then publish a last `webgrip.unfold` note, or a README line, that points people to `unfold-hq.unfold`.
-
+The pre-move extension on Open VSX stays at `0.4.0-rc.130` and does not move on its own. A last note on it, or a README line, that points people to `unfold-hq.unfold` is still open.
