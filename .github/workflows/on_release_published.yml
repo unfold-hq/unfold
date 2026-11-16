@@ -514,6 +514,7 @@ jobs:
           mise trust apps/site/mise.toml
           mise -C apps/site install
           mise -C apps/site exec -- npm --prefix ../unfold ci --omit=dev --no-audit --no-fund
+          mise -C apps/site exec -- corepack enable pnpm
           mise -C apps/site exec -- corepack pnpm install --frozen-lockfile
       - name: Build the release
         working-directory: apps/site
@@ -568,6 +569,7 @@ jobs:
           mise trust apps/site/mise.toml
           mise -C apps/site install
           mise -C apps/site exec -- npm --prefix ../unfold ci --omit=dev --no-audit --no-fund
+          mise -C apps/site exec -- corepack enable pnpm
           mise -C apps/site exec -- corepack pnpm install --frozen-lockfile
       - name: Build the release
         working-directory: apps/site
