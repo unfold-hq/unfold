@@ -87,18 +87,21 @@ jobs:
       - name: Install the site's locked wrangler
         env:
           COREPACK_ENABLE_DOWNLOAD_PROMPT: '0'
-        run: corepack pnpm --dir apps/site install --frozen-lockfile
+        working-directory: apps/site
+        run: corepack pnpm install --frozen-lockfile
       - name: Deploy the staging Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack pnpm --dir apps/site exec wrangler deploy --config ../../ops/docs/wrangler.toml --env staging
+        working-directory: apps/site
+        run: corepack pnpm exec wrangler deploy --config ../../ops/docs/wrangler.toml --env staging
       - name: Verify the staging pages, Markdown, revision and search
         run: uv run --frozen python scripts/docs-live.py --base https://docs-staging.unfoldhq.dev/
       - name: Deploy the production Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: corepack pnpm --dir apps/site exec wrangler deploy --config ../../ops/docs/wrangler.toml
+        working-directory: apps/site
+        run: corepack pnpm exec wrangler deploy --config ../../ops/docs/wrangler.toml
       - name: Verify the production pages, Markdown, revision and search
         run: uv run --frozen python scripts/docs-live.py
