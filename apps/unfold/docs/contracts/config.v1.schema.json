@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://forgejo.webgrip.dev/webgrip/unfold/raw/branch/development/apps/unfold/docs/contracts/config.v1.schema.json",
+  "$id": "https://docs.unfoldhq.dev/unfold/contracts/config.v1.schema.json",
   "title": "Unfold configuration file, version 1",
   "description": "The JSON file Unfold reads from --config or UNFOLD_CONFIG. Unfold checks the file against this schema at startup and lists every problem before it applies its own cross-field rules. Secrets never belong here: a key ending in Env names the environment variable that holds one. docs/operations/configuration.md is generated from this file and config.v1.environment.json.",
   "type": "object",

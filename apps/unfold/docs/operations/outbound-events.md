@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner, operator, contributor]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Written with the implementation on branch feat/outbound-events: src/outbound/*.ts, the /api/admin/webhooks route block in src/http.ts and public/views/webhooks.js. test/outbound-events.test.ts passed, including the Standard Webhooks signing vectors and a signed test event delivered to a local receiver. The AsyncAPI document parsed with @asyncapi/parser 3 without diagnostics. The verification snippets ran against that test's deliveries. The MCP Events section was written with the implementation on branch feat/mcp-events: src/mcp-events.ts and its hooks in src/outbound/, src/mcp.ts and src/mcp-http.ts; test/mcp-events.test.ts passed. Not checked: a live n8n, Zapier, Make, Slack or Teams receiver, and a live ChatGPT subscription."
+last_verified: 2026-11-16
+verified_by: "Written with the implementation on branch feat/outbound-events: src/outbound/*.ts, the /api/admin/webhooks route block in src/http.ts and public/views/webhooks.js. test/outbound-events.test.ts passed, including the Standard Webhooks signing vectors and a signed test event delivered to a local receiver. The AsyncAPI document parsed with @asyncapi/parser 3 without diagnostics. The verification snippets ran against that test's deliveries. The MCP Events section was written with the implementation on branch feat/mcp-events: src/mcp-events.ts and its hooks in src/outbound/, src/mcp.ts and src/mcp-http.ts; test/mcp-events.test.ts passed. Not checked: a live n8n, Zapier, Make, Slack or Teams receiver, and a live ChatGPT subscription. The schema address and the contract version table were checked on 2026-11-16 against src/outbound/catalogue.ts, src/outbound/contracts.ts and a local docs build that serves the schema at its $id; docs.unfoldhq.dev itself was not yet answering."
 ---
 
 # Outbound webhooks
@@ -11,6 +11,13 @@ verified_by: "Written with the implementation on branch feat/outbound-events: sr
 Unfold can tell your own tools when work moves: when a Work Item needs a person, when a pull request opens, when a Client Sign-off is recorded or when a Delivery is accepted. Each event goes to the URLs an administrator subscribed, as a [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) event in structured JSON mode, signed as a [Standard Webhooks](https://www.standardwebhooks.com/) message. Both are open specifications with libraries in most languages, so a receiver built on them works with any other producer that follows them.
 
 The contracts are [`events.asyncapi.yaml`](../contracts/events.asyncapi.yaml) (AsyncAPI 3.1) and [`cloudevent.v1.schema.json`](../contracts/cloudevent.v1.schema.json). Both are generated from `src/outbound/catalogue.ts` by `node scripts/outbound-contracts.ts`, and a test fails when they drift. The routes are in the [HTTP contract](../contracts/api.md#outbound-webhooks).
+
+Every event's `dataschema` is the schema's `$id`, `https://docs.unfoldhq.dev/unfold/contracts/cloudevent.v1.schema.json`, followed by `#/$defs/data/<type>`. The documentation site serves the schema at that address ([ADR-0066](../adrs/0066-unfold-identifies-its-published-schemas-by-their-address-on-docs-unfoldhq-dev.md)). Route and filter on `type`, which never changes for an event type; `dataschema` names where to read the schema and can change with a contract version. The AsyncAPI document's `info.version` is the contract version.
+
+| Contract version | Since | Change |
+| --- | --- | --- |
+| 1.1.0 | 2026-11-16 | `dataschema` and the schema's `$id` moved from the previous forge's raw-file address to `https://docs.unfoldhq.dev/unfold/contracts/cloudevent.v1.schema.json`. Types, attributes and data are unchanged. |
+| 1.0.0 | 2026-10-30 | First published catalogue. |
 
 ## Turn it on
 
@@ -56,7 +63,7 @@ webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=
 
 {"specversion":"1.0","id":"ploeg-48211","source":"/tenants/agency/clients/shop","type":"dev.unfold.work_item.needs_you",
  "subject":"work-items/412","time":"2026-10-30T10:05:00.000Z","datacontenttype":"application/json",
- "dataschema":"https://forgejo.webgrip.dev/webgrip/unfold/raw/branch/development/apps/unfold/docs/contracts/cloudevent.v1.schema.json#/$defs/data/work_item.needs_you",
+ "dataschema":"https://docs.unfoldhq.dev/unfold/contracts/cloudevent.v1.schema.json#/$defs/data/work_item.needs_you",
  "tenant":"agency","client":"shop",
  "data":{"workItem":{"id":"412","title":"Show the delivery window","team":"silver","state":"needs_human","externalRef":"VIK-88",
    "trackerUrl":"https://tracker.example/88","unfoldUrl":"https://unfold.example/#work/412"},"reason":"the reviewer escalated to a person"}}

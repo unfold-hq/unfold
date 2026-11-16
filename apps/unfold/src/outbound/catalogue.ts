@@ -3,7 +3,7 @@ import type { PloegEvent } from '../ploeg.ts';
 /** The prefix of every event type Unfold publishes. */
 export const eventTypePrefix = 'dev.unfold.';
 /** The URI of the CloudEvent schema every published event conforms to. */
-export const cloudEventSchemaUrl = 'https://forgejo.webgrip.dev/webgrip/unfold/raw/branch/development/apps/unfold/docs/contracts/cloudevent.v1.schema.json';
+export const cloudEventSchemaUrl = 'https://docs.unfoldhq.dev/unfold/contracts/cloudevent.v1.schema.json';
 
 type JsonSchema = Record<string, unknown>;
 

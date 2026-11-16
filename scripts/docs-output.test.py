@@ -78,6 +78,34 @@ class PublishedDocumentation(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, 'Missing legacy redirect'):
             output.validate(self.site, self.staging)
 
+    def write_schema(self, identifier):
+        schema = self.staging / 'unfold/contracts/event.v1.schema.json'
+        schema.parent.mkdir(parents=True, exist_ok=True)
+        schema.write_text(json.dumps({'$id': identifier}))
+        return schema
+
+    def test_schema_is_published_at_its_id(self):
+        schema = self.write_schema('https://example.test/unfold/unfold/contracts/event.v1.schema.json')
+        with self.assertRaisesRegex(AssertionError, 'Missing or stale schema'):
+            output.validate(self.site, self.staging)
+        published = self.site / 'unfold/contracts/event.v1.schema.json'
+        published.parent.mkdir(parents=True, exist_ok=True)
+        published.write_bytes(schema.read_bytes())
+        output.validate(self.site, self.staging)
+        published.write_text('{}')
+        with self.assertRaisesRegex(AssertionError, 'Missing or stale schema'):
+            output.validate(self.site, self.staging)
+
+    def test_schema_id_on_the_site_must_name_its_path(self):
+        self.write_schema('https://example.test/unfold/contracts/event.v1.schema.json')
+        with self.assertRaisesRegex(AssertionError, 'not where the site publishes it'):
+            output.validate(self.site, self.staging)
+
+    def test_schema_with_an_id_elsewhere_is_not_checked(self):
+        for identifier in ['urn:example:event:1', 'https://other.test/event.v1.schema.json']:
+            self.write_schema(identifier)
+            self.assertEqual(output.published_schemas(self.staging, 'https://example.test/unfold/'), [])
+
     def test_mismatched_revision_blocks_publish(self):
         (self.site / 'docs-sources.json').write_text('{}')
         with self.assertRaisesRegex(AssertionError, 'Mismatched source'):
