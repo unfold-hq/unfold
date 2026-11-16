@@ -195,7 +195,7 @@ Each agent workspace is one pod. `workspaceCpu` and `workspaceMemory` are its li
 
 In the verifier namespace the chart renders:
 
-- a NetworkPolicy selecting `dev.webgrip.unfold/network: none` with `policyTypes: [Ingress, Egress]` and no rules, which the verifier checks for before each verification and probes from inside each pod;
+- two NetworkPolicies with `policyTypes: [Ingress, Egress]` and no rules: `unfold-verifier-isolated` selects `unfoldhq.dev/network: none`, and `unfold-verifier-deny-all` selects the retiring `dev.webgrip.unfold/network: none`. Check pods carry both labels, so either policy isolates them. The verifier checks for one before each verification and probes from inside each pod. The next release drops the retiring label and its policy ([moving to Unfold's own keys](../../../docs/operations/unfold-owned-keys.md));
 - a Role bound to the workbench service account: `pods` get, create and delete; `pods/attach` and `pods/exec` get and create (the WebSocket upgrade is a GET; newer API servers authorize it as create); `networkpolicies` list. It has no `pods/log`, Secret or list-pods access.
 
 The chart refuses to render when `workspaceAgentSecrets` lists `credentialsSecret`, `delivery.publisher.existingSecret`, `decider.existingSecret`, a `credentialRefs` Secret or a Secret `externalSecrets` renders.

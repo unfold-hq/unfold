@@ -33,6 +33,7 @@ type Scenario = {
 const nodeImage = 'harbor.example/library/node@sha256:' + '1'.repeat(64);
 const helperImage = 'harbor.example/library/busybox@sha256:' + '2'.repeat(64);
 const denyAll = { metadata: { name: 'unfold-verifier-deny-all' }, spec: { podSelector: { matchLabels: { 'dev.webgrip.unfold/network': 'none' } }, policyTypes: ['Ingress', 'Egress'] } };
+const isolated = { metadata: { name: 'unfold-verifier-isolated' }, spec: { podSelector: { matchLabels: { 'unfoldhq.dev/network': 'none' } }, policyTypes: ['Ingress', 'Egress'] } };
 const verifier: KubernetesVerifierConfig = { kind: 'kubernetes', namespace: 'unfold-verifier', runtimeClassName: 'kata', image: helperImage, resources: { requests: { cpu: '100m', memory: '128Mi' }, limits: { cpu: '1', memory: '512Mi' } }, timeoutSeconds: 60, networkProbe: { host: '10.96.0.1', port: 443 } };
 
 function readArchive(archive: Buffer): ArchiveEntry[] {
@@ -150,7 +151,15 @@ test('a check pod runs under kata with no service account token, no network, a r
   assert.equal(pod.spec.activeDeadlineSeconds, verifier.timeoutSeconds);
   assert.deepEqual(pod.spec.nodeSelector, { pool: 'worker' });
   for (const [key, value] of Object.entries(verifierPodLabels)) assert.equal(pod.metadata.labels[key], value, key);
+  for (const prefix of ['unfoldhq.dev', 'dev.webgrip.unfold']) {
+    assert.equal(pod.metadata.labels[`${prefix}/network`], 'none', prefix);
+    assert.equal(pod.metadata.labels[`${prefix}/purpose`], 'verifier', prefix);
+    assert.equal(pod.metadata.labels[`${prefix}/candidate`], candidate.canonicalSha, prefix);
+    assert.equal(pod.metadata.annotations[`${prefix}/policy`], candidate.policySha, prefix);
+    assert.equal(pod.metadata.annotations[`${prefix}/check`], policy.checks[0].id, prefix);
+  }
   assert.ok(networkIsolated([denyAll], pod.metadata.labels));
+  assert.ok(networkIsolated([isolated], pod.metadata.labels));
   assert.equal(pod.spec.securityContext.seccompProfile.type, 'RuntimeDefault');
   for (const container of [...pod.spec.initContainers, ...pod.spec.containers]) {
     assert.equal(container.securityContext.readOnlyRootFilesystem, true, container.name);
@@ -220,7 +229,11 @@ test('preflight refuses a namespace without a deny-all policy for check pods, or
   assert.equal(networkIsolated([denyAll]), true);
   assert.equal(networkIsolated([{ spec: { ...denyAll.spec, policyTypes: ['Ingress'] } }]), false);
   assert.equal(networkIsolated([denyAll, { spec: { podSelector: {}, policyTypes: ['Egress'], egress: [{ to: [{ ipBlock: { cidr: '0.0.0.0/0' } }] }] } }]), false);
-  assert.equal(networkIsolated([{ spec: { podSelector: { matchExpressions: [{ key: 'dev.webgrip.unfold/network', operator: 'In', values: ['none'] }] }, policyTypes: ['Ingress', 'Egress'] } }]), true);
+  for (const key of ['unfoldhq.dev/network', 'dev.webgrip.unfold/network'])
+    assert.equal(networkIsolated([{ spec: { podSelector: { matchExpressions: [{ key, operator: 'In', values: ['none'] }] }, policyTypes: ['Ingress', 'Egress'] } }]), true, key);
+  assert.equal(networkIsolated([isolated]), true, 'the deny-all policy on the new key alone isolates check pods');
+  assert.equal(networkIsolated([denyAll]), true, 'the deny-all policy on the retiring key alone still isolates check pods');
+  assert.equal(networkIsolated([denyAll, { spec: { podSelector: { matchLabels: { 'unfoldhq.dev/network': 'none' } }, policyTypes: ['Egress'], egress: [{}] } }]), false, 'a policy on the new key that lets traffic out undoes isolation on the retiring key');
   const previous = process.env.KUBERNETES_SERVICE_HOST; delete process.env.KUBERNETES_SERVICE_HOST;
   try { await assert.rejects(kubernetesVerifierPreflight({ ...verifier, networkProbe: undefined }, client), { code: 'verifier_network_probe_unset' }); }
   finally { if (previous !== undefined) process.env.KUBERNETES_SERVICE_HOST = previous; }
@@ -290,10 +303,12 @@ test('the chart renders delivery the server accepts: kubernetes verifier, inputs
   assert.match(rendered.stdout, /- name: UNFOLD_PUBLISHER_TOKEN\n\s+valueFrom:\n\s+secretKeyRef:\n\s+name: unfold-publisher\n\s+key: token/);
   assert.match(rendered.stdout, /- name: delivery-inputs\n\s+mountPath: \/var\/lib\/unfold-delivery\n\s+readOnly: true/);
   assert.ok(delivery.policies[0].approvedBaseBundle.startsWith('/var/lib/unfold-delivery/'));
-  const policy = /kind: NetworkPolicy\n[\s\S]*?(?=\n---|$)/.exec(rendered.stdout)![0];
-  assert.match(policy, /namespace: unfold-verifier/);
-  assert.match(policy, /matchLabels:\n\s+dev\.webgrip\.unfold\/network: none\n\s+policyTypes: \[Ingress, Egress\]\s*$/);
-  assert.ok(networkIsolated([{ spec: { podSelector: { matchLabels: { 'dev.webgrip.unfold/network': 'none' } }, policyTypes: ['Ingress', 'Egress'] } }]));
+  const policies = [...rendered.stdout.matchAll(/kind: NetworkPolicy\n[\s\S]*?(?=\n---|$)/g)].map(match => match[0]).filter(policy => /namespace: unfold-verifier/.test(policy));
+  assert.equal(policies.length, 2, 'one deny-all policy per network label key');
+  const selecting = (key: string) => policies.find(policy => new RegExp(`matchLabels:\\n\\s+${key.replaceAll('.', '\\.')}\\/network: none\\n\\s+policyTypes: \\[Ingress, Egress\\]\\s*$`).test(policy));
+  assert.match(selecting('unfoldhq.dev') ?? '', /name: unfold-verifier-isolated/);
+  assert.match(selecting('dev.webgrip.unfold') ?? '', /name: unfold-verifier-deny-all/);
+  for (const key of ['unfoldhq.dev/network', 'dev.webgrip.unfold/network']) assert.ok(networkIsolated([{ spec: { podSelector: { matchLabels: { [key]: 'none' } }, policyTypes: ['Ingress', 'Egress'] } }]), key);
   const role = /kind: Role\nmetadata:\n\s+name: unfold-verifier\n[\s\S]*?(?=\n---)/.exec(rendered.stdout)![0];
   assert.match(role, /resources: \[pods\]\n\s+verbs: \[get, create, delete\]/);
   assert.match(role, /resources: \[pods\/attach, pods\/exec\]\n\s+verbs: \[get, create\]/);
