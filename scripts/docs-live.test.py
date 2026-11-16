@@ -49,6 +49,12 @@ class LivePublication(unittest.TestCase):
         self.responses['llms.txt'] = b'[Home](https://staging.example.test/unfold/index.md)'
         self.assertEqual(self.verify('https://staging.example.test/unfold/')['schemas'], 1)
 
+    def test_staging_serves_the_machine_index_that_names_production(self):
+        self.assertEqual(self.verify('https://staging.example.test/unfold/')['machine_index_links'], 1)
+        self.responses['llms.txt'] = b'[Home](https://elsewhere.example.test/index.md)'
+        with self.assertRaisesRegex(AssertionError, 'Machine index leaves the site'):
+            self.verify('https://staging.example.test/unfold/')
+
     def test_directory_redirect_must_keep_the_public_prefix(self):
         url = 'https://example.test/unfold/unfold'
         with patch.object(live, 'urlopen') as request:
