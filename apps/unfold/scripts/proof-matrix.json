@@ -49,16 +49,17 @@
     {
       "group": "Trackers",
       "integration": "GitHub issues",
-      "claims": ["tracker:github"],
-      "promise": "Reads a repository's issues on GitHub.com, a GHE.com tenant or an Enterprise Server",
+      "claims": ["tracker:github", "report-a-problem:github"],
+      "promise": "Reads a repository's issues on GitHub.com, a GHE.com tenant or an Enterprise Server, and files Report a problem issues",
       "doc": "docs/operations/task-connections.md",
       "tests": [
-        { "file": "test/tasks.test.ts", "names": ["adapter reads a scoped page and native task using its documented authorization and pagination", "GitHub sources accept a GHE.com tenant API root"] }
+        { "file": "test/tasks.test.ts", "names": ["adapter reads a scoped page and native task using its documented authorization and pagination", "GitHub sources accept a GHE.com tenant API root"] },
+        { "file": "test/github-issues.test.ts", "names": ["a report is filed as a GitHub issue with the reported-in-app label", "a filed GitHub issue is followed"] }
       ],
       "runs": [{ "task": "mise:browser", "flow": "tasks" }],
       "live": [],
       "desktop": [],
-      "gap": "No hand-off and no Report a problem filing, and never run against real GitHub."
+      "gap": "No hand-off; Report a problem files no attachments, because GitHub's REST API takes no issue uploads; never run against real GitHub."
     },
     {
       "group": "Trackers",

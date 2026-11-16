@@ -5,7 +5,7 @@ import type { TaskSourceConfig } from './tasks.ts';
 import type { Store, StoredReport, StoredReportFile, StoredReportIssue } from './store.ts';
 import { JobQueue } from './jobs/queue.ts';
 import { JobWorker, type JobOutcome } from './jobs/worker.ts';
-import { apiRoot, attachToIssue, canUpdateIssueBody, commentOnIssue, createIssue, describeIssueTarget, filesIssues, issueBodyFormat, issueProviderLabels, issueProviderNames, readIssueState, reportTargetProject, TaskError, updateIssueBody, type IssueFile, type IssueState } from './tasks.ts';
+import { apiRoot, attachToIssue, canAttachToIssue, canUpdateIssueBody, commentOnIssue, createIssue, describeIssueTarget, filesIssues, issueBodyFormat, issueProviderLabels, issueProviderNames, readIssueState, reportTargetProject, TaskError, updateIssueBody, type IssueFile, type IssueState } from './tasks.ts';
 
 export const maxReportBytes = 8 * 1024 * 1024;
 export const maxReportFiles = 5;
@@ -266,8 +266,10 @@ function heading(report: StoredReport): string {
   return kindHeadings[report.body.kind as ReportKind] ?? kindHeadings.broken;
 }
 
-/** The Markdown body of a filed issue: what happened, what was expected, the page facts and, once uploaded, the screenshot. */
-export function markdownBody(report: StoredReport, version: string, baseUrl?: string, screenshotUrl?: string, attachments: string[] = []): string {
+const unattachedWords = 'Not attached, because this tracker takes no file uploads';
+
+/** The Markdown body of a filed issue: what happened, what was expected, the page facts, once uploaded the screenshot, and the files a tracker without uploads did not take. */
+export function markdownBody(report: StoredReport, version: string, baseUrl?: string, screenshotUrl?: string, attachments: string[] = [], unattached: string[] = []): string {
   const happened = String(report.body.happened ?? '');
   const expected = String(report.body.expected ?? '');
   const rows = facts(report, version, baseUrl).map(([name, value, href]) => `| ${name} | ${href ? `[${markdownText(value)}](${href})` : markdownText(value)} |`);
@@ -277,16 +279,17 @@ export function markdownBody(report: StoredReport, version: string, baseUrl?: st
     '| | |', '| --- | --- |', ...rows, '',
     ...(screenshotUrl ? [`![Screenshot](${screenshotUrl})`, ''] : []),
     ...(attachments.length ? [`Attached: ${attachments.join(', ')}.`, ''] : []),
+    ...(unattached.length ? [`${unattachedWords}: ${unattached.join(', ')}.`, ''] : []),
     '_Filed with Report a problem in Unfold._', '',
   ].join('\n');
 }
 
 /** The HTML description of a filed task with the same sections, for trackers that render HTML; the screenshot travels as an attachment. */
-export function htmlBody(report: StoredReport, version: string, baseUrl?: string, attachments: string[] = []): string {
+export function htmlBody(report: StoredReport, version: string, baseUrl?: string, attachments: string[] = [], unattached: string[] = []): string {
   const paragraphs = (value: string) => value.split(/\n{2,}/).map(part => `<p>${htmlText(part).replace(/\n/g, '<br>')}</p>`).join('');
   const expected = String(report.body.expected ?? '');
   const rows = facts(report, version, baseUrl).map(([name, value, href]) => `<tr><th>${htmlText(name)}</th><td>${href ? `<a href="${htmlText(href)}">${htmlText(value)}</a>` : htmlText(value)}</td></tr>`).join('');
-  return `<h2>${heading(report)}</h2>${paragraphs(String(report.body.happened ?? ''))}${expected ? `<h2>What I expected</h2>${paragraphs(expected)}` : ''}<table>${rows}</table>${attachments.length ? `<p>Attached: ${htmlText(attachments.join(', '))}.</p>` : ''}<p><em>Filed with Report a problem in Unfold.</em></p>`;
+  return `<h2>${heading(report)}</h2>${paragraphs(String(report.body.happened ?? ''))}${expected ? `<h2>What I expected</h2>${paragraphs(expected)}` : ''}<table>${rows}</table>${attachments.length ? `<p>Attached: ${htmlText(attachments.join(', '))}.</p>` : ''}${unattached.length ? `<p>${unattachedWords}: ${htmlText(unattached.join(', '))}.</p>` : ''}<p><em>Filed with Report a problem in Unfold.</em></p>`;
 }
 
 const needsInfoLabel = /needs?[\s_-]*(more[\s_-]*)?info|question|waiting[\s_-]*(for|on)[\s_-]*(reporter|author)/i;
@@ -341,8 +344,8 @@ function likeness(a: Set<string>, b: Set<string>): number {
 }
 
 /** The Markdown comment that adds a repeat report to the issue it repeats. */
-export function joinedMarkdown(report: StoredReport, version: string, baseUrl?: string, screenshotUrl?: string, attachments: string[] = []): string {
-  return `**Someone else hit this too.**\n\n${markdownBody(report, version, baseUrl, screenshotUrl, attachments)}`;
+export function joinedMarkdown(report: StoredReport, version: string, baseUrl?: string, screenshotUrl?: string, attachments: string[] = [], unattached: string[] = []): string {
+  return `**Someone else hit this too.**\n\n${markdownBody(report, version, baseUrl, screenshotUrl, attachments, unattached)}`;
 }
 
 /**
@@ -546,8 +549,11 @@ export class ReportService {
 
   private async file(report: StoredReport, source: TaskSourceConfig): Promise<StoredReportIssue> {
     const project = this.config.reports!.project;
-    const files = this.store.reportFiles(report.id);
+    const stored = this.store.reportFiles(report.id);
+    const attaching = canAttachToIssue(source);
+    const files = attaching ? stored : [];
     const names = files.map(file => file.name);
+    const unattached = attaching ? [] : stored.map(file => file.name);
     const baseUrl = this.config.baseUrl;
     let issue = report.issue;
     const repeated = !issue && typeof report.body.duplicateOf === 'string' ? this.store.report(report.body.duplicateOf) : undefined;
@@ -556,7 +562,7 @@ export class ReportService {
       this.store.updateReport(report.id, { status: 'retrying', issue, url: issue.url, nextAttemptAt: report.nextAttemptAt ?? null });
     }
     if (!issue) {
-      const created = await createIssue(source, project, report.title, issueBodyFormat(source) === 'markdown' ? markdownBody(report, this.version, baseUrl, undefined, names) : htmlBody(report, this.version, baseUrl, names));
+      const created = await createIssue(source, project, report.title, issueBodyFormat(source) === 'markdown' ? markdownBody(report, this.version, baseUrl, undefined, names, unattached) : htmlBody(report, this.version, baseUrl, names, unattached));
       issue = { ...created, attached: [] };
       this.store.updateReport(report.id, { status: 'retrying', issue, url: issue.url, nextAttemptAt: report.nextAttemptAt ?? null });
     }
@@ -568,12 +574,12 @@ export class ReportService {
     }
     if (issue.joined) {
       if (!issue.commented) {
-        await commentOnIssue(source, project, issue, issueBodyFormat(source) === 'markdown' ? joinedMarkdown(report, this.version, baseUrl, issue.screenshotUrl, names.filter(name => name !== 'screenshot.png' || !issue!.screenshotUrl)) : `<p><strong>Someone else hit this too.</strong></p>${htmlBody(report, this.version, baseUrl, names)}`);
+        await commentOnIssue(source, project, issue, issueBodyFormat(source) === 'markdown' ? joinedMarkdown(report, this.version, baseUrl, issue.screenshotUrl, names.filter(name => name !== 'screenshot.png' || !issue!.screenshotUrl), unattached) : `<p><strong>Someone else hit this too.</strong></p>${htmlBody(report, this.version, baseUrl, names, unattached)}`);
         issue = { ...issue, commented: true };
       }
       return issue;
     }
-    if (canUpdateIssueBody(source) && issue.screenshotUrl) await updateIssueBody(source, project, issue, markdownBody(report, this.version, baseUrl, issue.screenshotUrl, names.filter(name => name !== 'screenshot.png')));
+    if (canUpdateIssueBody(source) && issue.screenshotUrl) await updateIssueBody(source, project, issue, markdownBody(report, this.version, baseUrl, issue.screenshotUrl, names.filter(name => name !== 'screenshot.png'), unattached));
     return issue;
   }
 

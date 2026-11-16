@@ -573,7 +573,7 @@ Where Report a problem files: false turns it off; { source, project? } uses a ta
 | `reports.source` | string |  | Task source to file through. |
 | `reports.project` | string |  | Repository or project on the report tracker; the source's own when absent. |
 | `reports.acknowledgement` | string |  | One line the success screen shows after a report is filed. |
-| `reports.provider` | one of `forgejo`, `vikunja` |  | Tracker reports are filed on. |
+| `reports.provider` | one of `forgejo`, `github`, `vikunja`, `jira` |  | Tracker reports are filed on. |
 | `reports.baseUrl` | string |  | Tracker API root. |
 | `reports.tokenEnv` | string |  | Environment variable holding the tracker token; unset keeps reports without filing them. |
 

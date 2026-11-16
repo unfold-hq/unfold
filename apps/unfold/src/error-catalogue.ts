@@ -396,6 +396,7 @@ const rows: Record<ErrorArea, readonly Row[]> = {
     ['report_unknown', [404], 'There is no such report of yours.', 'Open your reports from Report a problem.'],
     ['report_not_filed', [409], 'The report is not filed yet.', 'Add to it once it is filed.'],
     ['report_provider_unsupported', [422], 'Report a problem cannot file into this tracker.', 'An administrator must choose a tracker the message names.'],
+    ['report_attachments_unsupported', [422], 'The report tracker takes no file uploads, so the files stay out of the issue.', 'Nothing to do: the issue names the files that were not attached.'],
     ['report_target_missing', [404], 'The tracker cannot find the project reports go to.', 'An administrator must check the reports project.'],
     ['report_write_forbidden', [502], 'The tracker refused the workbench\'s token.', 'An administrator must give the token permission to create issues and attachments.'],
     ['report_tracker_failed', [502], 'The tracker did not file the report.', 'Nothing is lost: Unfold keeps the report and files it when the tracker answers.'],
