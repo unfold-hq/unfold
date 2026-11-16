@@ -56,7 +56,7 @@ EXPOSE 4096
 ENV OPENCODE_DISABLE_AUTOUPDATE=true OPENCODE_DISABLE_SHARE=true
 LABEL org.opencontainers.image.title="Unfold agent workspace" \
     org.opencontainers.image.description="OpenCode ${OPENCODE_VERSION} server for one Unfold session: Wolfi base, git, bash, node; no package manager network at run time." \
-    org.opencontainers.image.source="https://github.com/webgrip/unfold" \
+    org.opencontainers.image.source="https://github.com/unfold-hq/unfold" \
     org.opencontainers.image.vendor="WebGrip" \
     org.opencontainers.image.licenses="Apache-2.0" \
     org.opencontainers.image.created="${IMAGE_CREATED}" \
