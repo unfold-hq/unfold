@@ -108,7 +108,6 @@
     "**/test/fixtures/**",
     "**/tests/**",
     "**/__fixtures__/**",
-    "apps/*/.forgejo/**",
     "apps/*/.github/**",
     ".mise/**"
   ],
@@ -155,7 +154,7 @@
     },
     {
       "customType": "regex",
-      "description": "Local checks run the CI toolchain images by tag outside any workflow file. Managing them here keeps release-check and docs-site-check on the image CI uses; a package rule puts these updates on the branch that moves the workflow pins.",
+      "description": "Local checks run the CI toolchain images by tag outside any workflow file. Managing them here keeps docs-site-check on a current image; a package rule puts these updates on the branch that moves the workflow pins.",
       "managerFilePatterns": [
         "/^mise\\.toml$/",
         "/^scripts/docs-site\\.sh$/"
@@ -170,7 +169,6 @@
       "customType": "regex",
       "description": "Composite actions take their BuildKit, SBOM scanner and binfmt images as `with:` strings, which the github-actions manager does not read. Tag and digest are captured so the digest stays managed.",
       "managerFilePatterns": [
-        "/^\\.forgejo/workflows/[^/]+\\.ya?ml$/",
         "/^\\.github/workflows/[^/]+\\.ya?ml$/"
       ],
       "matchStrings": [
@@ -341,9 +339,8 @@
       ]
     },
     {
-      "description": "A pin of the former host's shared tooling in a file the repository never ships changes how the repository is built, not what it ships, so it lands as ci(tooling) whatever the update type and never cuts a release. Those files are the CI files (.forgejo/** and .github/**: reusable workflow and composite action refs, toolchain images) and mise.toml (a task that runs a toolchain image, a tool it installs). When these bumps landed as fix(deps), Unfold released for a tooling change. A package in a file that ships (package.json, a Dockerfile) keeps the commit type of its update type. The rule goes when those pins leave the repository.",
+      "description": "A pin of the former host's shared tooling in a file the repository never ships changes how the repository is built, not what it ships, so it lands as ci(tooling) whatever the update type and never cuts a release. Those files are the CI files (.github/**: action refs and toolchain images) and mise.toml (a task that runs a toolchain image, a tool it installs). When these bumps landed as fix(deps), Unfold released for a tooling change. A package in a file that ships (package.json, a Dockerfile) keeps the commit type of its update type. The rule goes when those pins leave the repository.",
       "matchFileNames": [
-        ".forgejo/**",
         ".github/**",
         "**/mise.toml",
         "**/.mise.toml"
@@ -744,14 +741,6 @@
       "pinDigests": false
     },
     {
-      "description": "Forgejo-resolved workflow pins keep the CI-only commit shape. A runner-level Forgejo overlay sets it too, but runner-level config is applied before the per-update-type commit types above, which then win.",
-      "matchDatasources": [
-        "gitea-tags"
-      ],
-      "semanticCommitType": "ci",
-      "semanticCommitScope": "actions"
-    },
-    {
       "description": "The agent image and the mise pin must move together: one OpenCode version is what the workbench, the probe and the image share. The npm package names no repository, so Renovate cannot find its release notes by itself; naming the source puts them in the pull request, where the person merging and the Run that explains the update (Ploeg ADR-0106) read them.",
       "matchPackageNames": [
         "opencode-ai"
@@ -772,7 +761,7 @@
       "groupName": "landscape renderer",
       "groupSlug": "landscape-renderer",
       "prBodyNotes": [
-        "This update stays red until the landscape explorer is rebuilt: run `mise run landscape` on this branch and push the two changed files under `docs/landscape/`. Forgejo then merges it on a green gate."
+        "This update stays red until the landscape explorer is rebuilt: run `mise run landscape` on this branch and push the two changed files under `docs/landscape/`. It then merges on a green gate."
       ]
     },
     {
@@ -902,7 +891,7 @@
       }
     },
     {
-      "description": "The tooling rules above give pins of the former host's packages under .forgejo/** their own webgrip CI dependencies branch, committed as ci(tooling). The local-check pins of the same images sit in mise.toml and scripts/docs-site.sh, outside that rule, so they moved on a separate fix(deps) branch: development then ran the release jobs on the new semantic-release image while release-check still named the old one, and the workflow policy test failed the release. This rule moves both on one branch, and the ci type keeps that branch from cutting a release.",
+      "description": "The tooling rules above give pins of the former host's packages in CI files their own webgrip CI dependencies branch, committed as ci(tooling). The local-check pins of the same images sit in mise.toml and scripts/docs-site.sh, outside that rule, so they moved on a separate fix(deps) branch: development then ran the release jobs on the new semantic-release image while release-check still named the old one, and the workflow policy test failed the release. This rule moves both on one branch, and the ci type keeps that branch from cutting a release.",
       "matchManagers": ["custom.regex"],
       "matchFileNames": ["mise.toml", "scripts/docs-site.sh"],
       "matchPackageNames": ["harbor.webgrip.dev/webgrip/semantic-release", "harbor.webgrip.dev/webgrip/techdocs-builder"],
@@ -915,7 +904,6 @@
     {
       "description": "Pins of the former host's packages in files the repository never ships (CI files and mise.toml) share one branch, majors included. Renovate gives a branch the highest commit type among its updates (fix beats ci), so a branch shared with anything that ships would commit these pins as fix(deps) and cut a release. separateMajorMinor is off for these pins, so each pin moves straight to the newest release instead of splitting into two branches that conflict. A branch that holds a major waits for a person.",
       "matchFileNames": [
-        ".forgejo/**",
         ".github/**",
         "**/mise.toml",
         "**/.mise.toml"
