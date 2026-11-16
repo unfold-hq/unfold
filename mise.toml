@@ -195,10 +195,6 @@ run = [
 ]
 description = "Test the GitHub Actions workflows, their release policy and release isolation with the repository's own release toolchain, then lint them"
 
-[tasks.docs-site-check]
-run = "sh scripts/docs-site.sh"
-description = "Build and scan the Zensical publishing output in the pinned CI image"
-
 [tasks.docs-stale]
 run = "uv run --frozen python scripts/docs-stale.py"
 description = "List current pages whose last_verified is older than 180 days; reports only"

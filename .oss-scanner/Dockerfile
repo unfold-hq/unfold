@@ -1,10 +1,15 @@
-# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
-# renovate: datasource=docker depName=node versioning=docker
-ARG NODE_IMAGE=docker.io/library/node:24.22.1-trixie@sha256:016f604a11c4c725f0a4c62e29ff11adab153d297bf97046c9bf2ddb9f1011d3
+ARG REGISTRY_CHAINGUARD=cgr.dev
+# renovate: datasource=docker depName=cgr.dev/chainguard/wolfi-base versioning=docker
+ARG WOLFI_BASE_IMAGE=${REGISTRY_CHAINGUARD}/chainguard/wolfi-base:latest@sha256:2c12da5496e21e99003b3db3b9246f025e53d533c4df334205391260f1e8f85b
 
-FROM ${NODE_IMAGE}
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 \
-    && rm -rf /var/lib/apt/lists/*
+FROM ${WOLFI_BASE_IMAGE}
+RUN printf 'https://packages.wolfi.dev/os\n' > /etc/apk/repositories \
+ && apk upgrade --no-cache \
+ && apk add --no-cache bash ca-certificates-bundle git python-3.13 python3-as-3.13 nodejs-24 npm \
+ && node --version | grep -q '^v24\.' \
+ && python3 --version \
+ && addgroup -g 1000 node \
+ && adduser -D -u 1000 -G node -h /home/node -s /bin/bash node
 
 COPY --chown=node:node . /src
 USER node

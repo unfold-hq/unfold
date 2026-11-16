@@ -197,7 +197,7 @@
       "type": "execution.paused",
       "occurredAt": "2026-09-09T12:01:00Z",
       "recordedAt": "2026-09-09T12:01:00.010Z",
-      "tenantId": "webgrip",
+      "tenantId": "acme",
       "aggregate": {
         "kind": "delivery_attempt",
         "id": "33333333-3333-4333-8333-333333333333",

@@ -1,6 +1,6 @@
 # Site architecture
 
-The site is a static Astro build with one small Worker for the sign-up form. Every page is HTML at build time and works without JavaScript; the scripts that exist enhance it: the theme toggle and its pre-paint script, the Shift explorer, mobile navigation, and the form's inline confirmation. The toolchain comes from the Webgrip estate's shared packages (`@webgrip/tsconfig`, `@webgrip/eslint-config-astro`, `@webgrip/prettier-config` and `@webgrip/astro-site-toolkit`), pinned to the versions webgrip.nl uses, so the three Astro sites keep the same rules.
+The site is a static Astro build with one small Worker for the sign-up form. Every page is HTML at build time and works without JavaScript; the scripts that exist enhance it: the theme toggle and its pre-paint script, the Shift explorer, mobile navigation, and the form's inline confirmation. The toolchain is the site's own: `tsconfig.json` extends Astro's strict preset, `eslint.config.js` and the `prettier` block in `package.json` hold the lint and format rules, and `scripts/` holds the build guards (`validate-csp.ts`, `serve-dist.ts`, `axe-scan.ts`).
 
 ## Package manager
 
@@ -40,7 +40,7 @@ Copy is a typed dictionary per locale. `nl.ts` is typed against `en.ts`, and `sr
 
 Stylesheets are inlined (`inlineStylesheets: 'always'`), and Vite never inlines assets as `data:` URIs (`assetsInlineLimit: 0`), because `font-src 'self'` would block an inlined font. `compressHTML` stays off: the compressor can remove the space between a text node and a following element.
 
-Astro writes a meta CSP with a hash for every inline script and style and no `unsafe-inline`. `pnpm build` ends with `webgrip-validate-csp`, which fails the build when an inline script or style below the CSP meta is not authorised by that page's policy. `public/_headers` adds the headers a meta CSP cannot carry, `frame-ancestors 'none'` among them. `lighthouserc.json` lists every indexable page, and `scripts/axe-scan.ts` scans those pages plus the 404, thanks and problem pages with axe. The sitemap leaves out the 404, thanks and problem pages, which are `noindex`.
+Astro writes a meta CSP with a hash for every inline script and style and no `unsafe-inline`. `pnpm build` ends with `scripts/validate-csp.ts`, which fails the build when an executable inline script or an inline style below the CSP meta is not hashed in that page's `script-src` or `style-src` respectively; `scripts/csp.test.ts` holds the rule. `public/_headers` adds the headers a meta CSP cannot carry, `frame-ancestors 'none'` among them. `lighthouserc.json` lists every indexable page and starts `scripts/serve-dist.ts`, which serves `dist/` with the production clean-URL and 404 rules and gzip, and `scripts/axe-scan.ts` scans those pages plus the 404, thanks and problem pages with axe. The sitemap leaves out the 404, thanks and problem pages, which are `noindex`.
 
 Deployment, releases and indexing are in [deploy](deploy.md). Nothing on the site loads a third-party resource: fonts and the demo video are self-hosted, and there is no analytics, telemetry or embed. The form posts to the site's own Worker.
 

@@ -239,7 +239,7 @@ Only `ploegd` holds the run actor's token; worker pods never see it. The graphs 
 ## 9. Install and check it
 
 ```sh
-helm install unfold oci://ghcr.io/webgrip/charts/unfold --version <version> -n unfold -f values.live.local.yaml
+helm install unfold oci://ghcr.io/unfold-hq/charts/unfold --version <version> -n unfold -f values.live.local.yaml
 ```
 
 Use a released version and never set an image: the published chart names every image by its released digest. In a GitOps repository, pin the same chart version in a HelmRelease instead.

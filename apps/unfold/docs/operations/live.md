@@ -53,7 +53,7 @@ This is the `runtime` object, not a full configuration file, and it enables exac
 
 `local` means local to the **Unfold server**. A remote server with this backend already moves agent CPU, memory and repository checks off the operator's laptop. Use this backend only for trusted single-user development on a dedicated host. It separates working directories and selected environment variables, but runs under the control server’s OS user. Approved shell commands or repository scripts can access server files, process environments and sibling workspaces. This is not a boundary for protecting the master key against hostile code. Use the Kubernetes backend with the supplied separate namespace and pod restrictions for a shared team pilot.
 
-Supply credentials through the deployment's secret mechanism or a short-lived shell environment populated from the vault. Keep secret values out of configuration files. The application supports loading `.env`, but Webgrip's operating policy keeps originals in OpenBao; use the [estate secrets model](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/docs/techdocs/docs/adr/adr-0055-one-secrets-model-six-levels.md).
+Supply credentials through the deployment's secret mechanism or a short-lived shell environment populated from the vault. Keep secret values out of configuration files. The application supports loading `.env`, but keep the originals in your secret store and give the process only what it needs.
 
 The [configuration reference](configuration.md) lists every configuration key and environment variable with its type and default. The table below covers the ones a live deployment sets.
 
@@ -107,7 +107,7 @@ For another operator, run `npm run user:add` against the same `UNFOLD_DATA_DIR` 
 
 The named estate examples in this section are recorded setup experience. Resolve current ports, identity-provider mounts, vault policies and model routes from that estate's deployment configuration before using them.
 
-A profile is a config file plus a launcher; nothing in the source knows which estate it serves. The webgrip pilot runs on port 4080 with its data under `.unfold`, and a second estate's profile runs beside it on 4081 with its data under its own directory below `.unfold`, each pointing at its own LiteLLM, task source, repositories and Ploeg. Both files are ignored by Git (`config/*.local.json`, `*.local.sh`) so no estate detail is committed.
+A profile is a config file plus a launcher; nothing in the source knows which estate it serves. One estate runs on port 4080 with its data under `.unfold`, and a second estate's profile runs beside it on 4081 with its data under its own directory below `.unfold`, each pointing at its own LiteLLM, task source, repositories and Ploeg. Both files are ignored by Git (`config/*.local.json`, `*.local.sh`) so no estate detail is committed.
 
 The launcher resolves every secret from the estate's OpenBao at start and exports it for the process. The second estate's OpenBao authenticates on the `authentik/` mount with one role per team, and only the `admin` role reads outside `secret/teams/<team>/*`, so the launcher logs in with `bao login -method=oidc -path=authentik role=admin`. The retired `oidc/` mount answers 403 to a login attempt, which reads like a policy problem and is a wrong path.
 
@@ -548,7 +548,7 @@ The `docker` backend runs the clone and the OpenCode server inside a container f
 docker build -t unfold-agent:1.19.5 ops/agent
 ```
 
-The Dockerfile builds on `cgr.dev/chainguard/wolfi-base` and Wolfi's package repository, which need no account; pass `--build-arg REGISTRY_CHAINGUARD=<your-proxy>` to pull the base through a mirror. Released builds are at `ghcr.io/webgrip/unfold-agent:<version>`, signed and within a zero critical, zero high CVE budget ([releases](release.md)).
+The Dockerfile builds on `cgr.dev/chainguard/wolfi-base` and Wolfi's package repository, which need no account; pass `--build-arg REGISTRY_CHAINGUARD=<your-proxy>` to pull the base through a mirror. Released builds are at `ghcr.io/unfold-hq/unfold-agent:<version>`, signed and within a zero critical, zero high CVE budget ([releases](release.md)).
 
 Add a `docker` block next to `runtime`:
 
@@ -702,7 +702,7 @@ Every connection still needs a valid token in either mode. To switch to `enforce
 
 ## Ploeg's MCP server in VS Code
 
-When Ploeg serves `ploeg-mcp` over HTTPS ([Ploeg's guide](../../../ploeg/docs/how-to/serve-ploeg-mcp-over-https.md)), set `UNFOLD_PLOEG_MCP_URL` and `UNFOLD_PLOEG_MCP_CLIENT_ID`, or the chart's `ploegMcp.url` and `ploegMcp.clientId` ([chart README](../../ops/helm/unfold/README.md#the-ploeg-mcp-server-for-editors)). Both are public values, so they belong in plain configuration, not in a Secret. `GET /api/mcp-servers` then names the server to every signed-in person ([API contract](../contracts/api.md#mcp-servers-for-editors)). The VS Code extension provides it to chat by URL, and VS Code signs the person in through the browser ([extension README](../../extensions/vscode/README.md#use-ploegs-tools-in-vs-code-chat)). On the homelab the values would be `https://mcp-ploeg.webgrip.dev/mcp` and `ploeg-mcp`; the desired state for that lives in `webgrip/homelab-cluster`, not here.
+When Ploeg serves `ploeg-mcp` over HTTPS ([Ploeg's guide](../../../ploeg/docs/how-to/serve-ploeg-mcp-over-https.md)), set `UNFOLD_PLOEG_MCP_URL` and `UNFOLD_PLOEG_MCP_CLIENT_ID`, or the chart's `ploegMcp.url` and `ploegMcp.clientId` ([chart README](../../ops/helm/unfold/README.md#the-ploeg-mcp-server-for-editors)). Both are public values, so they belong in plain configuration, not in a Secret. `GET /api/mcp-servers` then names the server to every signed-in person ([API contract](../contracts/api.md#mcp-servers-for-editors)). The VS Code extension provides it to chat by URL, and VS Code signs the person in through the browser ([extension README](../../extensions/vscode/README.md#use-ploegs-tools-in-vs-code-chat)). For example `https://mcp-ploeg.example.com/mcp` and `ploeg-mcp`; the values for a deployment live in its own desired state, not here.
 
 The identity provider's client must allow VS Code's redirect URIs, `http://127.0.0.1:33418` and `https://vscode.dev/redirect`. Unfold never sees the person's Ploeg token.
 

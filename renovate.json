@@ -125,27 +125,14 @@
     },
     {
       "customType": "regex",
-      "description": "Local checks run the CI toolchain images by tag outside any workflow file. Managing them here keeps docs-site-check on a current image; a package rule puts these updates on the branch that moves the workflow pins.",
-      "managerFilePatterns": [
-        "/^mise\\.toml$/",
-        "/^scripts/docs-site\\.sh$/"
-      ],
-      "matchStrings": [
-        "(?<depName>harbor\\.webgrip\\.dev/webgrip/(?:semantic-release|techdocs-builder)):(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s"
-      ],
-      "datasourceTemplate": "docker",
-      "versioningTemplate": "semver"
-    },
-    {
-      "customType": "regex",
-      "description": "The local MCP end-to-end compose file runs the Authentik that the nightly mcp-e2e job runs through Harbor's ghcr proxy. Naming the dependency after the workflow's image puts both pins in one update, so one pull request moves both; the proxy serves the upstream digest.",
+      "description": "The local MCP end-to-end compose file runs Authentik from GHCR, pinned by tag and digest.",
       "managerFilePatterns": [
         "/^apps/unfold/test/e2e/authentik\\.compose\\.yaml$/"
       ],
       "matchStrings": [
         "ghcr\\.io/goauthentik/server:(?<currentValue>[^@\\s}]+)@(?<currentDigest>sha256:[a-f0-9]{64})"
       ],
-      "depNameTemplate": "harbor.webgrip.dev/ghcr/goauthentik/server",
+      "depNameTemplate": "ghcr.io/goauthentik/server",
       "datasourceTemplate": "docker",
       "versioningTemplate": "docker"
     },
@@ -178,13 +165,13 @@
     },
     {
       "customType": "regex",
-      "description": "The agent sandbox warm pool and the live local example run the released unfold-agent image. Renovate moves them to the newest candidate the release pushed to Harbor, so they do not depend on a release commit to follow the release.",
+      "description": "The agent sandbox warm pool and the live local example run the released unfold-agent image. Renovate moves them to the newest candidate the release pushed to GHCR, so they do not depend on a release commit to follow the release.",
       "managerFilePatterns": [
         "/^apps/unfold/ops/cluster/agent-sandbox/warm-pool\\.yaml$/",
         "/^apps/unfold/ops/local/config\\.live\\.example\\.json$/"
       ],
       "matchStrings": [
-        "(?<depName>harbor\\.webgrip\\.dev/webgrip/unfold-agent):(?<currentValue>\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)"
+        "(?<depName>ghcr\\.io/unfold-hq/unfold-agent):(?<currentValue>\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?)"
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "semver"
@@ -296,24 +283,6 @@
       "addLabels": [
         "github-actions"
       ]
-    },
-    {
-      "description": "A pin of the former host's shared tooling in a file the repository never ships changes how the repository is built, not what it ships, so it lands as ci(tooling) whatever the update type and never cuts a release. Those files are the CI files (.github/**: action refs and toolchain images) and mise.toml (a task that runs a toolchain image, a tool it installs). When these bumps landed as fix(deps), Unfold released for a tooling change. A package in a file that ships (package.json, a Dockerfile) keeps the commit type of its update type. The rule goes when those pins leave the repository.",
-      "matchFileNames": [
-        ".github/**",
-        "**/mise.toml",
-        "**/.mise.toml"
-      ],
-      "matchPackageNames": [
-        "harbor.webgrip.dev/webgrip/**",
-        "ghcr.io/webgrip/**",
-        "@webgrip/**",
-        "webgrip/**",
-        "forgejo.webgrip.dev/webgrip/**",
-        "https://forgejo.webgrip.dev/webgrip/**"
-      ],
-      "semanticCommitType": "ci",
-      "semanticCommitScope": "tooling"
     },
     {
       "description": "Disable peer dependency updates to avoid range-only churn",
@@ -600,14 +569,9 @@
       "rebaseWhen": "behind-base-branch"
     },
     {
-      "description": "Packages from the former host (its registry project, its npm scope and its repositories) share one branch that merges itself on green without a soak. They include the unfold-agent image references, which must move on a branch of their own kind rather than with third-party updates. The rule goes when those pins leave the repository.",
+      "description": "The unfold-agent image references follow Unfold's own release, so they move on a branch of their own that merges itself on green without a soak, rather than with third-party updates.",
       "matchPackageNames": [
-        "harbor.webgrip.dev/webgrip/**",
-        "ghcr.io/webgrip/**",
-        "@webgrip/**",
-        "webgrip/**",
-        "forgejo.webgrip.dev/webgrip/**",
-        "https://forgejo.webgrip.dev/webgrip/**"
+        "ghcr.io/unfold-hq/unfold-agent"
       ],
       "matchUpdateTypes": [
         "minor",
@@ -616,8 +580,8 @@
         "pin",
         "pinDigest"
       ],
-      "groupName": "webgrip dependencies",
-      "groupSlug": "webgrip",
+      "groupName": "unfold-agent image",
+      "groupSlug": "unfold-agent",
       "dependencyDashboardApproval": false,
       "minimumReleaseAge": "0 days",
       "automerge": true,
@@ -626,22 +590,6 @@
         "automerge"
       ],
       "rebaseWhen": "behind-base-branch"
-    },
-    {
-      "description": "A major of a package from the former host opens its pull request without a dashboard tick and never merges itself; the major's branch, commit type and zero soak stay as the earlier rules set them.",
-      "matchPackageNames": [
-        "harbor.webgrip.dev/webgrip/**",
-        "ghcr.io/webgrip/**",
-        "@webgrip/**",
-        "webgrip/**",
-        "forgejo.webgrip.dev/webgrip/**",
-        "https://forgejo.webgrip.dev/webgrip/**"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "dependencyDashboardApproval": false,
-      "automerge": false
     },
     {
       "description": "The annotated-ARG manager owns the composed base images and the opencode pin.",
@@ -686,12 +634,12 @@
       ]
     },
     {
-      "description": "Every Unfold release is a candidate X.Y.Z-rc.N, so the released unfold-agent image is offered as one. Moving the references releases nothing: a releasing commit type would cut a candidate whose image Renovate then offers again. A reference ahead of Harbor is a release still publishing, not one to roll back.",
+      "description": "Every Unfold release is a candidate X.Y.Z-rc.N, so the released unfold-agent image is offered as one. Moving the references releases nothing: a releasing commit type would cut a candidate whose image Renovate then offers again. A reference ahead of GHCR is a release still publishing, not one to roll back.",
       "matchDatasources": [
         "docker"
       ],
       "matchPackageNames": [
-        "harbor.webgrip.dev/webgrip/unfold-agent"
+        "ghcr.io/unfold-hq/unfold-agent"
       ],
       "ignoreUnstable": false,
       "rollbackPrs": false,
@@ -716,12 +664,13 @@
       "allowedVersions": "<1.100.0"
     },
     {
-      "description": "Unfold's chart image tag is empty on purpose: the release train fills it from appVersion. Renovate would otherwise digest-pin it.",
+      "description": "Unfold's chart image tags are empty on purpose: the release fills them with its version and digest. Renovate would otherwise digest-pin them.",
       "matchManagers": [
         "helm-values"
       ],
       "matchPackageNames": [
-        "ghcr.io/webgrip/unfold"
+        "ghcr.io/unfold-hq/unfold",
+        "ghcr.io/unfold-hq/unfold-agent"
       ],
       "enabled": false
     },
@@ -810,36 +759,6 @@
         "fileFilters": ["**/pnpm-lock.yaml"],
         "executionMode": "update"
       }
-    },
-    {
-      "description": "The tooling rules above give pins of the former host's packages in CI files their own webgrip CI dependencies branch, committed as ci(tooling). The local-check pins of the same images sit in mise.toml and scripts/docs-site.sh, outside that rule, so they moved on a separate fix(deps) branch: development then ran the release jobs on the new semantic-release image while release-check still named the old one, and the workflow policy test failed the release. This rule moves both on one branch, and the ci type keeps that branch from cutting a release.",
-      "matchManagers": ["custom.regex"],
-      "matchFileNames": ["mise.toml", "scripts/docs-site.sh"],
-      "matchPackageNames": ["harbor.webgrip.dev/webgrip/semantic-release", "harbor.webgrip.dev/webgrip/techdocs-builder"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "webgrip CI dependencies",
-      "groupSlug": "webgrip-ci",
-      "semanticCommitType": "ci",
-      "semanticCommitScope": "tooling"
-    },
-    {
-      "description": "Pins of the former host's packages in files the repository never ships (CI files and mise.toml) share one branch, majors included. Renovate gives a branch the highest commit type among its updates (fix beats ci), so a branch shared with anything that ships would commit these pins as fix(deps) and cut a release. separateMajorMinor is off for these pins, so each pin moves straight to the newest release instead of splitting into two branches that conflict. A branch that holds a major waits for a person.",
-      "matchFileNames": [
-        ".github/**",
-        "**/mise.toml",
-        "**/.mise.toml"
-      ],
-      "matchPackageNames": [
-        "harbor.webgrip.dev/webgrip/**",
-        "ghcr.io/webgrip/**",
-        "@webgrip/**",
-        "webgrip/**",
-        "forgejo.webgrip.dev/webgrip/**",
-        "https://forgejo.webgrip.dev/webgrip/**"
-      ],
-      "groupName": "webgrip CI dependencies",
-      "groupSlug": "webgrip-ci",
-      "separateMajorMinor": false
     },
     {
       "description": "A watched agent standard is not a dependency: its pull request asks whether a radar ring moves, so it never merges on its own, needs no soak, and stays one pull request per standard. The docs type keeps it from cutting a release.",

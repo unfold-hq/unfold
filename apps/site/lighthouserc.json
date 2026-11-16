@@ -1,7 +1,7 @@
 {
   "ci": {
     "collect": {
-      "startServerCommand": "webgrip-serve-dist",
+      "startServerCommand": "node scripts/serve-dist.ts",
       "startServerReadyPattern": "serve-dist listening",
       "url": [
         "http://localhost:4173/",

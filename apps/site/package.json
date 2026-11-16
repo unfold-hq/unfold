@@ -16,7 +16,7 @@
   "packageManager": "pnpm@12.16.1",
   "scripts": {
     "dev": "astro dev",
-    "build": "node ../unfold/scripts/record-replay.ts && node scripts/build-demo.mjs && astro build && webgrip-validate-csp",
+    "build": "node ../unfold/scripts/record-replay.ts && node scripts/build-demo.mjs && astro build && node scripts/validate-csp.ts",
     "build:release": "node scripts/check-release-config.ts && pnpm build",
     "demo:build": "node ../unfold/scripts/record-replay.ts && node scripts/build-demo.mjs",
     "preview": "astro preview",
@@ -26,8 +26,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\"",
-    "validate:csp": "webgrip-validate-csp",
+    "test": "node --test --experimental-strip-types \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "validate:csp": "node scripts/validate-csp.ts",
     "validate:a11y": "node --experimental-strip-types scripts/axe-scan.ts",
     "validate:motion": "node --experimental-strip-types scripts/motion-check.ts"
   },
@@ -38,15 +38,50 @@
   "devDependencies": {
     "@astrojs/check": "0.9.12",
     "@axe-core/playwright": "4.14.0",
-    "@webgrip/astro-site-toolkit": "0.6.0",
-    "@webgrip/eslint-config-astro": "0.2.0",
-    "@webgrip/prettier-config": "0.3.0",
-    "@webgrip/tsconfig": "0.2.0",
+    "@eslint/js": "10.0.1",
     "eslint": "10.14.0",
+    "eslint-plugin-astro": "3.2.1",
     "playwright-core": "1.64.1",
     "prettier": "3.9.10",
+    "prettier-plugin-astro": "1.1.2",
     "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
     "wrangler": "4.156.2"
   },
-  "prettier": "@webgrip/prettier-config"
+  "prettier": {
+    "astroCompressHTML": "none",
+    "printWidth": 100,
+    "singleQuote": true,
+    "semi": true,
+    "trailingComma": "all",
+    "plugins": [
+      "prettier-plugin-astro"
+    ],
+    "overrides": [
+      {
+        "files": "*.astro",
+        "options": {
+          "parser": "astro"
+        }
+      },
+      {
+        "files": [
+          "*.md",
+          "*.mdx"
+        ],
+        "options": {
+          "proseWrap": "preserve"
+        }
+      },
+      {
+        "files": [
+          "*.yml",
+          "*.yaml"
+        ],
+        "options": {
+          "singleQuote": false
+        }
+      }
+    ]
+  }
 }
