@@ -195,8 +195,27 @@ jobs:
         run: mise exec node -- npm ci --prefix scripts/release-config --omit=dev --ignore-scripts --no-audit --no-fund
       - uses: ./.github/actions/release-policy
 
+  gitleaks:
+    if: github.repository == 'unfold-hq/unfold'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan the commits this pull request adds for secrets, with the repository's gitleaks rules
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          docker run --rm --network none --user "$(id -u):$(id -g)"
+          -v "$PWD:/repo:ro"
+          ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+          git /repo --config /repo/.gitleaks.toml --log-opts="${BASE:-origin/development}..${HEAD_SHA:-HEAD}" --no-banner --redact
+
   gate:
-    needs: [checks, checks-unfold, build-contexts, agents-check, opencode-contract, ploeg-pin, ploeg-docs, release-policy]
+    needs: [checks, checks-unfold, build-contexts, gitleaks, agents-check, opencode-contract, ploeg-pin, ploeg-docs, release-policy]
     if: github.repository == 'unfold-hq/unfold' && always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
