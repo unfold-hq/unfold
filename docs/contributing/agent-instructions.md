@@ -16,7 +16,7 @@ Where each kind of knowledge about working on Unfold lives, and what each agent 
 | --- | --- |
 | Commands an agent cannot guess, repository-wide traps, pointers to docs | [`.apm/instructions/repo.instructions.md`](https://github.com/unfold-hq/unfold/blob/development/.apm/instructions/repo.instructions.md), no `applyTo` |
 | Shared rules for the owner's repositories | the `baseline` package of agent-standards, pinned in `apm.yml`; see [Shared rules and skills](#shared-rules-and-skills) |
-| Rules for one application or directory | `.apm/instructions/<name>.instructions.md` with an `applyTo` glob, for example `apps-unfold`, `apps-site`, `forgejo` |
+| Rules for one application or directory | `.apm/instructions/<name>.instructions.md` with an `applyTo` glob, for example `apps-unfold`, `apps-site`, `github` |
 | Anything that must hold every time | a test, a CI job or a hook; the file may point at it |
 | Product knowledge, flows, reasons | `docs/` and the application's `docs/`, linked from the rules with absolute forge links |
 | Decisions | ADRs ([System decisions](../adr/index.md)) |
@@ -29,7 +29,7 @@ Where each kind of knowledge about working on Unfold lives, and what each agent 
 | One person's preferences | that person's tool configuration (`~/.claude/`, `~/.codex/`), never this repository |
 | Open work | a ticket |
 
-Everything above is a source; `mise run agents-install` generates what agents read. Claude Code reads `.claude/rules` (a rule with `applyTo` loads when Claude reads a matching file) and the skills in `.claude/skills`; `CLAUDE.md` is the one line that points there and imports nothing, which also stops Claude Code from reading `AGENTS.md` and loading every rule twice. Codex, opencode, Ploeg and OpenHands read the generated `AGENTS.md`, nested where a rule concerns one directory. Rules for `.forgejo/` land in the root `AGENTS.md`, because APM does not place files in hidden directories. APM puts a rule at the root once its `applyTo` matches most folders that hold files, and `apps/unfold` holds most of this repository's folders, so `apm.yml` excludes every folder below an application's top folder from that count; each application's rules then stay in its own `AGENTS.md`. Never edit a generated file.
+Everything above is a source; `mise run agents-install` generates what agents read. Claude Code reads `.claude/rules` (a rule with `applyTo` loads when Claude reads a matching file) and the skills in `.claude/skills`; `CLAUDE.md` is the one line that points there and imports nothing, which also stops Claude Code from reading `AGENTS.md` and loading every rule twice. Codex, opencode, Ploeg and OpenHands read the generated `AGENTS.md`, nested where a rule concerns one directory. Rules for `.github/` land in `.github/AGENTS.md`. APM puts a rule at the root once its `applyTo` matches most folders that hold files, and `apps/unfold` holds most of this repository's folders, so `apm.yml` excludes every folder below an application's top folder from that count; each application's rules then stay in its own `AGENTS.md`. Never edit a generated file.
 
 ## Shared rules and skills
 

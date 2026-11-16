@@ -70,31 +70,30 @@ A change to Unfold itself becomes a signed release in CI. It reaches the cluster
 ```mermaid
 sequenceDiagram
     actor Dev as You or an agent
-    participant FJ as Forgejo (unfold)
-    participant CI as Forgejo Actions
-    participant H as Harbor
-    participant GH as GitHub / GHCR
+    participant GH as GitHub (unfold-hq/unfold)
+    participant CI as GitHub Actions
+    participant R as GHCR and Open VSX
     participant HC as cluster repository
     participant Flux
-    Dev->>FJ: merge to development
-    FJ->>CI: on_source_change.yml
+    Dev->>GH: merge to development
+    GH->>CI: on_source_change.yml
     CI->>CI: verify
-    FJ->>CI: on_release_train.yml, hourly
+    GH->>CI: on_release_train.yml, hourly
     CI->>CI: verify the development head, release policy
-    CI->>FJ: semantic-release: tag unfold-v0.x.y-rc.N, Forgejo release
-    FJ->>CI: on_release_published.yml
-    CI->>H: build images, CVE gate (grype + VEX), cosign sign, charts
-    CI->>GH: copy images and charts, draft release, attach assets, publish
+    CI->>GH: semantic-release: tag unfold-v0.x.y-rc.N, draft release
+    CI->>CI: dispatch on_release_published.yml at the tag
+    CI->>R: build images, CVE gate (grype + VEX), keyless cosign, chart, extension
+    CI->>GH: verify every artifact, attach evidence, publish the release
     Dev->>HC: pin chart tag+digest and image digest (Renovate PR or by hand)
     HC->>Flux: main changes
     Flux->>Flux: OCIRepository + HelmRelease upgrade in namespace ploeg
 ```
 
-1. **Validate.** A push to `development` runs [`on_source_change.yml`](../../.forgejo/workflows/on_source_change.yml): Unfold's gates, the contract tests and managed qualification against the pinned Ploeg release, the check that the pin is a published Ploeg release, and the release policy.
-2. **Version.** When `UNFOLD_RELEASES_ENABLED` is `true`, the hourly [release train](../operations/ci.md#the-release-train) runs the same checks on the development head and, if `development` has not moved since, semantic-release reads the commits under `apps/`, tags `unfold-v0.x.y-rc.N` and creates the Forgejo release. `fix:` and `feat:` commits cut a release; `docs:` and `chore:` do not. Only zero-major release candidates are allowed ([ADR-0028](../../apps/ploeg/docs/adrs/0028-automatic-releases-stay-zero-major-candidates.md)).
-3. **Build, gate, sign.** The published release triggers [`on_release_published.yml`](../../.forgejo/workflows/on_release_published.yml). Each image is built once in Harbor, held to its application's CVE budget with grype and OpenVEX statements, then signed and attested with cosign. Unfold's Helm chart is published to Harbor.
-4. **Distribute.** [`publish_release.py`](../../scripts/publish_release.py) copies the signed images and charts to Forgejo and GHCR, verifies digests, creates a draft GitHub release, attaches the assets and then publishes it without marking it latest. GitHub receives the source through a push mirror ([Source and artifacts](../operations/artifacts.md)).
-5. **Pin.** Production state lives in the owner's cluster repository. Ploeg runs inside the Unfold release: the Unfold chart is pinned by tag and digest in its OCIRepository, and its HelmRelease takes `ploegd` from Ploeg's own `ghcr.io/ploeg-hq` images through Harbor. Renovate opens one pull request per Unfold release, and Forgejo merges it when its checks pass. The pins from `0.4.0-rc.2` to `0.4.0-rc.11` were committed by hand, and releases up to `0.4.0-rc.35` also carried Ploeg.
+1. **Validate.** A push to `development` runs [`on_source_change.yml`](../../.github/workflows/on_source_change.yml): Unfold's gates, the contract tests and managed qualification against the pinned Ploeg release, the check that the pin is a published Ploeg release, and the release policy.
+2. **Version.** When `UNFOLD_RELEASES_ENABLED` is `true`, the hourly [release train](../operations/ci.md#the-release-train) runs the same checks on the development head and, if `development` has not moved since, semantic-release reads the commits under `apps/`, tags `unfold-v0.x.y-rc.N` and files a draft GitHub release. `fix:` and `feat:` commits cut a release; `docs:` and `chore:` do not. Only zero-major release candidates are allowed ([ADR-0028](../../apps/ploeg/docs/adrs/0028-automatic-releases-stay-zero-major-candidates.md)).
+3. **Build, gate, sign.** The release job dispatches [`on_release_published.yml`](../../.github/workflows/on_release_published.yml) at the tag. Each image is built once, straight into `ghcr.io/unfold-hq`, held to its application's CVE budget with grype and OpenVEX statements, then signed keyless and attested with cosign. Unfold's Helm chart is published to `oci://ghcr.io/unfold-hq/charts/unfold` and the extension to Open VSX.
+4. **Distribute.** [`publish_release.py`](../../scripts/publish_release.py) verifies every artifact anonymously, attaches the evidence to the draft GitHub release and then publishes it without marking it latest ([Source and artifacts](../operations/artifacts.md)).
+5. **Pin.** Production state lives in the owner's cluster repository. Ploeg runs inside the Unfold release: the Unfold chart is pinned by tag and digest in its OCIRepository, and its HelmRelease takes `ploegd` from Ploeg's own `ghcr.io/ploeg-hq` images through Harbor. Renovate opens one pull request per Unfold release in the cluster repository, which merges it when its checks pass. The pins from `0.4.0-rc.2` to `0.4.0-rc.11` were committed by hand, and releases up to `0.4.0-rc.35` also carried Ploeg.
 6. **Apply.** Flux reconciles the change and Helm upgrades the release. On 2026-09-29 the cluster ran `0.4.0-rc.11`.
 
 [CI and releases](../operations/ci.md) covers the workflows and gates in detail.

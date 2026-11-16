@@ -19,8 +19,6 @@ Maintain documentation in Unfold and publish it at [docs.unfoldhq.dev](https://d
 1. `build` unpacks the pinned Ploeg bundle and runs `scripts/docs.py --check`. That checks the sources, builds the site with Zensical in strict mode, validates the output with [the output check](../../scripts/docs-output.py) and indexes it with Pagefind. The job then scans the whole output with gitleaks and [its narrow allowlist](../../scripts/docs-gitleaks.toml), and uploads the site. A failed build, output check or secret scan stops publication.
 2. `deploy`, on `development` only, uploads the site to the staging Worker `unfold-docs-staging` and checks it live, then uploads the same files to the production Worker `unfold-docs` and checks that too. A failed staging check leaves production as it was.
 
-Until Unfold's move to `unfold-hq` is complete, the previous [Forgejo docs workflow](../../.forgejo/workflows/on_docs_change.yml) still runs on the old forge. The cutover removes it.
-
 Both Workers serve static assets only, without Worker code. [ops/docs/wrangler.toml](../../ops/docs/wrangler.toml) configures them:
 
 | Worker | Address | Configuration |
