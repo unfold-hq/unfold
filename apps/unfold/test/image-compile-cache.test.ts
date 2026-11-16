@@ -24,7 +24,8 @@ test('the image writes its compile cache with the runtime Node build and the run
   const writers = stages(dockerfile).filter(stage => stage.lines.some(line => line.startsWith('RUN') && line.includes("import('/app/src/main.ts')")));
   assert.equal(writers.length, 1);
   const [writer] = writers;
-  assert.equal(writer.from, '${NODE_RUNTIME_IMAGE}');
+  assert.equal(writer.from, 'scratch');
+  assert.ok(writer.lines.includes('COPY --from=rootfs /rootfs/ /'), 'the cache is written by the Node the image runs, which the rootfs stage installs');
   const run = writer.lines.findIndex(line => line.includes("import('/app/src/main.ts')"));
   assert.ok(writer.lines.slice(0, run).includes('USER node'), 'the cache directory is named after the uid, so it is written as the user that reads it');
   assert.ok(writer.lines.slice(0, run).includes('ENV NODE_COMPILE_CACHE=/app/.node-cache'));

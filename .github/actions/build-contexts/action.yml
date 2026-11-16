@@ -1,44 +1,35 @@
 name: Build the container contexts
-description: Build both Unfold images to the build cache only; the Docker Hardened Images base needs a Docker Hub sign-in, which a pull request from a fork does not get
-inputs:
-  dhi-username:
-    description: Docker Hub account that may pull from dhi.io
-    default: ''
-  dhi-token:
-    description: Read-only Docker Hub access token of that account
-    default: ''
-  skip-without-credentials:
-    description: "'true' turns a missing sign-in into a notice instead of a failure; only a pull request from a fork passes it"
-    default: 'false'
+description: Build both Unfold images into the runner's image store and hold each to its CVE budget; every base pulls without credentials, so a pull request from a fork builds them too
 runs:
   using: composite
   steps:
-    - name: Sign in to dhi.io
-      id: login
-      shell: bash
-      env:
-        DHI_USERNAME: ${{ inputs.dhi-username }}
-        DHI_TOKEN: ${{ inputs.dhi-token }}
-        SKIP: ${{ inputs.skip-without-credentials }}
-      run: |
-        set -euo pipefail
-        if [ -n "$DHI_USERNAME" ] && [ -n "$DHI_TOKEN" ]; then
-          printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
-          echo "ready=true" >> "$GITHUB_OUTPUT"
-        elif [ "$SKIP" = true ]; then
-          echo "::notice::A pull request from a fork gets no Docker Hub sign-in, so the image contexts are built on development after the merge and by the release train before a release."
-          echo "ready=false" >> "$GITHUB_OUTPUT"
-        else
-          echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are not set; the Unfold images build from dhi.io, which needs a Docker Hub sign-in."
-          exit 1
-        fi
     - name: Container build contexts
-      if: steps.login.outputs.ready == 'true'
       shell: bash
       run: |
         set -euo pipefail
-        build() { docker build --progress=plain --output=type=cacheonly "$@"; }
-        build --file apps/unfold/Dockerfile --target app apps/unfold &
+        build() { docker build --progress=plain "$@"; }
+        build --file apps/unfold/Dockerfile --target app --tag unfold:context apps/unfold &
         app=$!
-        build --file apps/unfold/ops/agent/Dockerfile apps/unfold/ops/agent
+        build --file apps/unfold/ops/agent/Dockerfile --tag unfold-agent:context apps/unfold/ops/agent
         wait "$app"
+    - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      with:
+        version: 2026.10.25
+        install: false
+        cache: false
+    - name: CVE budget of the workbench image
+      uses: ./.github/actions/cve-gate
+      with:
+        image-ref: unfold:context
+        image-source: docker
+        image-name: unfold
+        budgets-file: apps/unfold/ops/security/cve-budgets.yaml
+        vex-dir: apps/unfold/ops/vex/statements
+    - name: CVE budget of the agent image
+      uses: ./.github/actions/cve-gate
+      with:
+        image-ref: unfold-agent:context
+        image-source: docker
+        image-name: unfold-agent
+        budgets-file: apps/unfold/ops/security/cve-budgets.yaml
+        vex-dir: apps/unfold/ops/vex/statements

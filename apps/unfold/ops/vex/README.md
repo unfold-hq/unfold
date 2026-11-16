@@ -4,4 +4,4 @@ Reviewed exploitability statements for findings the release gate should not coun
 
 Both images have a budget of zero critical and zero high findings in `enforce` mode, as recorded in [ops/security/cve-budgets.yaml](../security/cve-budgets.yaml). No statements are in force.
 
-When a fix is in Alpine but not yet in dhi.io's repository, the [agent image](../agent/Dockerfile) installs the fixed package from Alpine's signed repository with a minimum-version constraint, and that line goes once dhi.io carries the fix. Add a statement only when a rebuild on a patched base cannot remove the finding and the vulnerable code is unreachable in the image, and follow the infrastructure VEX guide for the file shape.
+Both images build on Wolfi and take the newest Wolfi package at build time ([ADR-0056](../../../../docs/adr/adr-0056-unfold-images-build-on-wolfi-and-ci-needs-no-docker-hub-account.md)), so a fixed package reaches the image with the next build. Add a statement only when a rebuild cannot remove the finding and the vulnerable code is unreachable in the image, and follow the infrastructure VEX guide for the file shape.

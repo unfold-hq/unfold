@@ -202,9 +202,8 @@ The procedure of the cutover day in [ADR-0055](../adr/adr-0055-github-unfold-hq-
 1. Claim the `unfold-hq` namespace on Open VSX with the account that owns `OVSX_PAT`, and check the token: `npx ovsx verify-pat unfold-hq -p <token>`. The next Forgejo release then publishes `unfold-hq.unfold` for the first time, which Trusted Publishing needs.
 2. Create the `unfold-hq-bot` GitHub App in the `unfold-hq` organisation with contents and pull-request write access, so Ploeg's `consumers` job can open the pin pull request there.
 3. Create the Cloudflare tokens: one that deploys the site Worker, and one that only reads the `unfoldhq.dev` zone.
-4. Create a read-only Docker Hub access token for an account that may pull Docker Hardened Images from `dhi.io`.
-5. Move `ovsx` in `apps/unfold/extensions/vscode/package.json` to 1.4.0 or newer; the GitHub publisher refuses an older one.
-6. Merge or close every open pull request on Forgejo; they do not move.
+4. Move `ovsx` in `apps/unfold/extensions/vscode/package.json` to 1.4.0 or newer; the GitHub publisher refuses an older one.
+5. Merge or close every open pull request on Forgejo; they do not move.
 
 ### On the day
 

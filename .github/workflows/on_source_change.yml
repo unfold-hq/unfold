@@ -75,9 +75,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/build-contexts
-        with:
-          dhi-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dhi-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
   ploeg-pin:
     if: github.repository == 'unfold-hq/unfold'

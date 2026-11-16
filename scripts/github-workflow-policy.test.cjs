@@ -96,7 +96,7 @@ test('every action is local or pinned to a full commit, and every image is publi
 });
 
 test('the workflows use only the repository secrets the move names, and the Cloudflare deploy token only in the site and documentation deploy jobs', () => {
-  const allowed = ['AGENT_STANDARDS_MODEL_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_DNS_READ_TOKEN', 'DOCKERHUB_TOKEN', 'DOCKERHUB_USERNAME', 'MARKETPLACE_AZURE_CLIENT_ID', 'MARKETPLACE_AZURE_TENANT_ID', 'VSCE_PAT'];
+  const allowed = ['AGENT_STANDARDS_MODEL_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_DNS_READ_TOKEN', 'MARKETPLACE_AZURE_CLIENT_ID', 'MARKETPLACE_AZURE_TENANT_ID', 'VSCE_PAT'];
   const used = new Set();
   for (const { file, name, job } of allJobs()) {
     const secrets = [...JSON.stringify(job).matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]);
@@ -106,20 +106,22 @@ test('the workflows use only the repository secrets the move names, and the Clou
   assert.deepEqual([...used].filter(secret => !allowed.includes(secret)), []);
 });
 
-test('a pull request runs the push\'s checks without write access, and its only secret is the Docker Hub pull for the image contexts', () => {
+test('a pull request runs the push\'s checks without write access or secrets, and builds and scans the image contexts from a fork too', () => {
   assert.deepEqual(Object.keys(pr.on).sort(), ['pull_request', 'workflow_dispatch']);
   assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-policy', 'warnings']);
   for (const name of ['checks', 'checks-unfold', 'warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
   for (const [name, job] of Object.entries(pr.jobs)) {
     assert.equal(job.permissions, undefined, `${name} keeps the read-only default`);
     const secrets = [...JSON.stringify(job).matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]);
-    assert.deepEqual(secrets, name === 'build-contexts' ? ['DOCKERHUB_USERNAME', 'DOCKERHUB_TOKEN'] : [], name);
+    assert.deepEqual(secrets, [], name);
   }
-  const contexts = pr.jobs['build-contexts'].steps.at(-1);
-  assert.equal(contexts.with['skip-without-credentials'], '${{ github.event.pull_request.head.repo.full_name != github.repository }}', 'only a fork, which gets no secrets, may skip the image contexts');
-  const login = actions['build-contexts'].runs.steps[0].run;
-  assert.equal(runShell(login, { DHI_USERNAME: '', DHI_TOKEN: '', SKIP: 'false' }).status, 1, 'a missing sign-in fails outside a fork');
-  assert.deepEqual(runShell(login, { DHI_USERNAME: '', DHI_TOKEN: '', SKIP: 'true' }), { status: 0, stderr: '', outputs: { ready: 'false' } });
+  assert.deepEqual(pr.jobs['build-contexts'].steps.at(-1), { uses: './.github/actions/build-contexts' }, 'the image contexts take no credential, so no pull request skips them');
+  const contexts = actions['build-contexts'];
+  assert.equal(contexts.inputs, undefined);
+  assert.doesNotMatch(JSON.stringify(contexts), /docker login|dhi\.io|DOCKERHUB/);
+  const gates = contexts.runs.steps.filter(step => step.uses === './.github/actions/cve-gate');
+  assert.deepEqual(gates.map(step => [step.with['image-name'], step.with['image-source']]), [['unfold', 'docker'], ['unfold-agent', 'docker']], 'both images are held to their CVE budget before a merge');
+  for (const step of gates) assert.equal(step.with['budgets-file'], 'apps/unfold/ops/security/cve-budgets.yaml');
   const verify = actions.verify.runs.steps.find(step => /mise run verify/.test(step.run ?? ''));
   assert.equal(verify.env.UNFOLD_REQUIRE_IMPORT_NOTES, 'true');
 });

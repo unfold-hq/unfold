@@ -548,7 +548,7 @@ The `docker` backend runs the clone and the OpenCode server inside a container f
 docker build -t unfold-agent:1.19.5 ops/agent
 ```
 
-The Dockerfile pulls its hardened base from `dhi.io`, which needs `docker login dhi.io` with a Docker account; pass `--build-arg REGISTRY_DHI=<your-proxy>` to use a mirror. Released builds are at `ghcr.io/webgrip/unfold-agent:<version>`, signed and within a zero critical, zero high CVE budget ([releases](release.md)).
+The Dockerfile builds on `cgr.dev/chainguard/wolfi-base` and Wolfi's package repository, which need no account; pass `--build-arg REGISTRY_CHAINGUARD=<your-proxy>` to pull the base through a mirror. Released builds are at `ghcr.io/webgrip/unfold-agent:<version>`, signed and within a zero critical, zero high CVE budget ([releases](release.md)).
 
 Add a `docker` block next to `runtime`:
 

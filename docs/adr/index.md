@@ -69,4 +69,5 @@ Use MADR 4.0 for new system decisions. Application decisions remain in their exi
 | [ADR-0053](adr-0053-a-person-accepts-a-pull-request-in-unfold-and-ploeg-asks-the-forge-to-merge-it-at-that-head.md) | A person accepts a pull request in Unfold, and Ploeg asks the forge to merge it at that head | proposed | 2026-11-01 |
 | [ADR-0054](adr-0054-unfold-shows-why-ci-stopped-a-work-item-on-every-surface-and-offers-ploegs-ci-actions.md) | Unfold shows why CI stopped a Work Item on every surface, and offers Ploeg's CI actions | proposed | 2026-11-02 |
 | [ADR-0055](adr-0055-github-unfold-hq-is-the-project-home.md) | GitHub unfold-hq/unfold is the project home, and GitHub Actions builds, releases and publishes Unfold | accepted | 2026-11-11 |
+| [ADR-0056](adr-0056-unfold-images-build-on-wolfi-and-ci-needs-no-docker-hub-account.md) | Unfold's images build on Wolfi, and CI needs no Docker Hub account | accepted | 2026-11-16 |
 | [ADR-0057](adr-0057-unfold-owns-its-agent-instructions.md) | Unfold owns its agent instructions, and APM generates them from `.apm/` alone | accepted | 2026-11-16 |

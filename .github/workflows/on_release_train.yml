@@ -74,9 +74,6 @@ jobs:
           ref: ${{ needs.pending.outputs.sha }}
           persist-credentials: false
       - uses: ./.github/actions/build-contexts
-        with:
-          dhi-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dhi-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
   ploeg-pin:
     needs: [pending]
