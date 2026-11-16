@@ -1,7 +1,7 @@
 {
   "name": "unfold",
   "owner": {
-    "name": "Ryan Grippeling / WebGrip"
+    "name": "Unfold"
   },
   "metadata": {
     "description": "Agent plugins for working with Unfold, for Claude Code, Codex, GitHub Copilot CLI and VS Code."
