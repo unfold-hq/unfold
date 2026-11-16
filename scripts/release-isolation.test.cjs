@@ -11,7 +11,7 @@ const { readYaml } = require('./yaml-documents.cjs');
 
 const root = path.resolve(__dirname, '..');
 const onGitHub = process.env.UNFOLD_RELEASE_FORGE === 'github';
-const forge = onGitHub ? '.github' : '.forgejo';
+const forge = '.github';
 if (onGitHub) {
   process.env.GITHUB_TOKEN ||= 'release-isolation-test';
   process.env.UNFOLD_RELEASE_CONFIG ||= path.join(root, 'scripts/release-config');

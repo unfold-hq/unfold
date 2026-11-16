@@ -33,12 +33,9 @@ const runShell = (script, env) => {
 };
 const KEYLESS_SIGNER = '^https://github\\.com/unfold-hq/unfold/\\.github/workflows/on_release_published\\.yml@refs/tags/unfold-v0\\.[0-9]+\\.[0-9]+(-rc\\.[0-9]+)?$';
 
-test('GitHub runs every Forgejo entry point, plus the Ploeg pin auto-merge', () => {
-  const ported = ['on_agent_standards.yml', 'on_dns_change.yml', 'on_docs_change.yml', 'on_nightly.yml', 'on_pull_request.yml', 'on_release_preview.yml', 'on_release_published.yml', 'on_release_train.yml', 'on_schedule.yml', 'on_source_change.yml'];
-  assert.deepEqual(Object.keys(workflows).sort(), [...ported, 'on_ploeg_pin.yml'].sort());
-  if (fs.existsSync(path.join(root, '.forgejo/workflows'))) {
-    assert.deepEqual(fs.readdirSync(path.join(root, '.forgejo/workflows')).sort(), ported, 'a new Forgejo workflow is ported here too, or named an exception');
-  }
+test('the repository runs CI only on GitHub Actions, through the eleven entry points this test knows', () => {
+  assert.deepEqual(Object.keys(workflows).sort(), ['on_agent_standards.yml', 'on_dns_change.yml', 'on_docs_change.yml', 'on_nightly.yml', 'on_ploeg_pin.yml', 'on_pull_request.yml', 'on_release_preview.yml', 'on_release_published.yml', 'on_release_train.yml', 'on_schedule.yml', 'on_source_change.yml']);
+  assert.ok(!fs.existsSync(path.join(root, '.forgejo')), 'no second CI system runs from .forgejo');
 });
 
 test('every job runs only in unfold-hq/unfold, on a GitHub-hosted runner, so the mirror and forks stay inert', () => {

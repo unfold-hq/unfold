@@ -11,7 +11,7 @@ const vm = require('node:vm');
 const { readYaml } = require('./yaml-documents.cjs');
 
 const onGitHub = process.env.UNFOLD_RELEASE_FORGE === 'github';
-const forge = onGitHub ? '.github' : '.forgejo';
+const forge = '.github';
 if (onGitHub) process.env.GITHUB_TOKEN ||= 'release-policy-test';
 else process.env.SEMANTIC_RELEASE_GITEA = 'true';
 const configPackage = onGitHub ? (process.env.UNFOLD_RELEASE_CONFIG ||= path.join(__dirname, 'release-config')) : '@webgrip/semantic-release-config';
@@ -163,7 +163,7 @@ test('the actual release notes retain a breaking-change compatibility warning', 
     commits: [commit],
     lastRelease: { version: '0.3.0', gitTag: 'unfold-v0.3.0' },
     nextRelease: { version: '0.4.0-rc.1', gitTag: 'unfold-v0.4.0-rc.1' },
-    options: { repositoryUrl: 'https://forgejo.webgrip.dev/webgrip/unfold.git' }, cwd, env: {}, logger,
+    options: { repositoryUrl: 'https://github.com/unfold-hq/unfold.git' }, cwd, env: {}, logger,
   }));
   assert.match(notes, /BREAKING CHANGES/);
   assert.match(notes, /managed worker authentication is now the default/);

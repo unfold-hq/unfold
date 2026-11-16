@@ -168,7 +168,7 @@ class DistributionTests(unittest.TestCase):
                 publish_release.mirror_release('unfold-v0.4.0-rc.9', source, 'forge', 'github', publish=publish)
                 self.assertEqual([m for m in calls if m != 'GET'], expected)
         self.assertIs(inspect.signature(publish_release.mirror_release).parameters['publish'].default, True)
-        workflow = (Path(__file__).resolve().parent.parent / '.forgejo/workflows/on_release_published.yml').read_text()
+        workflow = (Path(__file__).resolve().parent.parent / '.github/workflows/on_release_published.yml').read_text()
         self.assertEqual(re.findall(r'python3 scripts/publish_release\.py (\S+)', workflow), ['unfold'])
         self.assertEqual(re.findall(r'python3 scripts/publish_chart\.py (\S+)', workflow), ['unfold'])
 
