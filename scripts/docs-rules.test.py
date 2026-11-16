@@ -186,5 +186,43 @@ class Staleness(unittest.TestCase):
         self.assertEqual(rules.stale(pages, TODAY, days=1000), [])
 
 
+INTEGRATIONS = {'categories': [{
+    'id': 'tracker', 'label': 'Issue tracker',
+    'fields': {'name': {'label': 'Name', 'any': 'your issue tracker'}, 'branch': {'label': 'Agent branch', 'code': True, 'any': 'agent/<tracker>-<id>'}},
+    'choices': [{'id': 'vikunja', 'name': 'Vikunja', 'branch': 'agent/vik-<id>'}, {'id': 'clickup', 'name': 'ClickUp', 'branch': 'agent/clickup-<id>'}],
+}]}
+
+
+class IntegrationPlaceholders(unittest.TestCase):
+    def expand(self, markdown):
+        return rules.expand_integrations(markdown, INTEGRATIONS, '../reference/integrations.md')
+
+    def test_a_placeholder_shows_the_neutral_text_and_every_integration_on_hover(self):
+        markdown, problems = self.expand('Push to {{ tracker.branch }}.')
+        self.assertEqual(problems, [])
+        self.assertEqual(markdown, 'Push to [`agent/<tracker>-<id>`](../reference/integrations.md#tracker "Vikunja: agent/vik-<id> · ClickUp: agent/clickup-<id>"){ .unfold-choice data-choice="tracker.branch" }.')
+
+    def test_a_bare_category_means_its_name(self):
+        markdown, _ = self.expand('Open {{ tracker }}.')
+        self.assertIn('[your issue tracker](', markdown)
+        self.assertIn('data-choice="tracker.name"', markdown)
+
+    def test_a_table_lists_every_integration(self):
+        markdown, _ = self.expand('{{ tracker.table }}')
+        self.assertEqual(markdown.splitlines(), ['| Name | Agent branch |', '| --- | --- |', '| Vikunja | `agent/vik-<id>` |', '| ClickUp | `agent/clickup-<id>` |'])
+
+    def test_code_is_left_alone(self):
+        for markdown in ['`{{ tracker }}`', '```yaml\nname: {{ tracker }}\n```']:
+            self.assertEqual(self.expand(markdown), (markdown, []))
+
+    def test_an_unknown_placeholder_is_a_problem(self):
+        self.assertEqual(self.expand('{{ trackr }} {{ tracker.colour }}')[1], ['{{ trackr }}', '{{ tracker.colour }}'])
+
+    def test_the_data_must_match_ploeg(self):
+        self.assertEqual(rules.integration_problems(INTEGRATIONS, {'vikunja', 'clickup'}), [])
+        wrong = {'categories': [dict(INTEGRATIONS['categories'][0], choices=[{'id': 'jira', 'name': 'Jira', 'branch': 'agent/vik-<id>'}])]}
+        self.assertEqual(len(rules.integration_problems(wrong, {'vikunja'})), 2)
+
+
 if __name__ == '__main__':
     unittest.main()

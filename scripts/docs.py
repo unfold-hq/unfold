@@ -224,14 +224,24 @@ def rewrite(markdown, source):
     return ''.join(chunks)
 
 
+integrations = yaml.safe_load((root / 'docs/integrations.yml').read_text())
+integration_reference = root / 'docs/reference/integrations.md'
+provider_names = set(re.findall(r'(?:Name\(\) string \{ return|const Name =) "([a-z]+)"', ''.join(path.read_text() for path in (ploeg / 'pkg/provider').rglob('*.go') if not path.name.endswith('_test.go'))))
+integration_failures = rules.integration_problems(integrations, provider_names)
 for source, relative in mapping.items():
     output = staging / relative
     output.parent.mkdir(parents=True, exist_ok=True)
     if source.suffix == '.md':
-        markdown = rewrite(source.read_text(), source)
+        markdown, unknown = rules.expand_integrations(source.read_text(), integrations, os.path.relpath(integration_reference, source.parent))
+        integration_failures += [f'{source.relative_to(root)}: unknown placeholder {placeholder}' for placeholder in unknown if not source.is_relative_to(ploeg)]
+        markdown = rewrite(markdown, source)
         output.write_text(rules.mark_history(markdown, relative.as_posix()) if rules.historical(relative.as_posix()) else markdown)
     else:
         shutil.copyfile(source, output)
+if integration_failures:
+    raise SystemExit('Integration placeholders (see docs/integrations.yml):\n' + '\n'.join(integration_failures))
+(staging / 'assets').mkdir(exist_ok=True)
+(staging / 'assets/integrations.json').write_text(json.dumps(integrations, indent=2) + '\n')
 if failures:
     raise SystemExit('Missing documentation targets:\n' + '\n'.join(sorted(set(failures))))
 if anchor_failures:

@@ -1,0 +1,34 @@
+.md-typeset a.unfold-choice {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.2em;
+}
+
+.md-typeset a.unfold-choice--chosen {
+  text-decoration-style: solid;
+}
+
+.md-typeset .unfold-setup {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0 0 1.5em;
+  padding: 0.5em 0.75em;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.2rem;
+  font-size: 0.7rem;
+}
+
+.md-typeset .unfold-setup > span {
+  font-weight: 700;
+}
+
+.md-typeset .unfold-setup select {
+  margin-left: 0.25rem;
+  font: inherit;
+  color: var(--md-default-fg-color);
+  background: var(--md-default-bg-color);
+  border: 1px solid var(--md-default-fg-color--lighter);
+  border-radius: 0.2rem;
+}

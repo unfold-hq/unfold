@@ -257,3 +257,71 @@ def unverified(pages):
         if isinstance(reason, str) and reason.strip():
             found.append((page, reason.strip()))
     return sorted(found)
+
+
+INTEGRATION_PLACEHOLDER = re.compile(r'\{\{\s*([a-z]+)(?:\.([a-z]+))?\s*\}\}')
+INTEGRATION_CODE = re.compile(r'(^[ \t]*`{3,}[^\n]*\n.*?^[ \t]*`{3,}[^\n]*$|^[ \t]*~{3,}[^\n]*\n.*?^[ \t]*~{3,}[^\n]*$|`+[^`\n]*`+)', re.M | re.S)
+
+
+def integration_categories(data):
+    return {category['id']: category for category in data['categories']}
+
+
+def integration_hint(category, field):
+    if field == 'name':
+        names = [choice['name'] for choice in category['choices']]
+        return ', '.join(names[:-1]) + ' or ' + names[-1] if len(names) > 1 else names[0]
+    return ' · '.join(f"{choice['name']}: {choice[field]}" for choice in category['choices'])
+
+
+def integration_text(category, field, value):
+    return f'`{value}`' if category['fields'][field].get('code') else value
+
+
+def integration_table(category):
+    fields = list(category['fields'])
+    header = '| ' + ' | '.join(category['fields'][field]['label'] for field in fields) + ' |'
+    rows = ['| ' + ' | '.join(integration_text(category, field, choice[field]) for field in fields) + ' |' for choice in category['choices']]
+    return '\n'.join([header, '| ' + ' | '.join('---' for _ in fields) + ' |', *rows])
+
+
+def expand_integrations(markdown, data, reference_link):
+    """Replace {{ category.table }} with a table of every integration, and {{ category.field }} outside code with the integration-neutral text, linked to the reference page with every integration's value as its hover text. Return (markdown, problems)."""
+    categories = integration_categories(data)
+    problems = []
+
+    def placeholder(match):
+        name, field = match[1], match[2] or 'name'
+        category = categories.get(name)
+        if category is not None and field == 'table':
+            return integration_table(category)
+        if category is None or field not in category['fields']:
+            problems.append(match[0])
+            return match[0]
+        text = integration_text(category, field, category['fields'][field]['any'])
+        hint = integration_hint(category, field).replace('"', "'")
+        return f'[{text}]({reference_link}#{name} "{hint}"){{ .unfold-choice data-choice="{name}.{field}" }}'
+
+    chunks = INTEGRATION_CODE.split(markdown)
+    for index in range(0, len(chunks), 2):
+        chunks[index] = INTEGRATION_PLACEHOLDER.sub(placeholder, chunks[index])
+    return ''.join(chunks), problems
+
+
+def integration_problems(data, provider_names):
+    """Return why docs/integrations.yml disagrees with itself or with the Ploeg providers it names."""
+    problems = []
+    for category in data['categories']:
+        for choice in category['choices']:
+            missing = [field for field in category['fields'] if field not in choice]
+            if missing:
+                problems.append(f"{category['id']}.{choice['id']}: missing {', '.join(missing)}")
+            if choice['id'] not in provider_names:
+                problems.append(f"{category['id']}.{choice['id']}: Ploeg has no provider named {choice['id']}")
+            if category['id'] == 'tracker':
+                prefix = 'vik' if choice['id'] == 'vikunja' else choice['id']
+                if 'branch' in category['fields'] and not choice.get('branch', '').startswith(f'agent/{prefix}-'):
+                    problems.append(f"tracker.{choice['id']}: Ploeg names the branch agent/{prefix}-<id>, not {choice.get('branch')}")
+                if 'reference' in category['fields'] and not choice.get('reference', '').startswith('VIK-' if prefix == 'vik' else f'{prefix}-'):
+                    problems.append(f"tracker.{choice['id']}: reference {choice.get('reference')} does not match Ploeg's Reference()")
+    return problems
