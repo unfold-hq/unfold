@@ -1,5 +1,5 @@
 image:
-  repository: ghcr.io/webgrip/unfold
+  repository: ghcr.io/unfold-hq/unfold
   tag: ""
   digest: ""
   pullPolicy: IfNotPresent
@@ -103,7 +103,7 @@ workspaceNamespace: unfold-workspaces
 createWorkspaceNamespace: true
 workspaceImage: ""
 workspaceAgentImage:
-  repository: ghcr.io/webgrip/unfold-agent
+  repository: ghcr.io/unfold-hq/unfold-agent
   tag: ""
   digest: ""
 workspaceStorageSize: 8Gi
