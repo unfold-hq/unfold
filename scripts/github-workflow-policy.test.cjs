@@ -165,7 +165,6 @@ test('the release train versions Unfold and the site from a checked development 
     if (name === 'release') assert.ok(at(step => step.uses === './.github/actions/release-policy') > install && at(step => step.uses === './.github/actions/release-policy') < head);
     assert.equal(job.steps[release].if, "steps.head.outputs.current == 'true'");
     assert.equal(job.steps[release]['working-directory'], directory, name);
-    assert.equal(job.steps[release].env.UNFOLD_RELEASE_FORGE, 'github');
     assert.equal(job.steps[release].env.GITHUB_TOKEN, '${{ github.token }}');
     assert.match(job.steps[release].run, /scripts\/release-config\/node_modules\/semantic-release\/bin\/semantic-release\.js"$/);
     assert.equal(job.steps[dispatch].run, 'gh workflow run on_release_published.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG" -f tag="$TAG"', 'a tag GITHUB_TOKEN pushes starts no workflow, but a dispatch at that tag does, and signs under the tag ref');
@@ -184,19 +183,12 @@ test('the release train versions Unfold and the site from a checked development 
 
 test('the release configuration files Unfold\'s release as a draft, so publication attaches its assets before GitHub makes it immutable', () => {
   process.env.GITHUB_TOKEN ||= 'github-workflow-policy-test';
-  const previous = process.env.UNFOLD_RELEASE_FORGE;
-  process.env.UNFOLD_RELEASE_FORGE = 'github';
-  try {
-    for (const [file, draft] of [['apps/.releaserc.cjs', true], ['apps/site/.releaserc.cjs', false]]) {
-      delete require.cache[path.join(root, file)];
-      const config = require(path.join(root, file));
-      const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github');
-      assert.deepEqual(github[1], { successComment: false, failComment: false, releasedLabels: false, draftRelease: draft }, file);
-      delete require.cache[path.join(root, file)];
-    }
-  } finally {
-    if (previous === undefined) delete process.env.UNFOLD_RELEASE_FORGE;
-    else process.env.UNFOLD_RELEASE_FORGE = previous;
+  for (const [file, draft] of [['apps/.releaserc.cjs', true], ['apps/site/.releaserc.cjs', false]]) {
+    delete require.cache[path.join(root, file)];
+    const config = require(path.join(root, file));
+    const github = config.plugins.find(plugin => Array.isArray(plugin) && plugin[0] === '@semantic-release/github');
+    assert.deepEqual(github[1], { successComment: false, failComment: false, releasedLabels: false, draftRelease: draft }, file);
+    delete require.cache[path.join(root, file)];
   }
 });
 
@@ -238,7 +230,6 @@ test('the chart follows every image, the extension verifies before Open VSX publ
   assert.deepEqual(chart.needs, ['parse-release-tag', 'unfold-release-images']);
   const publish = chart.steps.at(-1);
   assert.match(publish.run.trimEnd(), /mise exec helm cosign@[\d.]+ -- python3 scripts\/publish_chart\.py unfold "\$VERSION"$/);
-  assert.equal(publish.env.UNFOLD_RELEASE_HOME, 'github');
   for (const image of ['unfold', 'unfold-agent']) {
     assert.equal(publisher.jobs['unfold-release-images'].outputs[`${image}-digest`], `\${{ steps.digest.outputs.digest-${image} }}`);
     assert.equal(publish.env[`${image.toUpperCase().replace(/-/g, '_')}_IMAGE_DIGEST`], `\${{ needs.unfold-release-images.outputs.${image}-digest }}`);
@@ -258,7 +249,6 @@ test('the chart follows every image, the extension verifies before Open VSX publ
   const distribute = publisher.jobs['unfold-release-distribute'];
   assert.deepEqual(distribute.needs, ['parse-release-tag', 'unfold-release-images', 'unfold-release-publish-chart', 'unfold-release-publish-extension']);
   assert.equal(distribute.steps.at(-1).run, 'mise exec cosign@2.6.5 -- python3 scripts/publish_release.py unfold "$VERSION"');
-  assert.equal(distribute.steps.at(-1).env.UNFOLD_RELEASE_HOME, 'github');
   for (const [name, job] of Object.entries(publisher.jobs).filter(([name]) => name !== 'parse-release-tag' && !name.startsWith('site-'))) {
     for (const version of ['0.4.0-rc.5', '']) assert.equal(evaluate(job.if, { needs: { 'parse-release-tag': { outputs: { version } } } }), version !== '', name);
   }

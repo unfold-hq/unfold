@@ -10,11 +10,9 @@ const os = require('node:os');
 const vm = require('node:vm');
 const { readYaml } = require('./yaml-documents.cjs');
 
-const onGitHub = process.env.UNFOLD_RELEASE_FORGE === 'github';
 const forge = '.github';
-if (onGitHub) process.env.GITHUB_TOKEN ||= 'release-policy-test';
-else process.env.SEMANTIC_RELEASE_GITEA = 'true';
-const configPackage = onGitHub ? (process.env.UNFOLD_RELEASE_CONFIG ||= path.join(__dirname, 'release-config')) : '@webgrip/semantic-release-config';
+process.env.GITHUB_TOKEN ||= 'release-policy-test';
+const configPackage = (process.env.UNFOLD_RELEASE_CONFIG ||= path.join(__dirname, 'release-config'));
 const { makeConfig, COMMIT_ANALYZER_PLUGIN, RELEASE_NOTES_PLUGIN, TAGS_ONLY_PLUGIN } = require(configPackage);
 const root = path.resolve(__dirname, '..');
 const config = require(path.join(root, 'apps/.releaserc.cjs'));
@@ -74,13 +72,11 @@ const repositoryWithOrphanedTags = (tags) => {
 };
 
 test('the installed release toolchain is the one exercised by this suite', () => {
-  const versions = Object.fromEntries(['semantic-release', '@semantic-release/commit-analyzer', configPackage].map((name) => {
+  for (const name of ['semantic-release', '@semantic-release/commit-analyzer', configPackage]) {
     const manifest = JSON.parse(fs.readFileSync(path.join(path.dirname(require.resolve(name)), 'package.json'), 'utf8'));
     console.log(`${name}: ${manifest.version}`);
-    return [name, manifest.version];
-  }));
-  if (onGitHub) assert.equal(path.dirname(require.resolve('semantic-release')).startsWith(path.join(configPackage, 'node_modules')), true, 'semantic-release comes from the repository\'s own release toolchain');
-  else assert.match(versions[configPackage], /^2\./, 'the tags-only configuration');
+  }
+  assert.equal(path.dirname(require.resolve('semantic-release')).startsWith(path.join(configPackage, 'node_modules')), true, 'semantic-release comes from the repository\'s own release toolchain');
 });
 
 test('the actual historical breaking commit is major once initial development ends, and minor for Unfold', async () => {
@@ -242,7 +238,7 @@ test('effective configuration uses unfold-v tags and CI tests it before invoking
   const action = readYaml(path.join(root, forge, 'actions/release-policy/action.yml'));
   const gate = action.runs.steps.find(step => step.run?.includes('node --test scripts/release-policy.test.cjs'));
   assert.equal(gate['working-directory'], undefined);
-  assert.match(gate.run, onGitHub ? /NODE_PATH="\$PWD\/scripts\/release-config\/node_modules"/ : /NODE_PATH="\$\{SEMREL_PREBAKED:\?/);
+  assert.match(gate.run, /NODE_PATH="\$PWD\/scripts\/release-config\/node_modules"/);
 });
 
 

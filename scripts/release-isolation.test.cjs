@@ -10,14 +10,9 @@ const { pathToFileURL } = require('node:url');
 const { readYaml } = require('./yaml-documents.cjs');
 
 const root = path.resolve(__dirname, '..');
-const onGitHub = process.env.UNFOLD_RELEASE_FORGE === 'github';
 const forge = '.github';
-if (onGitHub) {
-  process.env.GITHUB_TOKEN ||= 'release-isolation-test';
-  process.env.UNFOLD_RELEASE_CONFIG ||= path.join(root, 'scripts/release-config');
-} else {
-  process.env.SEMANTIC_RELEASE_GITEA = 'true';
-}
+process.env.GITHUB_TOKEN ||= 'release-isolation-test';
+process.env.UNFOLD_RELEASE_CONFIG ||= path.join(root, 'scripts/release-config');
 const logger = { log() {}, success() {}, warn() {}, error() {}, scope() { return this; } };
 
 function git(cwd, ...args) {
@@ -76,7 +71,7 @@ test('one Unfold release selects Unfold commits, Ploeg release bumps included, a
       ['unfold', 'fix: correct interactive work', ['apps/unfold/change.txt']],
       ['ploeg-bump', 'fix(ploeg): update Ploeg to v0.1.1', ['apps/unfold/ploeg-release.json', 'apps/unfold/scripts/unified-demo/go.mod']],
       ['ploeg-breaking', 'feat(ploeg)!: update Ploeg to a release with a new operator contract', ['apps/unfold/ploeg-release.json']],
-      ['ploeg-tooling', 'build(ploeg): fetch the Ploeg contract bundle through Harbor', ['apps/unfold/ploeg-release.json']],
+      ['ploeg-tooling', 'build(ploeg): fetch the Ploeg contract bundle from its release', ['apps/unfold/ploeg-release.json']],
       ['both', 'fix: show the field the newly pinned Ploeg sends', ['apps/unfold/change.txt', 'apps/unfold/ploeg-release.json']],
       ['docs', 'fix: clarify shared documentation', ['docs/guide.md']],
       ['site', 'feat(site): add the landing page', ['apps/site/change.txt']],

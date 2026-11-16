@@ -166,7 +166,7 @@ description = "Run both applications and PostgreSQL with a deterministic runtime
 [tasks.release-check-github]
 run = [
   "npm ci --prefix scripts/release-config --omit=dev --ignore-scripts --no-audit --no-fund",
-  "mise exec yq@4.54.3 -- env UNFOLD_RELEASE_FORGE=github NODE_PATH=$PWD/scripts/release-config/node_modules node --test scripts/release-policy.test.cjs scripts/release-isolation.test.cjs scripts/github-workflow-policy.test.cjs",
+  "mise exec yq@4.54.3 -- env NODE_PATH=$PWD/scripts/release-config/node_modules node --test scripts/release-policy.test.cjs scripts/release-isolation.test.cjs scripts/github-workflow-policy.test.cjs",
   "mise exec actionlint@1.7.12 shellcheck@0.11.0 -- actionlint",
 ]
 description = "Test the GitHub Actions workflows, their release policy and release isolation with the repository's own release toolchain, then lint them"

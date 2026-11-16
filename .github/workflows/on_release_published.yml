@@ -223,7 +223,6 @@ jobs:
           VERSION: ${{ needs.parse-release-tag.outputs.version }}
           UNFOLD_IMAGE_DIGEST: ${{ needs.unfold-release-images.outputs.unfold-digest }}
           UNFOLD_AGENT_IMAGE_DIGEST: ${{ needs.unfold-release-images.outputs.unfold-agent-digest }}
-          UNFOLD_RELEASE_HOME: github
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -389,7 +388,6 @@ jobs:
         shell: bash
         env:
           VERSION: ${{ needs.parse-release-tag.outputs.version }}
-          UNFOLD_RELEASE_HOME: github
           GITHUB_TOKEN: ${{ github.token }}
         run: mise exec cosign@2.6.5 -- python3 scripts/publish_release.py unfold "$VERSION"
 
