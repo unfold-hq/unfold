@@ -114,34 +114,6 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "An agent package from the former host, such as agent-standards, pinned by a vX.Y.Z tag in apm.yml.",
-      "managerFilePatterns": [
-        "/(^|/)apm\\.ya?ml$/"
-      ],
-      "matchStrings": [
-        "git:\\s*https://forgejo\\.webgrip\\.dev/webgrip/(?<repo>[a-z0-9._-]+?)(?:\\.git)?\\s*\\n\\s*path:\\s*\\S+\\s*\\n\\s*ref:\\s*(?<currentValue>v\\d+\\.\\d+\\.\\d+)"
-      ],
-      "depNameTemplate": "webgrip/{{{repo}}}",
-      "datasourceTemplate": "git-tags",
-      "packageNameTemplate": "https://forgejo.webgrip.dev/webgrip/{{{repo}}}.git",
-      "versioningTemplate": "semver"
-    },
-    {
-      "customType": "regex",
-      "description": "The agentstd CLI pinned to an agent-standards tag in mise.toml tasks, so the tool moves with the packages.",
-      "managerFilePatterns": [
-        "/(^|/)mise\\.toml$/"
-      ],
-      "matchStrings": [
-        "git\\+https://forgejo\\.webgrip\\.dev/webgrip/agent-standards\\.git@(?<currentValue>v\\d+\\.\\d+\\.\\d+)#subdirectory=cli"
-      ],
-      "depNameTemplate": "webgrip/agent-standards",
-      "datasourceTemplate": "git-tags",
-      "packageNameTemplate": "https://forgejo.webgrip.dev/webgrip/agent-standards.git",
-      "versioningTemplate": "semver"
-    },
-    {
-      "customType": "regex",
       "description": "Update ARGs annotated with '# renovate: datasource=\u2026 depName=\u2026'. The Dockerfiles compose their FROM refs from a registry variable and a digest-pinned tag, which the dockerfile manager cannot replace; tag and digest are captured separately so digest-pinned ARGs stay managed.",
       "managerFilePatterns": [
         "/(^|/)Dockerfile$/"
@@ -437,58 +409,20 @@
       "minimumReleaseAge": "0 days"
     },
     {
-      "description": "Every pin of an agent package installs with agentstd, so the lockfile and the generated agent files arrive in the bump's pull request. A bump of agent files changes what agents read, not what the repository ships, so it lands as chore(agents) and cuts no release.",
+      "description": "A bump of the APM CLI in mise.toml compiles .apm again with the new version, so a change in what it writes arrives in the bump's pull request. A bump of agent files changes what agents read, not what the repository ships, so it lands as chore(agents) and cuts no release.",
       "matchManagers": [
-        "custom.regex"
-      ],
-      "matchFileNames": [
-        "**/apm.yml",
-        "apm.yml",
-        "**/mise.toml",
-        "mise.toml"
-      ],
-      "matchDatasources": [
-        "git-tags"
+        "mise"
       ],
       "matchPackageNames": [
-        "https://forgejo.webgrip.dev/webgrip/**"
+        "apm-cli"
       ],
       "semanticCommitType": "chore",
       "semanticCommitScope": "agents",
       "postUpgradeTasks": {
         "commands": [
           "install-tool uv",
-          "uv tool run --from git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@v0.7.2#subdirectory=cli agentstd install"
-        ],
-        "fileFilters": [
-          "**/*",
-          "**/.*",
-          "**/.*/**"
-        ],
-        "executionMode": "branch"
-      }
-    },
-    {
-      "description": "A bump of agent-standards installs with the CLI from the tag it bumps to, so the lockfile and the generated agent files match that release.",
-      "matchManagers": [
-        "custom.regex"
-      ],
-      "matchFileNames": [
-        "**/apm.yml",
-        "apm.yml",
-        "**/mise.toml",
-        "mise.toml"
-      ],
-      "matchDatasources": [
-        "git-tags"
-      ],
-      "matchDepNames": [
-        "webgrip/agent-standards"
-      ],
-      "postUpgradeTasks": {
-        "commands": [
-          "install-tool uv",
-          "uv tool run --from git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@{{{newValue}}}#subdirectory=cli agentstd install"
+          "uvx --from apm-cli=={{{newVersion}}} apm install --force --no-policy",
+          "uvx --from apm-cli=={{{newVersion}}} apm compile"
         ],
         "fileFilters": [
           "**/*",
@@ -919,27 +853,6 @@
       "groupName": "webgrip CI dependencies",
       "groupSlug": "webgrip-ci",
       "separateMajorMinor": false
-    },
-    {
-      "description": "One pull request per agent package bumps every pin of that package together (apm.yml and the agentstd tag in mise.toml), so the generated files and the lockfile move in one step. The tooling rule turns separateMajorMinor off for pins in mise.toml and comes earlier, so this rule turns it back on.",
-      "matchManagers": [
-        "custom.regex"
-      ],
-      "matchFileNames": [
-        "**/apm.yml",
-        "apm.yml",
-        "**/mise.toml",
-        "mise.toml"
-      ],
-      "matchDatasources": [
-        "git-tags"
-      ],
-      "matchPackageNames": [
-        "https://forgejo.webgrip.dev/webgrip/**"
-      ],
-      "groupName": "{{depName}} agent package",
-      "groupSlug": "agent-package-{{{replace '/' '-' depName}}}",
-      "separateMajorMinor": true
     },
     {
       "description": "A watched agent standard is not a dependency: its pull request asks whether a radar ring moves, so it never merges on its own, needs no soak, and stays one pull request per standard. The docs type keeps it from cutting a release.",

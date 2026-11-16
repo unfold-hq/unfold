@@ -5,6 +5,7 @@ node = "24.22.2"
 go = "1.27.3"
 helm = "4.3.1"
 uv = "0.13.7"
+"pipx:apm-cli" = "0.35.0"
 "npm:@fission-ai/openspec" = "1.16.0"
 regctl = "0.11.7"
 
@@ -39,12 +40,35 @@ run = [
 description = "Install only what Unfold's gate group reads: the Ploeg bundle and chart, Unfold's tools and npm packages; CI's checks-unfold job runs it instead of setup"
 
 [tasks.agents-install]
-run = "uvx --from 'git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@v0.7.2#subdirectory=cli' agentstd install"
-description = "Install the agent-standards packages pinned in apm.yml and compile .apm into .claude/rules and AGENTS.md"
+run = [
+  "apm install --force --no-policy",
+  "apm compile",
+]
+description = "Compile .apm into AGENTS.md, .claude/rules, skills and commands with APM, and record what it wrote in apm.lock.yaml"
 
 [tasks.agents-check]
-run = "uvx --from 'git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@v0.7.2#subdirectory=cli' agentstd check"
-description = "Fail when a generated agent file differs from .apm and apm.lock.yaml, CLAUDE.md imports anything, or the session budget is exceeded"
+run = [
+  "apm audit --ci --no-policy",
+  """
+  set -f
+  generated="AGENTS.md */AGENTS.md apm.lock.yaml .agents .claude .opencode"
+  snapshot="$(mktemp)"
+  cp "$(git rev-parse --git-path index)" "$snapshot"
+  trap 'rm -f "$snapshot"' EXIT
+  export GIT_INDEX_FILE="$snapshot"
+  git add --all -- $generated
+  mise run agents-install
+  drift="$(git diff --name-status -- $generated; git ls-files --others --exclude-standard -- $generated)"
+  if [ -n "$drift" ]; then
+    printf '%s\n' "$drift"
+    git --no-pager diff -- $generated
+    echo 'agents-check: a generated agent file differs from .apm; run mise run agents-install and commit what it writes' >&2
+    exit 1
+  fi
+  echo 'agents-check: the generated agent files match .apm'
+  """,
+]
+description = "Fail when apm audit finds hidden Unicode or a deployed file that differs from apm.lock.yaml, or when compiling .apm again changes a generated agent file"
 
 [tasks.verify]
 run = "node scripts/verify.mjs"
