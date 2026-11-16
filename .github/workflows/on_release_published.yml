@@ -92,16 +92,12 @@ jobs:
           version: 2026.10.25
           install: false
           cache: false
-      - name: Sign in to GHCR and dhi.io
+      - name: Sign in to GHCR
         env:
           GHCR_TOKEN: ${{ github.token }}
-          DHI_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DHI_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
           set -euo pipefail
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-          [ -n "$DHI_USERNAME" ] && [ -n "$DHI_TOKEN" ] || { echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN are required: the images build from dhi.io."; exit 1; }
-          printf '%s' "$DHI_TOKEN" | docker login dhi.io --username "$DHI_USERNAME" --password-stdin
 
       - name: Probe GHCR for an existing image
         id: probe
