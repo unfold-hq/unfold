@@ -346,22 +346,13 @@ deployments:
   content_hash: sha256:18ac65e57d86f5d0c46da55d53582fbfb94ba74d87605e7394a39858fdac3011
 - kind: project-relative
   target: claude
-  value: .claude/rules/forgejo.md
-  runtime: null
-  scope: project
-  owners:
-  - .
-  active_owner: .
-  content_hash: sha256:4e5e272fa024766d9fb8cec042e63f4c2a4c9b85cdfd876bb62879cd7518e61f
-- kind: project-relative
-  target: claude
   value: .claude/rules/github.md
   runtime: null
   scope: project
   owners:
   - .
   active_owner: .
-  content_hash: sha256:81fd48f6834b8a70e5cf9615ea76bdaa3cc5ad54e52529f2d36d3ca41c2ef497
+  content_hash: sha256:aaf0f2678164831e62aa434285596f3ecb9aa8f308287f2b21676e0eb471edef
 - kind: project-relative
   target: claude
   value: .claude/rules/repo.md
@@ -370,7 +361,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:7014993d9afc0c2867c10a2eee1276a4f23e1b6c8db323727f3d4cf834e2fc6c
+  content_hash: sha256:43219957f8f7aab0e6a115d57f50688f43bbea847d1471c157a466eb4516cd54
 - kind: project-relative
   target: claude
   value: .claude/skills/explain-a-dependency-update
@@ -388,7 +379,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8c0f8d75233f5646d91eef9f37dd326c63e1410eb411ffd21dc9d23a05c21ccb
+  content_hash: sha256:46d717742ad0df04f867e59d190e0bc326a18d62606fbe3a5b4deb4dc60fe9a2
 - kind: project-relative
   target: claude
   value: .claude/skills/expressive-product-sites
@@ -919,7 +910,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:8c0f8d75233f5646d91eef9f37dd326c63e1410eb411ffd21dc9d23a05c21ccb
+  content_hash: sha256:46d717742ad0df04f867e59d190e0bc326a18d62606fbe3a5b4deb4dc60fe9a2
 - kind: project-relative
   target: codex
   value: .agents/skills/expressive-product-sites
@@ -1511,7 +1502,6 @@ local_deployed_files:
 - .claude/commands/unfold-review.md
 - .claude/rules/apps-site.md
 - .claude/rules/apps-unfold.md
-- .claude/rules/forgejo.md
 - .claude/rules/github.md
 - .claude/rules/repo.md
 - .claude/skills/explain-a-dependency-update
@@ -1526,7 +1516,7 @@ local_deployed_files:
 - .claude/skills/investigate-session/scripts/investigate.py
 - .opencode/commands/unfold-review.md
 local_deployed_file_hashes:
-  .agents/skills/explain-a-dependency-update/SKILL.md: sha256:8c0f8d75233f5646d91eef9f37dd326c63e1410eb411ffd21dc9d23a05c21ccb
+  .agents/skills/explain-a-dependency-update/SKILL.md: sha256:46d717742ad0df04f867e59d190e0bc326a18d62606fbe3a5b4deb4dc60fe9a2
   .agents/skills/expressive-product-sites/SKILL.md: sha256:57a3add9d93e378fa65c6e0eaf220cefcb041e7dc041e1dee100c5e3908770ca
   .agents/skills/expressive-product-sites/agents/openai.yaml: sha256:f7b4dfafb76f2aa68d52ac82a72ce2b57554fd0d9042822aeb5382c47152c1e2
   .agents/skills/expressive-product-sites/references/implementation-and-validation.md: sha256:6ff4edabd16abbf6afed31a2923c4639aa02580510bf1cfbfe6791e043bbf3c4
@@ -1536,10 +1526,9 @@ local_deployed_file_hashes:
   .claude/commands/unfold-review.md: sha256:ceda8bf0253792d6be1d8d5022f6c437e3c7c91cf0930592254738bdb33cb700
   .claude/rules/apps-site.md: sha256:773c4b5d7e744cf1513aa98fee0e56c8e7db09f9af0c31fab76dd6f92eaf397b
   .claude/rules/apps-unfold.md: sha256:e29cee8b4c493f866155363897264c5dff260fa18bdcdae08d1442d7226c3f17
-  .claude/rules/forgejo.md: sha256:4e5e272fa024766d9fb8cec042e63f4c2a4c9b85cdfd876bb62879cd7518e61f
-  .claude/rules/github.md: sha256:81fd48f6834b8a70e5cf9615ea76bdaa3cc5ad54e52529f2d36d3ca41c2ef497
-  .claude/rules/repo.md: sha256:7014993d9afc0c2867c10a2eee1276a4f23e1b6c8db323727f3d4cf834e2fc6c
-  .claude/skills/explain-a-dependency-update/SKILL.md: sha256:8c0f8d75233f5646d91eef9f37dd326c63e1410eb411ffd21dc9d23a05c21ccb
+  .claude/rules/github.md: sha256:aaf0f2678164831e62aa434285596f3ecb9aa8f308287f2b21676e0eb471edef
+  .claude/rules/repo.md: sha256:43219957f8f7aab0e6a115d57f50688f43bbea847d1471c157a466eb4516cd54
+  .claude/skills/explain-a-dependency-update/SKILL.md: sha256:46d717742ad0df04f867e59d190e0bc326a18d62606fbe3a5b4deb4dc60fe9a2
   .claude/skills/expressive-product-sites/SKILL.md: sha256:57a3add9d93e378fa65c6e0eaf220cefcb041e7dc041e1dee100c5e3908770ca
   .claude/skills/expressive-product-sites/agents/openai.yaml: sha256:f7b4dfafb76f2aa68d52ac82a72ce2b57554fd0d9042822aeb5382c47152c1e2
   .claude/skills/expressive-product-sites/references/implementation-and-validation.md: sha256:6ff4edabd16abbf6afed31a2923c4639aa02580510bf1cfbfe6791e043bbf3c4
