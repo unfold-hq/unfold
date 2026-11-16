@@ -73,7 +73,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:938211b03d3cc339b1353c5bd227e7343350b834de628a83e73023efc2c57759
+  content_hash: sha256:d55051372863bca2860bd0f19b388c2026bc45ceb50a6a16d3e17baf0380dcb5
 - kind: project-relative
   target: claude
   value: .claude/skills/expressive-product-sites
@@ -163,7 +163,7 @@ deployments:
   owners:
   - .
   active_owner: .
-  content_hash: sha256:938211b03d3cc339b1353c5bd227e7343350b834de628a83e73023efc2c57759
+  content_hash: sha256:d55051372863bca2860bd0f19b388c2026bc45ceb50a6a16d3e17baf0380dcb5
 - kind: project-relative
   target: codex
   value: .agents/skills/expressive-product-sites
@@ -275,7 +275,7 @@ local_deployed_files:
 - .claude/skills/investigate-session/scripts/investigate.py
 - .opencode/commands/unfold-review.md
 local_deployed_file_hashes:
-  .agents/skills/explain-a-dependency-update/SKILL.md: sha256:938211b03d3cc339b1353c5bd227e7343350b834de628a83e73023efc2c57759
+  .agents/skills/explain-a-dependency-update/SKILL.md: sha256:d55051372863bca2860bd0f19b388c2026bc45ceb50a6a16d3e17baf0380dcb5
   .agents/skills/expressive-product-sites/SKILL.md: sha256:57a3add9d93e378fa65c6e0eaf220cefcb041e7dc041e1dee100c5e3908770ca
   .agents/skills/expressive-product-sites/agents/openai.yaml: sha256:f7b4dfafb76f2aa68d52ac82a72ce2b57554fd0d9042822aeb5382c47152c1e2
   .agents/skills/expressive-product-sites/references/implementation-and-validation.md: sha256:6ff4edabd16abbf6afed31a2923c4639aa02580510bf1cfbfe6791e043bbf3c4
@@ -288,7 +288,7 @@ local_deployed_file_hashes:
   .claude/rules/conventions.md: sha256:1d39328a50aa4f885fa78c2ff4ae024a9eee75b9f865f6c9ab86030483aed8a3
   .claude/rules/github.md: sha256:aaf0f2678164831e62aa434285596f3ecb9aa8f308287f2b21676e0eb471edef
   .claude/rules/repo.md: sha256:15ae26dd1bb93a161f80ba7433e2ef4bfaa1ab64ea07bf4d291dc0f3a1b0da8d
-  .claude/skills/explain-a-dependency-update/SKILL.md: sha256:938211b03d3cc339b1353c5bd227e7343350b834de628a83e73023efc2c57759
+  .claude/skills/explain-a-dependency-update/SKILL.md: sha256:d55051372863bca2860bd0f19b388c2026bc45ceb50a6a16d3e17baf0380dcb5
   .claude/skills/expressive-product-sites/SKILL.md: sha256:57a3add9d93e378fa65c6e0eaf220cefcb041e7dc041e1dee100c5e3908770ca
   .claude/skills/expressive-product-sites/agents/openai.yaml: sha256:f7b4dfafb76f2aa68d52ac82a72ce2b57554fd0d9042822aeb5382c47152c1e2
   .claude/skills/expressive-product-sites/references/implementation-and-validation.md: sha256:6ff4edabd16abbf6afed31a2923c4639aa02580510bf1cfbfe6791e043bbf3c4
