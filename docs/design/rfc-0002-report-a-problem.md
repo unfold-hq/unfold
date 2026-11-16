@@ -6,7 +6,9 @@
 
 Accepted with its ADR on 2026-10-05. **Built on 2026-10-11 (VIK-1895), in the web application:** the top-bar button and palette command, the screenshot with private regions blurred, the markup canvas, the console and request buffers, `POST /api/reports`, filing into Forgejo and Vikunja with attachments, and the 24-hour retry. The target is set in the configuration (`reports`, see [task connections](../../apps/unfold/docs/operations/task-connections.md)), not yet in a settings screen.
 
-Still proposed: the VS Code extension command, the Settings target screen, GitHub, GitLab and ClickUp filing, and the replay attachment.
+**Built on 2026-11-17:** filing into GitHub issues, on GitHub.com, GHE.com and Enterprise Server, without attachments: the issue body names the files as not attached.
+
+Still proposed: the VS Code extension command, the Settings target screen, GitLab and ClickUp filing, linking GitHub issues to Unfold's stored copy of the files, and the replay attachment.
 
 What building it changed:
 
@@ -111,13 +113,13 @@ Settings → Insight and feedback names a target per tenant: a provider and a re
 | --- | --- | --- | --- |
 | Forgejo | `POST /repos/{owner}/{repo}/issues` (`issueCreateIssue`) | `POST /repos/{owner}/{repo}/issues/{index}/assets` (`issueCreateIssueAttachment`), field `attachment` | first |
 | Vikunja | `PUT /projects/{id}/tasks` | `PUT /tasks/{id}/attachments`, field `files` | first |
-| GitHub | `POST /repos/{owner}/{repo}/issues` | none in the REST API; the issue links to Unfold's stored copy | later |
+| GitHub | `POST /repos/{owner}/{repo}/issues` | none in the REST API; the issue names the files as not attached | built without attachments |
 | GitLab | `POST /projects/{id}/issues` | `POST /projects/{id}/uploads`, then embed | later |
 | ClickUp | `POST /list/{list_id}/task` | `POST /task/{task_id}/attachment` | later |
 
 Unfold's tracker clients in `apps/unfold/src/tasks.ts` read every provider but write only Vikunja comments and assignees. This adds a `createIssue` per provider, with its own tests. The credential is the tenant's existing source credential, which needs issue-write scope. Ploeg's `TrackerProvider` is not changed.
 
-For GitHub, where the API has no attachment upload, Unfold keeps the files and links them from the issue for 90 days.
+For GitHub, where the API has no attachment upload, the built adapter names the files in the issue body as not attached. Proposed: Unfold keeps the files and links them from the issue for 90 days.
 
 ## Unfold's own reports
 

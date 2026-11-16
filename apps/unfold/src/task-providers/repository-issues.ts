@@ -1,6 +1,6 @@
-import type { TaskSourceConfig } from '../tasks.ts';
-import type { DetailReaders, ParsedTask, TaskDetails } from './registry.ts';
-import { field, nativeTaskId, numericId, pathProject, record, TaskError, updated } from './shared.ts';
+import type { IssueRelease, TaskSourceConfig } from '../tasks.ts';
+import type { DetailReaders, FileRequest, ParsedTask, TaskDetails } from './registry.ts';
+import { field, nativeTaskId, numericId, pathProject, record, TaskError, updated, when } from './shared.ts';
 
 /** The issues collection of an `owner/repository` source, as Forgejo and GitHub name it. */
 export function repositoryIssuePath(source: TaskSourceConfig): string {
@@ -35,4 +35,24 @@ export function repositoryIssueUrl(source: TaskSourceConfig, id: string, base: s
 /** The `Authorization` header, when the source has a token. */
 export function authorize(source: TaskSourceConfig, headers: Record<string, string>, scheme: string): void {
   if (source.token) headers.Authorization = scheme ? `${scheme} ${source.token}` : source.token;
+}
+
+function releaseVersion(tag: string): { line: string; version: string } | undefined {
+  const match = /^(.*?v?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(tag);
+  return match ? { line: match[1], version: match[2] } : undefined;
+}
+
+/**
+ * The first release of the running version's line made after a fix merged, read from the releases at `path` on Forgejo
+ * or GitHub. A release is only named when one of them carries the running version, so another product's tags never count.
+ */
+export async function releaseAfter(call: FileRequest, path: string, mergedAt: string, version: string): Promise<IssueRelease | undefined> {
+  const listed = await call('GET', path);
+  const releases = (Array.isArray(listed) ? listed : []).map(entry => record(entry)).filter(entry => !entry.draft && typeof entry.tag_name === 'string' && when(entry.created_at))
+    .map(entry => ({ tag: String(entry.tag_name), url: typeof entry.html_url === 'string' ? entry.html_url : '', at: when(entry.created_at)! }));
+  const running = releases.find(entry => releaseVersion(entry.tag)?.version === version);
+  if (!running) return undefined;
+  const line = releaseVersion(running.tag)!.line;
+  const first = releases.filter(entry => releaseVersion(entry.tag)?.line === line && entry.at >= mergedAt).sort((a, b) => a.at.localeCompare(b.at))[0];
+  return first ? { ...first, live: first.at <= running.at } : undefined;
 }

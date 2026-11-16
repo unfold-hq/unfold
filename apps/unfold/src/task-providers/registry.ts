@@ -51,8 +51,8 @@ export interface IssueFiling {
   /** How the report dialog names the target. */
   describe(project: string): string;
   create(source: TaskSourceConfig, project: string, title: string, body: string, call: FileRequest): Promise<FiledIssue>;
-  /** Attaches one file and returns its download address when the tracker gives one. */
-  attach(source: TaskSourceConfig, project: string, issue: FiledIssue, file: IssueFile, call: FileRequest): Promise<string | undefined>;
+  /** Attaches one file and returns its download address when the tracker gives one. Absent when the tracker takes no file uploads through its API; the body then names the files as not attached. */
+  attach?(source: TaskSourceConfig, project: string, issue: FiledIssue, file: IssueFile, call: FileRequest): Promise<string | undefined>;
   /** Replaces the filed body, so it can show a screenshot uploaded after it. Absent when the tracker cannot show one. */
   updateBody?(source: TaskSourceConfig, project: string, issue: FiledIssue, body: string, call: FileRequest): Promise<void>;
   state(source: TaskSourceConfig, project: string, issue: FiledIssue, version: string, login: string, call: FileRequest): Promise<IssueState>;

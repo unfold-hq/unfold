@@ -64,7 +64,7 @@ test('every registry refuses a provider no adapter registered', async () => {
 test('each task provider adapter declares its capabilities and the shared code honours them', () => {
   const expected: Record<string, { handoff: boolean; issues: boolean; html: boolean; reference?: string; link?: string; routes: boolean; fixture: boolean }> = {
     forgejo: { handoff: false, issues: true, html: false, routes: false, fixture: false },
-    github: { handoff: false, issues: false, html: false, routes: false, fixture: false },
+    github: { handoff: false, issues: true, html: false, routes: false, fixture: false },
     gitlab: { handoff: false, issues: false, html: false, link: 'gitlab', routes: false, fixture: false },
     vikunja: { handoff: true, issues: true, html: true, reference: 'VIK-7', routes: true, fixture: false },
     clickup: { handoff: true, issues: false, html: false, link: 'clickup', routes: false, fixture: false },
@@ -89,6 +89,7 @@ test('each task provider adapter declares its capabilities and the shared code h
   assert.equal(describeIssueTarget(sourceOf('forgejo'), 'team/orders'), 'Forgejo · team/orders');
   assert.equal(describeIssueTarget(sourceOf('vikunja'), '30'), 'Vikunja · project 30');
   assert.equal(describeIssueTarget(sourceOf('jira'), 'OPS'), 'Jira · project OPS');
+  assert.equal(describeIssueTarget(sourceOf('github'), 'team/orders'), 'GitHub · team/orders');
   assert.equal(linkProviderLabel('gitlab'), 'GitLab');
   assert.equal(linkProviderLabel('clickup'), 'ClickUp');
 });
@@ -308,8 +309,8 @@ test('Report a problem files into a third registered tracker that declares issue
 
   const source: TaskSourceConfig = { id: 'desk-feedback', name: 'Feedback', provider: 'desk', baseUrl: `${server.origin}/rest`, project: 'ops', repositoryId: 'orders', executionOwner: 'interactive', token: 'desk-token' };
   assert.deepEqual(reportSettings(undefined, [source], 'live'), { source, project: 'ops' }, 'a registered tracker that files issues can be the default target');
-  assert.throws(() => reportSettings({ source: 'nope' }, [source], 'live'), /must name a Forgejo, Vikunja, Jira or Desk task source/);
-  assert.throws(() => reportSettings({ provider: 'github', baseUrl: 'https://api.github.com', project: 'a/b', tokenEnv: 'X' }, [], 'live'), /reports.provider must be forgejo, vikunja, jira or desk/);
+  assert.throws(() => reportSettings({ source: 'nope' }, [source], 'live'), /must name a Forgejo, GitHub, Vikunja, Jira or Desk task source/);
+  assert.throws(() => reportSettings({ provider: 'gitlab', baseUrl: 'https://gitlab.example/api/v4', project: 'a/b', tokenEnv: 'X' }, [], 'live'), /reports.provider must be forgejo, github, vikunja, jira or desk/);
 
   const store = new Store(':memory:');
   t.after(() => store.close());

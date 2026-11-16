@@ -774,7 +774,7 @@
           "additionalProperties": false,
           "required": ["provider", "baseUrl", "project", "tokenEnv"],
           "properties": {
-            "provider": { "type": "string", "enum": ["forgejo", "vikunja"], "description": "Tracker reports are filed on." },
+            "provider": { "type": "string", "enum": ["forgejo", "github", "vikunja", "jira"], "description": "Tracker reports are filed on." },
             "baseUrl": { "type": "string", "maxLength": 2048, "pattern": "^https?://\\S+$", "description": "Tracker API root." },
             "project": { "type": "string", "minLength": 1, "description": "Repository or project reports are filed in." },
             "tokenEnv": { "$ref": "#/$defs/envName", "description": "Environment variable holding the tracker token; unset keeps reports without filing them." },

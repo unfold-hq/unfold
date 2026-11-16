@@ -310,6 +310,9 @@ export function issueBodyFormat(source: TaskSourceConfig): 'markdown' | 'html' {
 /** How the report dialog names a target. */
 export function describeIssueTarget(source: TaskSourceConfig, project: string): string { return filing(source).describe(project); }
 
+/** Whether the tracker of `source` takes Report a problem's files as attachments. */
+export function canAttachToIssue(source: TaskSourceConfig): boolean { return Boolean(filing(source).attach); }
+
 /** Whether a filed issue's body can be replaced after its files are attached. */
 export function canUpdateIssueBody(source: TaskSourceConfig): boolean { return Boolean(filing(source).updateBody); }
 
@@ -319,10 +322,12 @@ export async function createIssue(source: TaskSourceConfig, project: string, tit
   return filing(source).create(source, target, title, body, call(source));
 }
 
-/** Attaches one file to a filed issue or task and returns its download address when the tracker gives one. */
+/** Attaches one file to a filed issue or task and returns its download address when the tracker gives one; refuses on a tracker that takes no uploads. */
 export async function attachToIssue(source: TaskSourceConfig, project: string, issue: FiledIssue, file: IssueFile): Promise<string | undefined> {
   const target = reportProject(source, project);
-  return filing(source).attach(source, target, issue, file, call(source));
+  const attach = filing(source).attach;
+  if (!attach) throw new TaskError(422, 'report_attachments_unsupported', `${trackerName(source)} issues take no file uploads through its API.`);
+  return attach(source, target, issue, file, call(source));
 }
 
 /** Replaces a filed issue's body, so it can show the screenshot uploaded after it was created; nothing on a tracker that cannot. */

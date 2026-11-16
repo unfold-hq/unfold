@@ -11,7 +11,7 @@ Each task system is an adapter in `src/task-providers/`, one file per provider, 
 | Provider | Hand to Ploeg | Report a problem | Descriptions | Reference | Personal link |
 | --- | --- | --- | --- | --- | --- |
 | `forgejo` | no | issues | Markdown | none | none |
-| `github` | no | no | Markdown | none | none |
+| `github` | no | issues, without attachments | Markdown | none | none |
 | `gitlab` | no | no | Markdown | none | `gitlab` |
 | `vikunja` | yes, and Ploeg's assignment routes | tasks | HTML, shown as Markdown | `VIK-<id>` | none |
 | `clickup` | yes | no | Markdown, tidied for display | none; a custom task ID shows as the task's reference | `clickup`, and set-up by name |
@@ -144,7 +144,7 @@ Use a fine-grained personal access token limited to the selected repository with
 
 The `baseUrl` is `https://api.github.com` for GitHub.com and `https://api.SUBDOMAIN.ghe.com`, with no path, for an enterprise on GHE.com, where `SUBDOMAIN` is the enterprise's dedicated subdomain ([GitHub's REST API base URL](https://docs.github.com/en/enterprise-cloud@latest/rest/using-the-rest-api/getting-started-with-the-rest-api), [GHE.com network details](https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/network-details-for-ghecom)). Enterprise Server keeps its own host with the `/api/v3` path. Any other `ghe.com` host or path is rejected, and issue links open on the matching web host: `github.com`, `SUBDOMAIN.ghe.com` or the Enterprise Server host.
 
-The current connection accepts a provisioned token. It does not install a GitHub App, renew installation tokens, or create pull requests. Public and private connectivity must still be qualified against the configured GitHub.com, GHE.com or Enterprise Server instance.
+The current connection accepts a provisioned token. It does not install a GitHub App, renew installation tokens, or create pull requests. A GitHub App installation token expires after an hour, so it only works where something outside Unfold renews the variable `tokenEnv` names; a fine-grained personal access token, preferably of a dedicated machine account, is the shape this connection is built for. To file [Report a problem](#file-report-a-problem-into-a-tracker) issues the same token also needs **Issues: read and write**. Public and private connectivity must still be qualified against the configured GitHub.com, GHE.com or Enterprise Server instance.
 
 ### GitLab
 
@@ -300,7 +300,7 @@ The status beside the task shows which team holds it, Ploeg's Work Items for it 
 
 ## File Report a problem into a tracker
 
-Report a problem ([RFC-0002](../../../../docs/design/rfc-0002-report-a-problem.md)) files what people report into any registered tracker whose adapter declares issue filing: a Forgejo issue, a Vikunja task or a Jira issue today, with the screenshot, `console.json` and `requests.json` attached. The adapter decides the body format (Markdown on Forgejo, HTML on Vikunja, ADF converted from Markdown on Jira), how files attach, and what Unfold reads back when it follows the report. It uses one of the task sources above:
+Report a problem ([RFC-0002](../../../../docs/design/rfc-0002-report-a-problem.md)) files what people report into any registered tracker whose adapter declares issue filing: a Forgejo issue, a GitHub issue, a Vikunja task or a Jira issue today. The screenshot, `console.json` and `requests.json` are attached on every tracker except GitHub, whose REST API has no endpoint to upload a file to an issue: there the issue body ends with *Not attached, because this tracker takes no file uploads* and the file names, and Unfold deletes the files with the report's other files after 90 days. The adapter decides the body format (Markdown on Forgejo and GitHub, HTML on Vikunja, ADF converted from Markdown on Jira), whether and how files attach, and what Unfold reads back when it follows the report. It uses one of the task sources above:
 
 ```json
 "reports": { "source": "forgejo-unfold", "project": "acme/unfold" }
@@ -312,13 +312,14 @@ Or give reports a connection of their own, which is not a task source and never 
 "reports": { "provider": "forgejo", "baseUrl": "https://forgejo.example/api/v1", "project": "acme/unfold", "tokenEnv": "UNFOLD_REPORTS_FORGEJO_TOKEN" }
 ```
 
-* `source` names a task source with a token whose adapter files issues (Forgejo, Vikunja or Jira). Leave `reports` out to use the first such source that Unfold owns (`executionOwner: interactive`) and its own project. A source Ploeg dispatches from is never the default, and naming one requires a different `project`, so a report never becomes agent work. Set `reports` to `false` to keep every report in Unfold and file nothing.
-* `project` is optional: `owner/repository` on Forgejo, a numeric project ID on Vikunja, or a project key on Jira, when reports belong somewhere other than the source's work.
+* `source` names a task source with a token whose adapter files issues (Forgejo, GitHub, Vikunja or Jira). Leave `reports` out to use the first such source that Unfold owns (`executionOwner: interactive`) and its own project. A source Ploeg dispatches from is never the default, and naming one requires a different `project`, so a report never becomes agent work. Set `reports` to `false` to keep every report in Unfold and file nothing.
+* `project` is optional: `owner/repository` on Forgejo and GitHub, a numeric project ID on Vikunja, or a project key on Jira, when reports belong somewhere other than the source's work.
 * If the variable `tokenEnv` names is not set, Unfold starts anyway, logs `reports.token_missing` and keeps reports without filing them.
-* The token needs to create issues and upload issue attachments on Forgejo (`write:issue`), create tasks and attachments in the project on Vikunja, or create issues and attachments and add comments in the project on Jira (see [Jira](#jira)).
+* On Forgejo and GitHub the issue gets the label `reported-in-app` when the repository has one by that name; Unfold never creates it. GitHub only applies a label set by an account with at least triage access to the repository, and files the issue without it otherwise.
+* The token needs to create issues and upload issue attachments on Forgejo (`write:issue`), create issues and comment on them on GitHub (a fine-grained token with **Issues: read and write** on the repository; see [GitHub](#github)), create tasks and attachments in the project on Vikunja, or create issues and attachments and add comments in the project on Jira (see [Jira](#jira)).
 * Unfold keeps each report before it files it. If the tracker refuses or cannot be reached, the person sees "Saved. Unfold will file it when the tracker answers", and Unfold retries with growing gaps for 24 hours, continuing an issue it already created. The server log line `report.file_failed` gives the tracker's answer.
 * Files are deleted 90 days after a report is filed. The report row and its address stay.
-* Unfold follows each filed report on the tracker every ten minutes for 180 days (two weeks after it closes, longer while a merged fix waits for a release) and shows the reporter where it stands. On Forgejo the token also needs to read the repository's pull requests and releases (`read:repository`) for *Fixed in* a release. A failed read logs `report.follow_failed` and keeps the last answer.
+* Unfold follows each filed report on the tracker every ten minutes for 180 days (two weeks after it closes, longer while a merged fix waits for a release) and shows the reporter where it stands. On Forgejo the token also needs to read the repository's pull requests and releases (`read:repository`) for *Fixed in* a release. On GitHub the fix is the newest pull request of the same repository in the issue's timeline that references it, and *Fixed in* needs **Contents: read** to list releases; the token's own comments are recognised through `GET /user`, which an installation token cannot read. A failed read logs `report.follow_failed` and keeps the last answer.
 * People can reply to their filed report from Unfold, and a repeat report joins an open one as a comment. Both are written by the token's account, so the token needs to comment on issues or tasks.
 * `acknowledgement` (optional, both forms) is one line of at most 280 characters the success screen shows, for example `"We read every report on weekdays."`. Leave it out rather than promise a response time you do not keep.
 * With no tracker configured, and always in the demo, Unfold keeps the report and says so.

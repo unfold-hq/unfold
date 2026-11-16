@@ -1,23 +1,7 @@
-import type { FiledIssue, IssueFix, IssueRelease, TaskSourceConfig } from '../tasks.ts';
+import type { FiledIssue, IssueFix, TaskSourceConfig } from '../tasks.ts';
 import type { FileRequest, IssueFiling, TaskProviderAdapter } from './registry.ts';
-import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, repositoryIssueDetails, repositoryIssuePath, repositoryIssueUrl } from './repository-issues.ts';
+import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, releaseAfter, repositoryIssueDetails, repositoryIssuePath, repositoryIssueUrl } from './repository-issues.ts';
 import { apiWebRoot, listPage, numericId, plainComment, readOne, record, requireSuffix, TaskError, when } from './shared.ts';
-
-function releaseVersion(tag: string): { line: string; version: string } | undefined {
-  const match = /^(.*?v?)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)$/.exec(tag);
-  return match ? { line: match[1], version: match[2] } : undefined;
-}
-
-async function releaseAfter(call: FileRequest, target: string, mergedAt: string, version: string): Promise<IssueRelease | undefined> {
-  const listed = await call('GET', `/repos/${target}/releases?limit=50`);
-  const releases = (Array.isArray(listed) ? listed : []).map(entry => record(entry)).filter(entry => !entry.draft && typeof entry.tag_name === 'string' && when(entry.created_at))
-    .map(entry => ({ tag: String(entry.tag_name), url: typeof entry.html_url === 'string' ? entry.html_url : '', at: when(entry.created_at)! }));
-  const running = releases.find(entry => releaseVersion(entry.tag)?.version === version);
-  if (!running) return undefined;
-  const line = releaseVersion(running.tag)!.line;
-  const first = releases.filter(entry => releaseVersion(entry.tag)?.line === line && entry.at >= mergedAt).sort((a, b) => a.at.localeCompare(b.at))[0];
-  return first ? { ...first, live: first.at <= running.at } : undefined;
-}
 
 /**
  * Report a problem on Forgejo: an issue in a repository with the label `reported-in-app` when the repository has it,
@@ -60,7 +44,7 @@ export const forgejoIssues: IssueFiling = {
       const pull = record(await call('GET', `/repos/${target}/pulls/${reference.number}`).catch(() => reference));
       fix = { number: String(reference.number), url: String(pull.html_url ?? reference.html_url ?? ''), merged: pull.merged === true, ...(when(pull.merged_at) ? { mergedAt: when(pull.merged_at) } : {}) };
     }
-    const release = fix?.mergedAt ? await releaseAfter(call, target, fix.mergedAt, version).catch(() => undefined) : undefined;
+    const release = fix?.mergedAt ? await releaseAfter(call, `/repos/${target}/releases?limit=50`, fix.mergedAt, version).catch(() => undefined) : undefined;
     const labels = (Array.isArray(value.labels) ? value.labels : []).map(label => String(record(label).name ?? '')).filter(Boolean);
     const assignees = Array.isArray(value.assignees) ? value.assignees : [];
     return { open: value.state !== 'closed', ...(when(value.closed_at) ? { closedAt: when(value.closed_at) } : {}), labels, assigned: assignees.length > 0, comments: comments.slice(-10), ...(fix ? { fix } : {}), ...(release ? { release } : {}) };
