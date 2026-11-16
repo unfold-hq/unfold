@@ -108,7 +108,7 @@ test('the workflows use only the repository secrets the move names, and the Clou
 
 test('a pull request runs the push\'s checks without write access or secrets, and builds and scans the image contexts from a fork too', () => {
   assert.deepEqual(Object.keys(pr.on).sort(), ['pull_request', 'workflow_dispatch']);
-  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-policy', 'warnings']);
+  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-policy', 'warnings']);
   for (const name of ['checks', 'checks-unfold', 'warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
   for (const [name, job] of Object.entries(pr.jobs)) {
     assert.equal(job.permissions, undefined, `${name} keeps the read-only default`);
@@ -124,6 +124,18 @@ test('a pull request runs the push\'s checks without write access or secrets, an
   for (const step of gates) assert.equal(step.with['budgets-file'], 'apps/unfold/ops/security/cve-budgets.yaml');
   const verify = actions.verify.runs.steps.find(step => /mise run verify/.test(step.run ?? ''));
   assert.equal(verify.env.UNFOLD_REQUIRE_IMPORT_NOTES, 'true');
+});
+
+test('a pull request scans only the commits it adds for secrets, with the repository\'s gitleaks rules and the docs scan\'s pinned image', () => {
+  const job = pr.jobs.gitleaks;
+  assert.equal(job.steps[0].with['fetch-depth'], 0, 'the base commit must be in the clone for the range to resolve');
+  const scan = job.steps.at(-1);
+  assert.deepEqual(scan.env, { BASE: '${{ github.event.pull_request.base.sha }}', HEAD_SHA: '${{ github.event.pull_request.head.sha }}' });
+  assert.match(scan.run, /--network none/);
+  assert.match(scan.run, / git \/repo --config \/repo\/\.gitleaks\.toml --log-opts="\$\{BASE:-origin\/development\}\.\.\$\{HEAD_SHA:-HEAD\}"/);
+  const image = image => image.match(/ghcr\.io\/gitleaks\/gitleaks:\S+/)[0];
+  assert.equal(image(scan.run), image(workflows['on_docs_change.yml'].jobs.build.steps.map(step => step.run ?? '').join('\n')), 'one gitleaks release scans the docs and the pull requests');
+  assert.doesNotMatch(JSON.stringify(job), /gitleaks-action|GITLEAKS_LICENSE/);
 });
 
 test('the pull request gate waits for every job except the advisory ones, and passes only when each succeeded', () => {
