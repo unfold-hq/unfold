@@ -25,7 +25,7 @@ export function isIndexable(siteUrl: string): boolean {
 export const SITE_INDEXABLE = isIndexable(SITE_URL);
 export const SITE_NAME = 'Unfold';
 
-export const SOURCE_URL = 'https://forgejo.webgrip.dev/webgrip/unfold';
+export const SOURCE_URL = 'https://github.com/unfold-hq/unfold';
 export const DEMO_GUIDE_URL = `${SOURCE_URL}/src/branch/development/docs/workflows/local-demo.md`;
 export const CAPABILITY_MATRIX_URL = `${SOURCE_URL}/src/branch/development/docs/reference/capability-matrix.md`;
 export const LICENSE_URL = `${SOURCE_URL}/src/branch/development/LICENSE`;

@@ -24,7 +24,7 @@ standards = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(standards)
 
 survey_dir = standards.catalogue_dir / 'survey'
-user_agent = 'unfold-agent-standards-survey/1 (+https://forgejo.webgrip.dev/webgrip/unfold)'
+user_agent = 'unfold-agent-standards-survey/1 (+https://github.com/unfold-hq/unfold)'
 page_chars = 2500
 source_chars = 4000
 lookback_days = 10

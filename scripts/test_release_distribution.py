@@ -82,8 +82,8 @@ class DistributionTests(unittest.TestCase):
     def test_the_published_chart_names_unfold_as_its_source_and_home(self):
         root = Path(__file__).resolve().parent.parent
         metadata = release_registry.command('helm', 'show', 'chart', str(root / 'apps/unfold/ops/helm/unfold')).splitlines()
-        self.assertIn('home: https://forgejo.webgrip.dev/webgrip/unfold', metadata)
-        self.assertEqual(metadata[metadata.index('sources:') + 1], '- https://github.com/webgrip/unfold')
+        self.assertIn('home: https://github.com/unfold-hq/unfold', metadata)
+        self.assertEqual(metadata[metadata.index('sources:') + 1], '- https://github.com/unfold-hq/unfold')
 
     def test_the_released_chart_defaults_every_unfold_image_to_its_pushed_digest(self):
         root = Path(__file__).resolve().parent.parent
