@@ -1752,6 +1752,21 @@
       "type": "object",
       "properties": { "enabled": { "type": "boolean" }, "host": { "type": "string" }, "className": { "type": "string" }, "tlsSecret": { "type": "string" } }
     },
+    "tests": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The Helm test hook: one pod that checks /readyz and its version, /healthz's Ploeg contract and /api/auth/methods through the Service.",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "podLabels": { "type": "object", "additionalProperties": { "type": "string" } },
+        "networkPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" } }
+        },
+        "resources": { "type": "object" }
+      }
+    },
     "ploeg": {
       "type": "object",
       "properties": { "enabled": { "type": "boolean" } },
