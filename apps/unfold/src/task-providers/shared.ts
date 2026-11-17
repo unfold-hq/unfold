@@ -28,7 +28,7 @@ const maxCommentText = 600;
 const quietRetryMs = 2000;
 const limitedUntil = new Map<string, number>();
 
-function limitKey(source: TaskSourceConfig): string { return createHash('sha256').update(`${source.baseUrl}\u0000${source.token ?? ''}`).digest('hex'); }
+function limitKey(source: TaskSourceConfig): string { return createHash('sha256').update(`${source.baseUrl}\u0000${source.token ?? source.app?.id ?? ''}`).digest('hex'); }
 
 /** Milliseconds until a tracker allows asking again, read from `Retry-After` or `X-RateLimit-Reset` (epoch seconds, as ClickUp and GitHub send it), or undefined when it says neither. */
 export function retryDelay(headers: Headers, now = Date.now()): number | undefined {
@@ -115,7 +115,8 @@ export function entries(value: unknown): Record<string, unknown>[] { return Arra
 
 /** The readers an adapter's `details` uses, which redact the source's token from every label and name. */
 export function detailReaders(source: TaskSourceConfig): DetailReaders {
-  const label = (entry: unknown, max = 200) => typeof entry === 'string' && entry.trim() && entry.length <= max && !/[\u0000-\u001f\u007f]/.test(entry) ? (source.token ? entry.replaceAll(source.token, '[redacted]') : entry) : undefined;
+  const secret = sourceSecret(source);
+  const label = (entry: unknown, max = 200) => typeof entry === 'string' && entry.trim() && entry.length <= max && !/[\u0000-\u001f\u007f]/.test(entry) ? (secret ? entry.replaceAll(secret, '[redacted]') : entry) : undefined;
   const color = (entry: unknown) => typeof entry === 'string' && /^#?[0-9a-fA-F]{6}$/.test(entry) ? `#${entry.replace('#', '').toLowerCase()}` : undefined;
   const date = (entry: unknown, milliseconds = false) => {
     if ((typeof entry !== 'string' && typeof entry !== 'number') || entry === '' || String(entry).startsWith('0001-')) return undefined;
@@ -136,6 +137,29 @@ export function headers(source: TaskSourceConfig): Record<string, string> {
   return result;
 }
 
+/** Whether a source carries a credential of its own: a token or an app that mints one. */
+export function hasCredential(source: TaskSourceConfig): boolean { return Boolean(source.token || source.app); }
+
+/** The credential a tracker answer must never echo: the source's token, or the app token it holds now. */
+export function sourceSecret(source: TaskSourceConfig): string | undefined {
+  return source.token ?? (source.app ? taskProvider(source.provider).appAuth?.cached(source) : undefined);
+}
+
+async function credentialed(source: TaskSourceConfig, fresh: boolean): Promise<TaskSourceConfig> {
+  if (!source.app) return source;
+  const app = taskProvider(source.provider).appAuth;
+  if (!app) throw new TaskError(502, 'task_credentials_rejected', `${taskProvider(source.provider).label} sources cannot authenticate as an app.`);
+  return { ...source, token: await app.token(source, fresh) };
+}
+
+/** Sends one request with the source's credential; an app source whose token the tracker no longer accepts mints a new one and asks once more. */
+async function send(source: TaskSourceConfig, url: URL, init: Omit<RequestInit, 'headers'>, extra: Record<string, string> = {}): Promise<Response> {
+  const response = await fetch(url, { ...init, headers: { ...headers(await credentialed(source, false)), ...extra } });
+  if (response.status !== 401 || !source.app) return response;
+  await response.body?.cancel();
+  return fetch(url, { ...init, headers: { ...headers(await credentialed(source, true)), ...extra } });
+}
+
 /**
  * Reads one JSON response from a tracker, refusing redirects, non-JSON answers and anything over 2 MiB. A 429 that
  * asks for at most two seconds is waited out and asked once more; a longer one, or a spent allowance the tracker
@@ -148,13 +172,13 @@ export async function request(source: TaskSourceConfig, path: string, query: Rec
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    let response = await fetch(url, { method: 'GET', headers: headers(source), redirect: 'manual', signal: controller.signal });
+    let response = await send(source, url, { method: 'GET', redirect: 'manual', signal: controller.signal });
     if (response.status === 429) {
       const wait = retryDelay(response.headers);
       await response.body?.cancel();
       if (wait === undefined || wait > quietRetryMs) throw rateLimited(source, wait);
       await pause(wait);
-      response = await fetch(url, { method: 'GET', headers: headers(source), redirect: 'manual', signal: controller.signal });
+      response = await send(source, url, { method: 'GET', redirect: 'manual', signal: controller.signal });
     }
     if (!response.ok) {
       await response.body?.cancel();
@@ -197,7 +221,7 @@ export async function write(source: TaskSourceConfig, method: 'PUT' | 'POST' | '
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(new URL(`${source.baseUrl}${path}`), { method, headers: { ...headers(source), ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }) }, ...(payload === undefined ? {} : { body: JSON.stringify(payload) }), redirect: 'manual', signal: controller.signal });
+    const response = await send(source, new URL(`${source.baseUrl}${path}`), { method, ...(payload === undefined ? {} : { body: JSON.stringify(payload) }), redirect: 'manual', signal: controller.signal }, payload === undefined ? {} : { 'Content-Type': 'application/json' });
     await response.body?.cancel();
     if (response.ok) { noteAllowance(source, response.headers); return; }
     if (response.status >= 300 && response.status < 400) throw new TaskError(502, 'task_redirect_refused', 'The task service redirected the request. Update its configured API root.');
@@ -219,7 +243,7 @@ export async function fileRequest(source: TaskSourceConfig, method: 'POST' | 'PU
   const timer = setTimeout(() => controller.abort(), body instanceof FormData ? uploadTimeoutMs : timeoutMs);
   try {
     const json = body !== undefined && !(body instanceof FormData);
-    const response = await fetch(new URL(`${source.baseUrl}${path}`), { method, headers: { ...headers(source), ...(json ? { 'Content-Type': 'application/json' } : {}) }, ...(body === undefined ? {} : { body: json ? JSON.stringify(body) : body as FormData }), redirect: 'manual', signal: controller.signal });
+    const response = await send(source, new URL(`${source.baseUrl}${path}`), { method, ...(body === undefined ? {} : { body: json ? JSON.stringify(body) : body as FormData }), redirect: 'manual', signal: controller.signal }, json ? { 'Content-Type': 'application/json' } : {});
     if (!response.ok) {
       const answer = (await response.text().catch(() => '')).slice(0, 300);
       if (response.status >= 300 && response.status < 400) throw new TaskError(502, 'task_redirect_refused', 'The tracker redirected the request. Update its configured API root.');

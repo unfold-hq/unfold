@@ -48,7 +48,7 @@ function report(): FormData {
 }
 
 const issueAnswer = (call: Call): Answer | undefined => {
-  if (call.method === 'POST' && call.path === '/api/v3/repos/acme/unfold/issues') return { status: 201, body: { id: 3001, number: 77, html_url: 'https://github.example/acme/unfold/issues/77', state: 'open' } };
+  if (call.method === 'POST' && call.path === '/api/v3/repos/acme/unfold/issues') return { status: 201, body: { id: 3001, number: 77, html_url: 'https://github.example/acme/unfold/issues/77', state: 'open', labels: JSON.parse(call.body).labels?.map((name: string) => ({ name })) ?? [] } };
   return undefined;
 };
 

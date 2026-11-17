@@ -2,9 +2,9 @@ import { createHash } from 'node:crypto';
 import type { AppConfig, Repository } from './types.ts';
 import { descriptionMarkdown } from './rich-text.ts';
 import { configuredOwnership, describeOwnership, ownership } from './tenancy.ts';
-import { andList, findTaskProvider, handoffLabels, issueLabels, orList, taskProvider, taskProviders, type IssueFiling, type TaskHandoff } from './task-providers/index.ts';
-import type { TaskReading } from './task-providers/registry.ts';
-import { configText, detailReaders, entries, fileRequest, maxDescription, maxPage, maxResponseBytes, nativeTaskId, record, request, TaskError, write } from './task-providers/shared.ts';
+import { andList, appCredentialFields, findTaskProvider, handoffLabels, issueLabels, orList, taskProvider, taskProviders, type IssueFiling, type TaskHandoff } from './task-providers/index.ts';
+import type { SourceApp, TaskReading } from './task-providers/registry.ts';
+import { configText, detailReaders, entries, fileRequest, hasCredential, maxDescription, maxPage, maxResponseBytes, nativeTaskId, record, request, sourceSecret, TaskError, write } from './task-providers/shared.ts';
 
 export { TaskError } from './task-providers/shared.ts';
 /** The name a task provider adapter registered under, in `src/task-providers/`. */
@@ -12,7 +12,7 @@ export type TaskProvider = string;
 export type TaskTarget = { forge: string; owner: string; repo: string; baseBranch: string };
 export type PloegTaskSource = { workItemId: string; provider: string; externalId: string; expectedBaseUrl: string; expectedScope: string; expectedRevision: string; expectedUpdatedAt: string; expectedTarget: TaskTarget };
 /** A registered task source. `tenant` (the default Tenant when absent) and `client` name its owner (system ADR-0017). */
-export type TaskSourceConfig = { id: string; name: string; provider: TaskProvider; baseUrl: string; project: string; repositoryId: string; token?: string; tokenType?: 'bearer'; executionOwner: 'interactive' | 'ploeg'; ploeg?: { target: TaskTarget }; tenant?: string; client?: string; connection?: string };
+export type TaskSourceConfig = { id: string; name: string; provider: TaskProvider; baseUrl: string; project: string; repositoryId: string; token?: string; tokenType?: 'bearer'; app?: SourceApp; executionOwner: 'interactive' | 'ploeg'; ploeg?: { target: TaskTarget }; tenant?: string; client?: string; connection?: string };
 export type TaskSnapshot = { key: string; sourceId: string; provider: TaskProvider; id: string; revision: string; title: string; description: string; url: string; status: 'open' | 'closed' | 'unknown'; updatedAt?: string; repositoryId: string; nativeRevision?: string; scope?: string; ploeg?: PloegTaskSource; bindingConfig?: string; bindingRevision?: string; ploegUnavailable?: { code: string; message: string }; labels?: TaskLabel[]; assignees?: TaskAssignee[]; priority?: number; dueAt?: string; identifier?: string; descriptionTruncated?: true };
 export type TaskLabel = { name: string; color?: string };
 export type TaskAssignee = { username: string; name?: string };
@@ -48,7 +48,7 @@ export function validateTaskSources(raw: unknown, repositories: Repository[], mo
   return raw.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Each task source must be an object');
     const source = value as Record<string, unknown>;
-    if (Object.keys(source).some(key => !sourceFields.has(key))) throw new Error('Unknown task source field; credentials must use tokenEnv, never literal tokens');
+    if (Object.keys(source).some(key => !sourceFields.has(key) && !appCredentialFields().includes(key))) throw new Error('Unknown task source field; credentials must use tokenEnv or an app credential, never literal tokens');
     if (typeof source.id !== 'string' || !slug.test(source.id) || ids.has(source.id)) throw new Error('Task source IDs must be unique lowercase slugs');
     ids.add(source.id);
     if (!configText(source.name, 100)) throw new Error('Task source name must contain 1–100 characters');
@@ -80,6 +80,11 @@ export function validateTaskSources(raw: unknown, repositories: Repository[], mo
       if (!token || token.length > 4096 || /[^\x21-\x7e]/.test(token)) throw new Error('Task source tokenEnv must reference a non-empty, valid API token');
     }
     const label = `taskSources[${index}] (${source.id})`;
+    const app = sourceApp(source, adapter.name, label);
+    if (app) {
+      const problem = adapter.appAuth!.keyProblem(app);
+      if (problem) throw new Error(`${label}: ${problem}`);
+    }
     const owned = configuredOwnership(source, label);
     const owner = ownership(owned);
     const repository = repositories.find(item => item.id === source.repositoryId)!;
@@ -90,8 +95,21 @@ export function validateTaskSources(raw: unknown, repositories: Repository[], mo
     const first = mappings.get(identity);
     if (first && first.mapping !== mapping) throw new Error(`Aliases of a task source must use the same repository, execution owner, Tenant and Client: taskSources[${first.index}] (${first.id}) and ${label} both read ${provider} ${project} at ${baseUrl}`);
     if (!first) mappings.set(identity, { index, id: source.id, mapping });
-    return { id: source.id, name: source.name, provider, baseUrl, project, repositoryId: source.repositoryId, executionOwner: source.executionOwner, ...(token ? { token } : {}), ...(ploeg ? { ploeg } : {}), ...owned };
+    return { id: source.id, name: source.name, provider, baseUrl, project, repositoryId: source.repositoryId, executionOwner: source.executionOwner, ...(token ? { token } : {}), ...(app ? { app } : {}), ...(ploeg ? { ploeg } : {}), ...owned };
   });
+}
+
+/**
+ * The app credential a task source or reports connection names, or undefined when it names a token or nothing. A
+ * credential under another adapter's key, or next to `tokenEnv`, is refused, so each source has at most one way in.
+ */
+export function sourceApp(value: Record<string, unknown>, provider: TaskProvider, label: string): SourceApp | undefined {
+  const auth = taskProvider(provider).appAuth;
+  const named = appCredentialFields().filter(field => value[field] !== undefined);
+  if (named.some(field => field !== auth?.field)) throw new Error(`${label} sets ${named.join(', ')}, which ${taskProvider(provider).label} sources do not take`);
+  if (!auth || value[auth.field] === undefined) return undefined;
+  if (value.tokenEnv !== undefined) throw new Error(`${label} sets both tokenEnv and ${auth.field}; use exactly one credential`);
+  return auth.parse(value[auth.field], label);
 }
 
 const handoffOnly = (): string => `Only ${andList(handoffLabels())} tasks can be handed to Ploeg from the workbench.`;
@@ -113,7 +131,7 @@ export function handoffUnsupported(source: TaskSourceConfig, ploeg: AppConfig['p
   if (adapter.fixture) return 'Demo fixture tasks are not linked to Ploeg.';
   if (!adapter.handoff) return handoffOnly();
   if (source.executionOwner !== 'ploeg') return 'This connection is not assigned to Ploeg. An administrator sets its executionOwner to "ploeg" to enable hand-off.';
-  if (!source.token) return 'This connection has no tracker token, so the workbench cannot assign its tasks.';
+  if (!hasCredential(source)) return 'This connection has no tracker token, so the workbench cannot assign its tasks.';
   if (ploeg?.demo) return 'Ploeg is showing illustrative demo records. Hand-off needs a live Ploeg operator connection.';
   if (!ploeg?.url || !ploeg.tokenEnv) return 'Connect the authenticated Ploeg operator API in the server configuration to hand tasks off.';
   return undefined;
@@ -123,7 +141,7 @@ export function handoffUnsupported(source: TaskSourceConfig, ploeg: AppConfig['p
 export function isFixtureSource(source: TaskSourceConfig): boolean { return Boolean(findTaskProvider(source.provider)?.fixture); }
 
 /** The link provider whose personal token a source without a token of its own reads with, or undefined. */
-export function sourceLinkProvider(source: TaskSourceConfig): string | undefined { return source.token ? undefined : findTaskProvider(source.provider)?.linkedAccount; }
+export function sourceLinkProvider(source: TaskSourceConfig): string | undefined { return hasCredential(source) ? undefined : findTaskProvider(source.provider)?.linkedAccount; }
 
 /** A source that reads with a person's linked token. */
 export function withLinkedToken(source: TaskSourceConfig, linked: { token: string; type: 'bearer' | 'private' }): TaskSourceConfig {
@@ -151,7 +169,8 @@ export function sourceTaskUrl(source: TaskSourceConfig, id: string): string {
 /** Adds `descriptionMarkdown` for display: an HTML description from a tracker that sends HTML becomes Markdown, any other description is copied unchanged. The snapshot's own fields, and so its revision and import, are untouched. */
 export function presentTask(source: TaskSourceConfig, task: TaskSnapshot): PresentedTask {
   let markdown = descriptionMarkdown(task.provider, task.description, `${webRoot(source)}/`);
-  if (source.token) markdown = markdown.replaceAll(source.token, '[redacted]');
+  const secret = sourceSecret(source);
+  if (secret) markdown = markdown.replaceAll(secret, '[redacted]');
   return { ...task, descriptionMarkdown: markdown };
 }
 
@@ -163,23 +182,24 @@ function snapshot(source: TaskSourceConfig, raw: unknown, truncate = false): Tas
   const parsed = adapter.parse(source, value, truncate ? maxResponseBytes : maxDescription);
   const { id, status, updatedAt, nativeRevision, project } = parsed;
   let { title, description } = parsed;
-  if (source.token) {
-    title = title.replaceAll(source.token, '[redacted]');
-    description = description.replaceAll(source.token, '[redacted]');
+  const secret = sourceSecret(source);
+  if (secret) {
+    title = title.replaceAll(secret, '[redacted]');
+    description = description.replaceAll(secret, '[redacted]');
   }
   const key = `task:${digest([source.provider, source.baseUrl.replace(/\/+$/, ''), project, id])}`;
   const url = taskUrl(source, id, value);
-  if (source.token) {
+  if (secret) {
     let decoded: string;
     try { decoded = decodeURIComponent(url); } catch { throw new TaskError(502, 'task_response_invalid', 'The task service returned an invalid task link.'); }
-    if (decoded.includes(source.token)) throw new TaskError(502, 'task_sensitive_response', 'The task service returned credential material in a task link. This snapshot cannot be imported.');
+    if (decoded.includes(secret)) throw new TaskError(502, 'task_sensitive_response', 'The task service returned credential material in a task link. This snapshot cannot be imported.');
   }
   const revision = digest({ key, title, description, status, updatedAt, url });
   const truncated = description.length > maxDescription;
   if (truncated) description = description.slice(0, maxDescription).replace(/[\ud800-\udbff]$/, '');
   const details = Object.fromEntries(Object.entries(adapter.details(source, value, detailReaders(source))).filter(([, entry]) => entry !== undefined && !(Array.isArray(entry) && !entry.length)));
   const result = { key, sourceId: source.id, provider: source.provider, id, revision, title, description, url, status, ...(updatedAt ? { updatedAt } : {}), ...(nativeRevision ? { nativeRevision, scope: project } : {}), repositoryId: source.repositoryId, ...details, ...(truncated ? { descriptionTruncated: true as const } : {}) };
-  if (source.token && Object.values(result).some(value => typeof value === 'string' && value.includes(source.token!))) throw new TaskError(502, 'task_sensitive_response', 'The task service returned credential material in a task identity, revision or link. This snapshot cannot be imported.');
+  if (secret && Object.values(result).some(value => typeof value === 'string' && value.includes(secret))) throw new TaskError(502, 'task_sensitive_response', 'The task service returned credential material in a task identity, revision or link. This snapshot cannot be imported.');
   return result;
 }
 
@@ -341,7 +361,7 @@ export function reportTargetProject(source: TaskSourceConfig, project: string): 
   try { return reportProject(source, project); } catch (error) { throw new Error(error instanceof TaskError ? error.message : `reports.project ${(error as Error).message.replace(/^Task source project/, 'must be')}`); }
 }
 
-/** One comment on a filed issue or task as plain text. `mine` marks the comments the workbench's token wrote. */
+/** One comment on a filed issue or task as plain text. `mine` marks the comments the workbench's token or app wrote. */
 export type IssueComment = { id: string; author: string; text: string; at: string; mine: boolean };
 /** The pull request that names a filed issue, newest first. */
 export type IssueFix = { number: string; url: string; merged: boolean; mergedAt?: string };
@@ -353,10 +373,11 @@ export type IssueState = { open: boolean; closedAt?: string; labels: string[]; a
 const trackerLogins = new Map<string, Promise<string>>();
 
 function trackerLogin(source: TaskSourceConfig): Promise<string> {
-  const key = `${source.baseUrl}\u0000${source.token ?? ''}`;
+  const key = `${source.baseUrl}\u0000${source.token ?? source.app?.id ?? ''}`;
   let login = trackerLogins.get(key);
   if (!login) {
-    login = fileRequest(source, 'GET', filing(source).loginPath ?? '/user').then(value => String(record(value)[filing(source).loginField] ?? ''));
+    const app = source.app ? taskProvider(source.provider).appAuth : undefined;
+    login = app ? app.login(source) : fileRequest(source, 'GET', filing(source).loginPath ?? '/user').then(value => String(record(value)[filing(source).loginField] ?? ''));
     login.catch(() => trackerLogins.delete(key));
     trackerLogins.set(key, login);
   }

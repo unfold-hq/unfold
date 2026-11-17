@@ -1,7 +1,8 @@
 import type { FiledIssue, IssueFix } from '../tasks.ts';
 import type { IssueFiling, TaskProviderAdapter } from './registry.ts';
 import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, releaseAfter, repositoryIssueDetails, repositoryIssuePath, repositoryIssueUrl } from './repository-issues.ts';
-import { apiWebRoot, listPage, numericId, plainComment, readOne, record, TaskError, when } from './shared.ts';
+import { githubApp } from './github-app.ts';
+import { apiWebRoot, entries, listPage, numericId, plainComment, readOne, record, TaskError, when } from './shared.ts';
 
 const gheComApiHost = /^api\.([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.ghe\.com$/;
 
@@ -27,6 +28,7 @@ function pullRequestIn(target: string, entry: Record<string, unknown>): IssueFix
 
 /**
  * Report a problem on GitHub: an issue in a repository with the label `reported-in-app` when the repository has it,
+ * added after creation when GitHub dropped it from the new issue, as it does for an account without push access,
  * Markdown bodies, and a state that follows the newest pull request of the same repository that references the issue
  * to the first release of the running version's line after it merged. GitHub's REST API takes no issue attachments,
  * so the body names the screenshot and buffers as not attached.
@@ -40,6 +42,8 @@ export const githubIssues: IssueFiling = {
     const issue = record(await call('POST', `/repos/${target}/issues`, { title, body, ...(label ? { labels: ['reported-in-app'] } : {}) }));
     const number = String(issue.number ?? '');
     if (!numericId.test(number) || typeof issue.html_url !== 'string') throw new TaskError(502, 'task_response_invalid', 'The tracker did not answer with an issue number and address.');
+    const labelled = entries(issue.labels).some(entry => String(entry.name ?? '').toLowerCase() === 'reported-in-app');
+    if (label && !labelled) await call('POST', `/repos/${target}/issues/${number}/labels`, { labels: ['reported-in-app'] }).catch(() => undefined);
     return { id: String(issue.id ?? number), number, url: issue.html_url };
   },
   async state(_source, target, issue, version, login, call) {
@@ -61,13 +65,14 @@ export const githubIssues: IssueFiling = {
   },
 };
 
-/** GitHub issues of one repository on github.com, GHE.com or GitHub Enterprise Server, read with a Bearer token. */
+/** GitHub issues of one repository on github.com, GHE.com or GitHub Enterprise Server, read with a Bearer token or as a GitHub App. */
 export const github: TaskProviderAdapter = {
   name: 'github',
   label: 'GitHub',
   descriptionFormat: 'markdown',
   taskId: numericId,
   issues: githubIssues,
+  appAuth: githubApp,
   apiRoot: githubApiRoot,
   project: ownerRepository,
   webRoot(source) {

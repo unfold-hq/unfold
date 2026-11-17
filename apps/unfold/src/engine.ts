@@ -1,5 +1,5 @@
 import { defaultWorkspaceRetentionDays, workspaceRetention } from './runtime/retention.ts';
-import { knownSecrets } from './redaction.ts';
+import { knownSecrets, withoutKnownSecrets } from './redaction.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { Store } from './store.ts';
 import { authorityFailure, authorityRequestTimeoutMs, ExecutionAuthority, refusedUnproven } from './execution-authority.ts';
@@ -1433,7 +1433,7 @@ export class Engine {
   /** Adds a credential Unfold learned after start-up, such as a tracker connection's token, to what the engine replaces with `[redacted]`. */
   redact(secret: string): void { if (secret) this.keys.add(secret); }
 
-  private cleanText(value: string): string { for (const key of this.keys) if (key) value = value.split(key).join('[redacted]'); return value; }
+  private cleanText(value: string): string { return withoutKnownSecrets(value, [...this.keys]); }
   private clean<T>(value: T): T {
     if (typeof value === 'string') return this.cleanText(value) as T;
     if (Array.isArray(value)) return value.map(item => this.clean(item)) as T;

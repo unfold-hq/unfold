@@ -276,6 +276,11 @@ Tracker projects Unfold imports tasks from. Demo mode adds a fixture source when
 | `taskSources[].project` | string |  | Repository, project or list on the tracker, in the provider's own form. |
 | `taskSources[].repositoryId` | string |  | Registered repository the source's tasks change. |
 | `taskSources[].tokenEnv` | string |  | Environment variable holding the tracker API token. |
+| `taskSources[].githubApp` | object |  | GitHub only, instead of tokenEnv: the GitHub App Unfold mints its own short-lived installation tokens as. |
+| `taskSources[].githubApp.appId` | integer, at least 1, or string |  | The App ID, or the App's Client ID. |
+| `taskSources[].githubApp.installationId` | integer, at least 1, or string |  | The installation that holds the repository; looked up from the repository when absent. |
+| `taskSources[].githubApp.privateKeyEnv` | string |  | Environment variable holding the App's PEM private key. |
+| `taskSources[].githubApp.privateKeyFile` | string |  | Absolute path of a mounted file holding the App's PEM private key, read again at every mint. |
 | `taskSources[].executionOwner` | one of `interactive`, `ploeg` |  | Who runs the source's tasks: people from the workbench, or Ploeg. |
 | `taskSources[].ploeg` | object |  | The Ploeg target tasks of this source are handed off to (Vikunja and ClickUp, executionOwner ploeg). |
 | `taskSources[].ploeg.target` | object |  | Forge repository the work lands in; it must match the registered repository. |
@@ -566,7 +571,7 @@ Candidate verification and publishing under pinned policies. Needs execution; re
 
 ### `reports`
 
-Where Report a problem files: false turns it off; { source, project? } uses a task source with a token; { provider, baseUrl, project, tokenEnv } is a connection of its own. Absent, the first interactive source that can file issues; off in demo mode.
+Where Report a problem files: false turns it off; { source, project? } uses a task source with a token; { provider, baseUrl, project, tokenEnv or githubApp } is a connection of its own. Absent, the first interactive source that can file issues; off in demo mode.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
@@ -576,6 +581,11 @@ Where Report a problem files: false turns it off; { source, project? } uses a ta
 | `reports.provider` | one of `forgejo`, `github`, `vikunja`, `jira` |  | Tracker reports are filed on. |
 | `reports.baseUrl` | string |  | Tracker API root. |
 | `reports.tokenEnv` | string |  | Environment variable holding the tracker token; unset keeps reports without filing them. |
+| `reports.githubApp` | object |  | The GitHub App Unfold files as, instead of tokenEnv; an unreadable private key keeps reports without filing them. |
+| `reports.githubApp.appId` | integer, at least 1, or string |  | The App ID, or the App's Client ID. |
+| `reports.githubApp.installationId` | integer, at least 1, or string |  | The installation that holds the repository; looked up from the repository when absent. |
+| `reports.githubApp.privateKeyEnv` | string |  | Environment variable holding the App's PEM private key. |
+| `reports.githubApp.privateKeyFile` | string |  | Absolute path of a mounted file holding the App's PEM private key, read again at every mint. |
 
 ### `notifications`
 
