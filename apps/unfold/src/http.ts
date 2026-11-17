@@ -60,7 +60,7 @@ import { defaultTenant } from './insight.ts';
 import { createMcpHttp } from './mcp-http.ts';
 import { taskKeyRing } from './mcp-tasks.ts';
 import { McpEvents } from './mcp-events.ts';
-import { entitledRole } from './oidc.ts';
+import { entitledRole, exchangedAccountId } from './oidc.ts';
 import { LinkedSessions, parseLinkedEvent } from './linked-sessions.ts';
 import { TaskReferenceResolver } from './linked-references.ts';
 import { LinkedUsage, linkedWorkCharges, ploegRunUsage } from './linked-usage.ts';
@@ -225,6 +225,9 @@ function loopbackUrl(address: AddressInfo): string {
   return `http://${host}:${address.port}`;
 }
 
+const tokenExchangeGrant = 'urn:ietf:params:oauth:grant-type:token-exchange';
+const exchangedTokenTypes = ['urn:ietf:params:oauth:token-type:id_token', 'urn:ietf:params:oauth:token-type:access_token', 'urn:ietf:params:oauth:token-type:jwt'];
+
 function mutationGuard(req: IncomingMessage, config: AppConfig): void {
   if (req.headers['x-unfold-request'] !== '1') fault(403, 'csrf', 'Unfold refused this change because it lacks the header X-Unfold-Request: 1. Reload the page; a script must send that header with every change.');
   const origin = req.headers.origin;
@@ -261,6 +264,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   if (!connections) trackerConnections.sync();
   const audit = new AuditTrail({ store, jobs, settings: config.audit, config, owner: path => trackerConnections.ownerOf(path), exportEnabled: tenant => flags.getBooleanValue('audit.export', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), schedule: true });
   const auth = new Auth(store, config);
+  auth.onFamilyRevoked = signIns => { for (const signIn of signIns) agentHost?.revokeSignIn(signIn); };
   const ploeg = new PloegClient(config, ploegCompatibility);
   if (config.ploeg && !ploeg.isDemo) { trackerConnections.useRoutes(() => ploeg.routes()); void trackerConnections.refreshRoutes(); }
   const cards = config.ploeg && !config.ploeg.demo ? new CardService(ploeg, new CardStore(store.db), { settings: config.cards?.rules ?? {}, publish: config.cards?.publishPullRequestComment === true }) : undefined;
@@ -469,10 +473,11 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
       if (relay && await relay.handle(req, res, url)) return;
       if (lifecycle.handles(path)) return await lifecycle.handle(req, res, url);
       if (notifications.handlesPublic(path)) { const answer = await notifications.publicRoute(method, path, req.headers, await rawBody(req, 262_144)); return json(res, answer.status, answer.body); }
-      const editorCollect = path.match(/^\/api\/auth\/editor\/([A-Za-z0-9_-]{8,32})$/);
+      const editorExchange = path === '/api/auth/editor/exchange';
+      const editorCollect = editorExchange ? null : path.match(/^\/api\/auth\/editor\/([A-Za-z0-9_-]{8,32})$/);
       const ofrep = path.startsWith('/api/ofrep/v1/evaluate/flags');
       if (path.startsWith('/api/intake/') && await intakeRoute(req, res, path, url.searchParams, { service: intake, user: () => auth.user(req), guard: () => mutationGuard(req, config), readJson: () => body(req), enabledFor: user => flags.getBooleanValue('intake.requests', false, flagContext(user)), baseUrl: config.baseUrl ?? `http://${req.headers.host}`, trustedProxies: config.trustedProxies, send: (status, value) => json(res, status, sanitize(value)) })) return;
-      if (['POST','PUT','PATCH','DELETE'].includes(method) && path !== '/api/auth/editor' && !editorCollect && !ofrep) mutationGuard(req, config);
+      if (['POST','PUT','PATCH','DELETE'].includes(method) && path !== '/api/auth/editor' && !editorCollect && !editorExchange && !ofrep) mutationGuard(req, config);
       if (method === 'POST' && path === '/api/login') {
         if (!localLoginEnabled(config)) throw localLoginOff();
         const data = await body(req);
@@ -486,6 +491,19 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         const requested = req.headers['content-type']?.startsWith('application/json') ? await body(req) : {};
         const started = auth.beginEditor(clientAddress(req, config.trustedProxies), editorLabel(requested.client, requested.host));
         return json(res, 200, { code: started.code, secret: started.secret, userCode: started.userCode, expiresIn: started.expiresIn, interval: started.interval, url: `${config.baseUrl ?? `http://${req.headers.host}`}/api/auth/oidc?editor=${encodeURIComponent(started.code)}` });
+      }
+      if (method === 'POST' && editorExchange) {
+        const exchange = oidc?.configured() ? config.auth.oidc?.exchange : undefined;
+        if (!oidc || !exchange) return fault(404, 'exchange_off', 'This Unfold does not trade identity-provider tokens for editor credentials. Sign the editor in through the browser.');
+        const data = req.headers['content-type']?.startsWith('application/x-www-form-urlencoded') ? Object.fromEntries(new URLSearchParams((await rawBody(req, 32_768)).toString('utf8'))) : await body(req);
+        if (data.grant_type !== tokenExchangeGrant) fault(400, 'unsupported_grant_type', `Send grant_type ${tokenExchangeGrant}.`);
+        if (typeof data.subject_token_type !== 'string' || !exchangedTokenTypes.includes(data.subject_token_type)) fault(400, 'invalid_request', `Send subject_token_type as one of ${exchangedTokenTypes.join(', ')}.`);
+        const claims = await oidc.exchangeClaims(typeof data.subject_token === 'string' ? data.subject_token : '');
+        const userId = exchangedAccountId(config.auth.oidc!, claims, name => store.getUserByName(name));
+        if (!userId) fault(403, 'exchange_unknown_person', 'The token names nobody Unfold can match to an account. Sign in to Unfold in the browser once, then try again.');
+        const issued = auth.exchangeEditor(userId!, editorLabel(data.client, data.host));
+        console.log(JSON.stringify({ level: 'info', event: 'editor.exchanged', actor: issued.user.id, audience: claims.aud, match: exchange.match }));
+        return json(res, 200, { access_token: issued.token, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token', token_type: 'Bearer', expires_in: Math.floor((Date.parse(issued.expiresAt) - Date.now()) / 1000), expiresAt: issued.expiresAt, familyExpiresAt: issued.familyExpiresAt, user: issued.user });
       }
       if (method === 'POST' && editorCollect) {
         const data = await body(req);
@@ -543,6 +561,11 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         res.writeHead(303, { Location: location });
         res.end();
         return;
+      }
+      if (method === 'POST' && path === '/api/auth/editor/rotate') {
+        const rotated = auth.rotateEditor(auth.bearer(req));
+        console.log(JSON.stringify({ level: 'info', event: 'editor.rotated', actor: rotated.user.id, familyExpiresAt: rotated.familyExpiresAt }));
+        return json(res, 200, rotated);
       }
       if (path.startsWith('/api/')) {
         const user = auth.user(req);

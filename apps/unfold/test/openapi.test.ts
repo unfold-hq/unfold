@@ -237,7 +237,7 @@ test('http.ts hands requests only to the route modules this test reads', () => {
 test('each operation names its role, its credentials and the mutation header the code requires', () => {
   const ids = new Set<string>();
   const problems: string[] = [];
-  const exempt = new Set(['/api/auth/editor', '/api/auth/editor/{code}', '/api/ofrep/v1/evaluate/flags', '/api/ofrep/v1/evaluate/flags/{ofrepKey}', '/api/intake/{intakeSourceId}', '/api/notifications/channels/slack/interactions']);
+  const exempt = new Set(['/api/auth/editor', '/api/auth/editor/exchange', '/api/auth/editor/{code}', '/api/ofrep/v1/evaluate/flags', '/api/ofrep/v1/evaluate/flags/{ofrepKey}', '/api/intake/{intakeSourceId}', '/api/notifications/channels/slack/interactions']);
   for (const { path, method, operation } of operations()) {
     const name = `${method.toUpperCase()} ${path}`;
     if (!operation.operationId || ids.has(operation.operationId)) problems.push(`${name}: operationId missing or repeated`);

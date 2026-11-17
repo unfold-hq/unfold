@@ -140,7 +140,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0022](../../apps/unfold/docs/adrs/0022-apache-2-0-is-the-estate-licence.md) | Apache-2.0 is a decision here, not an inheritance | 2026-09-11 | — |
 | Unfold | [0023](../../apps/unfold/docs/adrs/0023-unfold-submits-work-to-ploeg-and-never-executes-it.md) | Unfold submits Work Items to Ploeg and never executes them | 2026-10-11 | — |
 | Unfold | [0036](../../apps/unfold/docs/adrs/0036-the-agent-host-speaks-websocket-through-ws.md) | The agent host speaks WebSocket through `ws` | 2026-10-03 | — |
-| Unfold | [0037](../../apps/unfold/docs/adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md) | An editor signs in only after its person approves it, and gets its own credential | 2026-10-03 | — |
+| Unfold | [0037](../../apps/unfold/docs/adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md) | An editor signs in only after its person approves it, and gets its own credential | 2026-11-17 | — |
 | Unfold | [0038](../../apps/unfold/docs/adrs/0038-the-application-shows-unfold-and-is-organised-around-work.md) | The application shows Unfold, and is organised around work | 2026-10-04 | — |
 | Unfold | [0039](../../apps/unfold/docs/adrs/0039-unfold-collects-context-files-and-hands-them-to-ploeg.md) | Unfold collects context files and hands them to Ploeg | 2026-10-04 | — |
 | Unfold | [0040](../../apps/unfold/docs/adrs/0040-accept-opens-a-pull-request-through-the-trusted-publisher-in-the-unfold-control-service.md) | Accept opens a pull request through the trusted publisher in the Unfold control service | 2026-10-11 | — |
@@ -322,6 +322,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0065](../../apps/unfold/docs/adrs/0065-unfold-tracks-agent-standards-in-a-catalogue-that-renovate-and-a-weekly-survey-keep-current.md) | Unfold tracks agent standards in a catalogue that Renovate and a weekly survey keep current | 2026-11-04 | unknown | — |
 | Unfold | [0068](../../apps/unfold/docs/adrs/0068-a-person-sees-their-own-usage-and-nobody-elses.md) | A person sees their own usage, and nobody else's | 2026-11-17 | unknown | — |
 | Unfold | [0069](../../apps/unfold/docs/adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md) | Linked Session cost is billing input, recorded as an estimate at API list prices | 2026-11-17 | unknown | — |
+| Unfold | [0070](../../apps/unfold/docs/adrs/0070-an-editor-trades-an-identity-provider-token-for-its-credential.md) | An editor trades an identity-provider token for its credential | 2026-11-17 | unknown | — |
 
 ## Other statuses
 

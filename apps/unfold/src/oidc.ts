@@ -3,7 +3,9 @@ import type { AppConfig, UserRole } from './types.ts';
 import type { SignInTokens } from './person-proof.ts';
 import { membershipsFromGroups, type Membership } from './tenancy.ts';
 
-export type OidcSettings = { issuer: string; subjectNamespace?: string; clientId: string; clientSecret?: string; scopes: string[]; displayName: string; roleClaim: string; groupsClaim: string; roles: Record<UserRole, string[]> };
+/** Which identity-provider tokens an editor may trade for an editor credential, and how their person is found. */
+export type OidcExchange = { audiences: string[]; match: 'subject' | 'email' };
+export type OidcSettings = { issuer: string; subjectNamespace?: string; clientId: string; clientSecret?: string; scopes: string[]; displayName: string; roleClaim: string; groupsClaim: string; roles: Record<UserRole, string[]>; exchange?: OidcExchange };
 export type OidcIdentity = { id: string; name: string; role: UserRole; subject: string; email?: string; memberships: Membership[] };
 type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string; authorization_response_iss_parameter_supported?: boolean };
 type Pending = { verifier: string; nonce: string; createdAt: number; browserBinding: string; editor?: string };
@@ -11,6 +13,8 @@ type Pending = { verifier: string; nonce: string; createdAt: number; browserBind
 const pendingTtlMs = 10 * 60_000;
 const maxPending = 1000;
 const clockSkewMs = 60_000;
+/** The longest lifetime, `exp` minus `iat`, of a token Unfold trades for an editor credential. */
+export const maxExchangedTokenSeconds = 86_400;
 
 export class OidcError extends Error {
   readonly status: number;
@@ -46,6 +50,20 @@ export function entitledRole(settings: Pick<OidcSettings, 'roleClaim' | 'groupsC
     if (settings.roles[candidate].some(entry => roleEntryMatches(entry, groups, claims))) return candidate;
   }
   return undefined;
+}
+
+/**
+ * The Unfold account a token offered in exchange names, or undefined when it names none. Under `subject` it is the
+ * account browser sign-in derives from the same `sub`; under `email` it is the single sign-on account whose name is
+ * the token's verified email address, for an identity provider that gives each client its own `sub`.
+ */
+export function exchangedAccountId(settings: Pick<OidcSettings, 'issuer' | 'subjectNamespace'> & { exchange?: OidcExchange }, claims: Record<string, unknown>, byName: (name: string) => { id: string; passwordHash: string } | undefined): string | undefined {
+  if (settings.exchange?.match === 'email') {
+    if (claims.email_verified !== true || typeof claims.email !== 'string' || !/^[^\s@]{1,200}@[^\s@]{1,200}$/.test(claims.email)) return undefined;
+    const account = byName(claims.email.toLowerCase());
+    return account && account.passwordHash === '' && account.id.startsWith('oidc-') ? account.id : undefined;
+  }
+  return typeof claims.sub === 'string' && claims.sub ? subjectUserId(settings.subjectNamespace ?? settings.issuer, claims.sub) : undefined;
 }
 
 /** The lower of two roles: viewer below operator below admin. */
@@ -188,7 +206,31 @@ export class Oidc {
   }
 
   private async validate(token: string, nonce: string): Promise<Record<string, unknown>> {
-    const settings = this.required();
+    const claims = await this.signedClaims(token, [this.required().clientId]);
+    if (claims.nonce !== nonce) throw new OidcError(502, 'oidc_token', 'The identity token does not match this sign-in.');
+    return claims;
+  }
+
+  /**
+   * The claims of a token an editor offers in exchange for an editor credential: signed by a key of the configured
+   * issuer, issued by it, for one of `auth.oidc.exchange.audiences`, unexpired, with an `iat` and a lifetime of at most
+   * `maxExchangedTokenSeconds`. Throws OidcError `invalid_grant` (400) for any token Unfold must not accept.
+   */
+  async exchangeClaims(token: string): Promise<Record<string, unknown>> {
+    const exchange = this.required().exchange;
+    if (!exchange) throw new OidcError(404, 'exchange_off', 'This Unfold does not trade identity-provider tokens for editor credentials.');
+    if (token.length > 16_384) throw new OidcError(400, 'invalid_grant', 'The token is longer than Unfold accepts.');
+    let claims: Record<string, unknown>;
+    try { claims = await this.signedClaims(token, exchange.audiences); }
+    catch (error) {
+      if (error instanceof OidcError && error.code === 'oidc_token') throw new OidcError(400, 'invalid_grant', error.message);
+      throw error;
+    }
+    if (typeof claims.iat !== 'number' || typeof claims.exp !== 'number' || claims.exp - claims.iat > maxExchangedTokenSeconds) throw new OidcError(400, 'invalid_grant', `The token must carry iat and live at most ${maxExchangedTokenSeconds / 3600} hours.`);
+    return claims;
+  }
+
+  private async signedClaims(token: string, audiences: readonly string[]): Promise<Record<string, unknown>> {
     const discovery = await this.discover();
     const parts = token.split('.');
     if (parts.length !== 3) throw new OidcError(502, 'oidc_token', 'The identity token is malformed.');
@@ -196,19 +238,20 @@ export class Oidc {
     const claims = decodeSegment(parts[1]);
     const algorithms: Record<string, string | null> = { RS256: 'sha256', RS384: 'sha384', RS512: 'sha512', ES256: 'sha256', ES384: 'sha384', ES512: 'sha512', PS256: 'sha256' };
     if (typeof header?.alg !== 'string' || !(header.alg in algorithms) || typeof header.kid !== 'string') throw new OidcError(502, 'oidc_token', 'The identity token uses an unsupported signature.');
-    let key = (await this.signingKeys()).get(header.kid) ?? (await this.signingKeys(true)).get(header.kid);
+    const key = (await this.signingKeys()).get(header.kid) ?? (await this.signingKeys(true)).get(header.kid);
     if (!key) throw new OidcError(502, 'oidc_token', 'The identity token was signed with an unknown key.');
     const signed = Buffer.from(`${parts[0]}.${parts[1]}`);
     const signature = Buffer.from(parts[2], 'base64url');
     const options = header.alg.startsWith('PS') ? { key, padding: 6, saltLength: 32 } : header.alg.startsWith('ES') ? { key, dsaEncoding: 'ieee-p1363' as const } : { key };
-    if (!verifySignature(algorithms[header.alg]!, signed, options as any, signature)) throw new OidcError(502, 'oidc_token', 'The identity token signature is invalid.');
+    let valid = false;
+    try { valid = verifySignature(algorithms[header.alg]!, signed, options as any, signature); } catch {}
+    if (!valid) throw new OidcError(502, 'oidc_token', 'The identity token signature is invalid.');
     const now = Date.now();
     if (typeof claims?.iss !== 'string' || claims.iss.replace(/\/$/, '') !== discovery.issuer.replace(/\/$/, '')) throw new OidcError(502, 'oidc_token', 'The identity token names another issuer.');
-    const audience = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-    if (!audience.includes(settings.clientId)) throw new OidcError(502, 'oidc_token', 'The identity token is for another application.');
+    const audience: unknown[] = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+    if (!audience.some(entry => typeof entry === 'string' && audiences.includes(entry))) throw new OidcError(502, 'oidc_token', 'The identity token is for another application.');
     if (typeof claims.exp !== 'number' || claims.exp * 1000 < now - clockSkewMs) throw new OidcError(502, 'oidc_token', 'The identity token has expired.');
-    if (typeof claims.iat === 'number' && claims.iat * 1000 > now + clockSkewMs) throw new OidcError(502, 'oidc_token', 'The identity token is from the future.');
-    if (claims.nonce !== nonce) throw new OidcError(502, 'oidc_token', 'The identity token does not match this sign-in.');
+    if ((typeof claims.iat === 'number' && claims.iat * 1000 > now + clockSkewMs) || (typeof claims.nbf === 'number' && claims.nbf * 1000 > now + clockSkewMs)) throw new OidcError(502, 'oidc_token', 'The identity token is from the future.');
     if (typeof claims.sub !== 'string' || !claims.sub) throw new OidcError(502, 'oidc_token', 'The identity token names no subject.');
     return claims;
   }

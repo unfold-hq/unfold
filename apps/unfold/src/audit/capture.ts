@@ -139,6 +139,7 @@ export function capture(request: TapRequest): Captured | undefined {
     const label = request.editorLabel(editorDecision[1], user);
     return { actor: user, fact: { kind: 'credential', credential: 'editor', action: editorDecision[2] === 'approve' ? 'issue' : 'deny', user: person(user), ...(label ? { name: label } : {}), outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
   }
+  if (method === 'POST' && path === '/api/auth/editor/rotate') return { actor: user, fact: { kind: 'credential', credential: 'editor', action: 'issue', user: person(user), name: 'rotation', outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
   const editorCredential = /^\/api\/editor-credentials\/([a-f0-9]{24})$/.exec(path);
   if (method === 'DELETE' && editorCredential) return { actor: user, fact: { kind: 'credential', credential: 'editor', action: 'revoke', user: person(user), uid: editorCredential[1], outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
   if (method === 'POST' && path === '/api/agent-host/tokens') return { actor: user, fact: { kind: 'credential', credential: 'agents_window', action: 'issue', user: person(user), name: text(request.inputs().label, 80) ?? 'agent host', outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };

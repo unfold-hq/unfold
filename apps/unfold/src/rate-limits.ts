@@ -45,6 +45,7 @@ const exportRoutes: [string, RegExp][] = [
 const signIns: [string, RegExp][] = [
   ['POST', /^\/api\/login$/],
   ['POST', /^\/api\/auth\/editor$/],
+  ['POST', /^\/api\/auth\/editor\/(?:exchange|rotate)$/],
   ['GET', /^\/api\/auth\/oidc$/],
   ['GET', /^\/api\/auth\/oidc\/callback$/],
   ['GET', /^\/api\/links\/[^/]+\/callback$/],
