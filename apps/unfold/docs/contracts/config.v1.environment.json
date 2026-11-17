@@ -33,6 +33,7 @@
     { "name": "UNFOLD_INSIGHT_EXPORT", "type": "off | faro | otlp", "default": "off", "description": "Sink product events are exported to." },
     { "name": "UNFOLD_INSIGHT_EXPORT_URL", "type": "URL", "description": "Collector URL of the export; required for faro and otlp." },
     { "name": "UNFOLD_INSIGHT_EXPORT_LEVEL", "type": "aggregate | events", "default": "aggregate", "description": "aggregate sends each finished day's rollup; events sends each event with its pseudonymous actor hash." },
+    { "name": "UNFOLD_RELEASED_AT", "type": "ISO 8601 instant", "description": "When this release was published; the release image sets it from its creation time and the System page shows it beside the version. An instant before 2020 or an unparseable value counts as unknown." },
     { "name": "UNFOLD_SENTRY_DSN", "type": "secret", "description": "Sentry-protocol DSN (Sentry, GlitchTip, Bugsink) errors are reported to." },
     { "name": "UNFOLD_ERROR_OTLP_URL", "type": "URL", "description": "OTLP/HTTP logs endpoint errors are reported to." },
     { "name": "UNFOLD_ERROR_ENVIRONMENT", "type": "string", "default": "the mode", "description": "Environment name error reports carry, such as staging." },

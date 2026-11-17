@@ -61,6 +61,7 @@ The chart renders `config:` from its values into the file, and its [values.schem
 | `UNFOLD_INSIGHT_EXPORT` | off \| faro \| otlp | `off` |  | Sink product events are exported to. |
 | `UNFOLD_INSIGHT_EXPORT_URL` | URL |  |  | Collector URL of the export; required for faro and otlp. |
 | `UNFOLD_INSIGHT_EXPORT_LEVEL` | aggregate \| events | `aggregate` |  | aggregate sends each finished day's rollup; events sends each event with its pseudonymous actor hash. |
+| `UNFOLD_RELEASED_AT` | ISO 8601 instant |  |  | When this release was published; the release image sets it from its creation time and the System page shows it beside the version. An instant before 2020 or an unparseable value counts as unknown. |
 | `UNFOLD_SENTRY_DSN` | secret |  |  | Sentry-protocol DSN (Sentry, GlitchTip, Bugsink) errors are reported to. |
 | `UNFOLD_ERROR_OTLP_URL` | URL |  |  | OTLP/HTTP logs endpoint errors are reported to. |
 | `UNFOLD_ERROR_ENVIRONMENT` | string | `the mode` |  | Environment name error reports carry, such as staging. |

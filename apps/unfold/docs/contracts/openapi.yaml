@@ -538,6 +538,8 @@ paths:
                   status: { const: ok }
                   mode: { type: string }
                   version: { type: string }
+                  releasedAt: { type: [string, 'null'], format: date-time, description: 'When this release was published; null for a build that is not a release.' }
+                  startedAt: { type: string, format: date-time, description: 'When this server process started, which is when this instance was deployed or last restarted.' }
                   runtimes: { type: array, items: { type: string } }
                   litellm: { type: boolean }
                   gateway: { type: string }
