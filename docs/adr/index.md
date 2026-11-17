@@ -71,3 +71,4 @@ Use MADR 4.0 for new system decisions. Application decisions remain in their exi
 | [ADR-0055](adr-0055-github-unfold-hq-is-the-project-home.md) | GitHub unfold-hq/unfold is the project home, and GitHub Actions builds, releases and publishes Unfold | accepted | 2026-11-11 |
 | [ADR-0056](adr-0056-unfold-images-build-on-wolfi-and-ci-needs-no-docker-hub-account.md) | Unfold's images build on Wolfi, and CI needs no Docker Hub account | accepted | 2026-11-16 |
 | [ADR-0057](adr-0057-unfold-owns-its-agent-instructions.md) | Unfold owns its agent instructions, and APM generates them from `.apm/` alone | accepted | 2026-11-16 |
+| [ADR-0058](adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md) | People sign in through one Zitadel broker on the production cluster, with an organisation per Tenant | accepted | 2026-11-17 |
