@@ -89,6 +89,31 @@ class LivePublication(unittest.TestCase):
                 live.read_url(url)
             self.assertEqual(read.call_count, 6)
 
+    def test_a_deploy_that_is_still_propagating_is_read_again_until_it_settles(self):
+        fresh = self.responses['index.md']
+        reads = []
+
+        def read(url):
+            name = url.removeprefix('https://example.test/unfold/')
+            if name == 'index.md':
+                reads.append(name)
+                return b'# Unfold, the previous revision' if len(reads) < 3 else fresh
+            return self.responses['' if url == 'https://example.test/unfold' else name]
+
+        now = [0.0]
+        sleep = lambda seconds: now.__setitem__(0, now[0] + seconds)
+        result = live.verify_settled('https://example.test/unfold/', self.staging, read, site_url='https://example.test/unfold/', settle_seconds=60, pause=15, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(result['human_pages'], 1)
+        self.assertEqual(now[0], 30)
+
+    def test_a_publication_that_stays_stale_fails_once_the_settle_time_is_spent(self):
+        self.responses['index.md'] = b'# Unfold, the previous revision'
+        now = [0.0]
+        sleep = lambda seconds: now.__setitem__(0, now[0] + seconds)
+        with self.assertRaisesRegex(AssertionError, 'stale Markdown'):
+            live.verify_settled('https://example.test/unfold/', self.staging, lambda url: self.responses['' if url == 'https://example.test/unfold' else url.removeprefix('https://example.test/unfold/')], site_url='https://example.test/unfold/', settle_seconds=60, pause=15, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(now[0], 60)
+
     def test_matching_publication_passes(self):
         self.assertEqual(self.verify()['human_pages'], 1)
 
