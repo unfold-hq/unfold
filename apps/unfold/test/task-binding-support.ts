@@ -12,11 +12,12 @@ export const itemId = '9007199254740993';
 
 export function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { promise, resolve }; }
 
-export async function fixture(t: Pick<TestContext, 'after'>, provider: 'vikunja' | 'clickup' = 'vikunja') {
+export async function fixture(t: Pick<TestContext, 'after'>, provider: 'vikunja' | 'clickup' = 'vikunja', options: { saved?: { routed: boolean } } = {}) {
   const env = `UNFOLD_TRACKER_BINDING_TEST_${randomBytes(6).toString('hex').toUpperCase()}`;
   const token = randomBytes(24).toString('hex');
   const linkedToken = randomBytes(24).toString('hex');
   const suffix = provider === 'vikunja' ? '/api/v1' : '/api/v2';
+  const savedToken = 'pk_9001_UNFOLDBOTTOKENFIRST';
   process.env[env] = token;
   const state = { task: { id: 17, project_id: 42, title: 'Fix the rounding regression', description: 'Use the current order service and retain test evidence.', done: false, updated: '2026-09-11T10:00:00Z' }, rowUpdated: '2026-09-11T10:01:00Z', target: { ...target }, lookups: 0, sourceReads: [] as string[], admissions: [] as any[], unavailable: false, conflict: false, admissionResponseLost: false, nativeMismatch: false, singletonMismatch: false, lookupGate: undefined as ReturnType<typeof deferred> | undefined, execution: undefined as any, prepared: 0, inference: 0 };
   let base = '';
@@ -25,7 +26,9 @@ export async function fixture(t: Pick<TestContext, 'after'>, provider: 'vikunja'
     const send = (data: unknown, code = 200) => res.writeHead(code, { 'content-type': 'application/json' }).end(JSON.stringify(data));
     if (url.pathname === '/api/v1/tasks') return send([state.task]);
     if (url.pathname === '/api/v1/tasks/17' || url.pathname === '/api/v2/task/17') { state.sourceReads.push(String(req.headers.authorization)); return send(provider === 'vikunja' ? state.task : { id: String(state.task.id), list: { id: String(state.task.project_id) }, name: state.task.title, markdown_description: state.task.description, status: { type: state.task.done ? 'closed' : 'open' }, date_updated: String(Date.parse(state.task.updated)) }); }
+    if (url.pathname === '/api/v2/user') return req.headers.authorization === savedToken ? send({ user: { id: 1, username: 'Unfold bot' } }) : send({}, 401);
     if (req.headers.authorization !== `Bearer ${token}`) return send({}, 401);
+    if (url.pathname === '/api/v1/operator/connections') return send({ schemaVersion: '1.0', checkedAt: null, eventWindowDays: 30, repositories: [{ key: 'orders', label: null, ...target, readiness: 'ready', reason: '', lastForgeEventAt: null, boards: ['Engineering'] }], boards: options.saved?.routed ? [{ tracker: provider, name: 'Engineering', projectId: '42', team: 'delivery', repository: 'orders', default: null, allow: [], webhook: 'present', teams: [] }] : [] });
     if (state.unavailable) return send({}, 503);
     if (url.pathname === '/api/v1/operator/work-items/lookup') {
       state.lookups++;
@@ -70,7 +73,8 @@ export async function fixture(t: Pick<TestContext, 'after'>, provider: 'vikunja'
   };
   const server = await application('live', config => {
     config.repositories[0] = { ...config.repositories[0], url: 'https://forge.example/team/orders.git', executionOwner: 'ploeg' };
-    config.taskSources = [{ id: 'board', name: 'Engineering', provider, baseUrl: `${base}${suffix}`, project: '42', repositoryId: 'order-service', ...(provider === 'vikunja' ? { token } : {}), executionOwner: 'ploeg', ploeg: { target } }];
+    if (options.saved) config.links = { clickup: { apiUrl: base, appUrl: base } };
+    config.taskSources = options.saved ? [] : [{ id: 'board', name: 'Engineering', provider, baseUrl: `${base}${suffix}`, project: '42', repositoryId: 'order-service', ...(provider === 'vikunja' ? { token } : {}), executionOwner: 'ploeg', ploeg: { target } }];
     config.ploeg = { url: base, tokenEnv: env, teams: ['delivery'], userTeams: { outsider: ['delivery'] } };
     config.execution = { team: 'delivery', heartbeatMs: 20000 };
     config.runtime.briefCheck = false;
@@ -78,6 +82,13 @@ export async function fixture(t: Pick<TestContext, 'after'>, provider: 'vikunja'
   }, new Map([['opencode', runtime]]));
   const admin = await login(server.url);
   if (provider === 'clickup') server.app.store.setSecret(`link:clickup:${admin.user.id}`, { accessToken: linkedToken, method: 'token' });
+  if (options.saved) {
+    const connection = await request(server.url, '/api/tracker-connections', { method: 'POST', cookie: admin.cookie, body: { provider, token: savedToken } });
+    assert.equal(connection.status, 201, connection.text);
+    const saved = await request(server.url, `/api/tracker-connections/${connection.body.connection.id}/sources`, { method: 'POST', cookie: admin.cookie, body: { name: 'board', project: '42', repositoryId: 'order-service', executionOwner: 'ploeg' } });
+    assert.equal(saved.status, 201, saved.text);
+    assert.equal(saved.body.source.id, 'board');
+  }
   t.after(async () => { state.lookupGate?.resolve(); await server.close(); await new Promise<void>(resolve => { remote.close(() => resolve()); remote.closeAllConnections(); }); delete process.env[env]; });
   const preview = async (cookie = admin.cookie) => { const result = await request(server.url, '/api/task-sources/board/tasks/17', { cookie }); assert.equal(result.status, 200, result.text); return result.body; };
   const importTask = (task: any, cookie = admin.cookie) => request(server.url, '/api/task-imports', { method: 'POST', cookie, body: { sourceId: 'board', taskId: '17', revision: task.revision, bindingRevision: task.bindingRevision, teamId: 'delivery', runtime: 'opencode', budgetUsd: 3 } });

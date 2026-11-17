@@ -107,6 +107,8 @@ export type PloegConnectionSource = { id: string; name: string; target: string; 
 export type PloegConnectionBoard = { tracker: string; name: string; projectId: string | null; team: string | null; repository: string | null; default: string | null; allow: string[]; webhook: 'present' | 'missing' | 'unreadable' | 'unresolved' | 'unchecked'; teams: { team: string; assignees: { username: string; shared: boolean | null }[] }[]; sources: PloegConnectionSource[] };
 /** How every board and repository is wired. `supported` is false for a Ploeg that predates the connections read; `unrouted` lists the Unfold task sources that hand work to Ploeg on a board Ploeg does not route. */
 export type PloegConnections = { demo: boolean; supported: boolean; checkedAt: string | null; eventWindowDays: number; repositories: PloegConnectionRepository[]; boards: PloegConnectionBoard[]; unrouted: { id: string; name: string; provider: string; project: string }[]; fetchedAt: string };
+/** A board Ploeg routes from its static file, with the repositories it routes to: the pinned or default one first, then the allowed ones. */
+export type PloegRoute = { tracker: string; project: string; targets: { forge: string; owner: string; repo: string; baseBranch: string }[] };
 export type PloegNowGroup = 'waiting' | 'active' | 'running' | 'recent' | 'refused';
 export type PloegNow = { demo: boolean; teams: string[]; waiting: PloegNowItem[]; active: PloegNowItem[]; refused: PloegRefusal[]; running: PloegRunRow[]; recent: PloegRunRow[]; runningTruncated: boolean; recentTruncated: boolean; truncatedStates: PloegNowTruncatedState[]; errors: Partial<Record<PloegNowGroup, string>>; fetchedAt: string };
 export type PloegNowTruncatedState = 'awaiting_review' | 'needs_human' | 'proposed' | 'leased' | 'queued';
@@ -1652,6 +1654,18 @@ export class PloegClient {
     });
     const visible = new Set(boards.map(board => board.name));
     return { demo: false, supported: true, checkedAt: nullable(data.checkedAt, timestamp), eventWindowDays: numeric(data.eventWindowDays, true), repositories: repositories.map(repository => ({ ...repository, boards: repository.boards.filter(name => visible.has(name)) })), boards, unrouted: unrouted(boards), fetchedAt };
+  }
+
+  /** Every board Ploeg routes and the repositories each one routes to, read with the consumer's own scope; a Ploeg without the connections read routes nothing Unfold can see. */
+  async routes(): Promise<PloegRoute[]> {
+    let data: Record<string, unknown>;
+    try { data = envelope(await this.request('connections', true, { added: true })); }
+    catch (error) { if (error instanceof PloegError && error.code === 'ploeg_unsupported') return []; throw error; }
+    const byKey = new Map(array(data.repositories, connectionRepository, 500).map(repository => [repository.key, repository]));
+    return array(data.boards, connectionBoard, 500).flatMap(board => board.projectId === null ? [] : [{
+      tracker: board.tracker, project: board.projectId,
+      targets: [board.repository, board.default, ...board.allow].flatMap(key => { const repository = key ? byKey.get(key) : undefined; return repository ? [{ forge: repository.forge, owner: repository.owner, repo: repository.repo, baseBranch: repository.baseBranch }] : []; }),
+    }]);
   }
 
   private async refusals(user: User, fresh: boolean): Promise<PloegRefusal[]> {

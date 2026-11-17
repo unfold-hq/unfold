@@ -3,7 +3,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { AppConfig, User } from './types.ts';
 import type { ServiceAccountGuide, TaskProviderAdapter } from './task-providers/index.ts';
 import { request, TaskError } from './task-providers/shared.ts';
-import { validateTaskSources, type TaskSourceConfig } from './tasks.ts';
+import type { PloegRoute } from './ploeg.ts';
+import { canHandOff, validateTaskSources, type TaskSourceConfig, type TaskTarget } from './tasks.ts';
 import { setupTarget } from './task-setup.ts';
 import { defaultTenant, validTenancyId } from './tenancy.ts';
 import { reaches } from './tenant-scope.ts';
@@ -49,6 +50,8 @@ export class TrackerConnections {
   private readonly config: AppConfig;
   private readonly options: Options;
   private readonly listeners: ((secret: string) => void)[] = [];
+  private routes: PloegRoute[] = [];
+  private readRoutes: (() => Promise<PloegRoute[]>) | undefined;
 
   constructor(store: SecretStore, config: AppConfig, options: Options) {
     this.store = store;
@@ -109,6 +112,27 @@ export class TrackerConnections {
     return this.config.repositories.some(repository => repository.id === source.repositoryId) ? 'active' : 'repository_missing';
   }
 
+  /** Reads Ploeg's static routes with `read` from now on, so {@link TrackerConnections.refreshRoutes} can give saved sources their Ploeg target. */
+  useRoutes(read: () => Promise<PloegRoute[]>): void { this.readRoutes = read; }
+  /** Reads Ploeg's routes again and syncs, only while a saved source hands its work to Ploeg. When Ploeg cannot be read, the routes read before stay. */
+  async refreshRoutes(): Promise<void> {
+    if (!this.readRoutes || !this.sources().some(source => source.executionOwner === 'ploeg')) return;
+    try {
+      this.routes = await this.readRoutes();
+      this.sync();
+    } catch (error) { this.log('tracker_connections.routes_unread', { message: String((error as Error)?.message ?? error).slice(0, 200) }); }
+  }
+
+  private routedTarget(source: ConnectionSource, connection: TrackerConnection): TaskTarget | undefined {
+    if (source.executionOwner !== 'ploeg' || !canHandOff(connection.provider)) return undefined;
+    const repository = this.config.repositories.find(entry => entry.id === source.repositoryId);
+    const path = repository ? (() => { try { return new URL(repository.url).pathname.replace(/^\//, '').replace(/\.git$/, ''); } catch { return undefined; } })() : undefined;
+    if (!repository || !path) return undefined;
+    const route = this.routes.find(entry => entry.tracker === connection.provider && entry.project === source.project);
+    const target = route?.targets.find(entry => `${entry.owner}/${entry.repo}` === path && entry.baseBranch === repository.baseBranch);
+    return target ? { forge: target.forge, owner: target.owner, repo: target.repo, baseBranch: target.baseBranch } : undefined;
+  }
+
   /** Puts the saved sources into `config.taskSources` after the configured ones, replacing what an earlier sync put there. */
   sync(): void {
     const list = this.config.taskSources ??= [];
@@ -120,10 +144,11 @@ export class TrackerConnections {
       const state = this.state(source, connection);
       if (state !== 'active') { this.log('tracker_connections.source_unused', { source: source.id, reason: state }); continue; }
       const held = this.credential(connection.id);
+      const target = this.routedTarget(source, connection);
       list.push({
         id: source.id, name: source.name, provider: connection.provider, baseUrl: connection.baseUrl, project: source.project, repositoryId: source.repositoryId, executionOwner: source.executionOwner,
         ...(held ? { token: held.token, ...(held.tokenType ? { tokenType: held.tokenType } : {}) } : {}),
-        tenant: source.tenant, ...(source.client ? { client: source.client } : {}), connection: connection.id,
+        ...(target ? { ploeg: { target } } : {}), tenant: source.tenant, ...(source.client ? { client: source.client } : {}), connection: connection.id,
       });
     }
   }
