@@ -12,6 +12,7 @@ import { getTask, listTasks, presentTask, publicTaskSource, sourceLinkProvider, 
 import { readCandidate, unavailableCandidate } from './candidates.ts';
 import { placements } from './config.ts';
 import type { WorkerRelay } from './runtime/relay.ts';
+import { KubernetesClient } from './runtime/kubernetes.ts';
 import type { AgentHost } from './ahp/host.ts';
 import { parseEditorWindow } from './ahp/editor-window.ts';
 import { agentHostTokenId, type AgentsWindowTarget, repositoryFolderPaths, protocolBaselines as agentHostProtocolVersions, protocolVersion as agentHostProtocolVersion } from './ahp/host.ts';
@@ -34,6 +35,7 @@ import { FocusQueryError, focusExportQuery, focusFile, readFocusExport } from '.
 import { TaskHandoff } from './task-handoff.ts';
 import { handedOffBy } from './notify/handed-off.ts';
 import { TenantScope } from './tenant-scope.ts';
+import { CostExportReaders, kubernetesTokenReviewer, readerReaches, withReaderTeams } from './cost-export-readers.ts';
 import { membershipsFromGroups, ownership } from './tenancy.ts';
 import { StaticFiles } from './static.ts';
 import { Collection, CollectionError } from './collection.ts';
@@ -265,7 +267,9 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const audit = new AuditTrail({ store, jobs, settings: config.audit, config, owner: path => trackerConnections.ownerOf(path), exportEnabled: tenant => flags.getBooleanValue('audit.export', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), schedule: true });
   const auth = new Auth(store, config);
   auth.onFamilyRevoked = signIns => { for (const signIn of signIns) agentHost?.revokeSignIn(signIn); };
-  const ploeg = new PloegClient(config, ploegCompatibility);
+  const ploeg = new PloegClient(withReaderTeams(config), ploegCompatibility);
+  const readers = new CostExportReaders(config.costExportReaders ?? [], kubernetesTokenReviewer(new KubernetesClient(config.kubernetes ?? {})));
+  auth.useReaders(readers);
   if (config.ploeg && !ploeg.isDemo) { trackerConnections.useRoutes(() => ploeg.routes()); void trackerConnections.refreshRoutes(); }
   const cards = config.ploeg && !config.ploeg.demo ? new CardService(ploeg, new CardStore(store.db), { settings: config.cards?.rules ?? {}, publish: config.cards?.publishPullRequestComment === true }) : undefined;
   if (cards) ploeg.useCards(cards);
@@ -472,6 +476,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         const refusal = limiter.take([addressLimit], clientAddress(req, config.trustedProxies));
         if (refusal) return refuse(res, refusal, addressLimit === 'scim');
       } else if (path.startsWith('/api/') && !path.startsWith('/api/relay/')) {
+        if (await readers.authenticate(req) && !readers.allows(method, path)) fault(403, 'reader_route', 'A cost export reader reads only GET /api/ploeg/cost-export.');
         const limits = personLimits(method, path);
         const caller = limits.length ? auth.user(req) : undefined;
         const refusal = caller && limiter.take(limits, config.mode === 'demo' ? `address:${clientAddress(req, config.trustedProxies)}` : `user:${caller.id}`);
@@ -1211,15 +1216,17 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
               res.end(deliveriesCsv(ledger?.rows ?? [])); return;
             }
             if (path === '/api/ploeg/cost-export') {
-              if (user.role === 'viewer') fault(403, 'forbidden', 'Only operators and administrators export cost.');
+              const reader = readers.readerOf(user);
+              if (user.role === 'viewer' && !reader) fault(403, 'forbidden', 'Only operators and administrators export cost.');
+              const reachesTarget = (target: Parameters<TenantScope['workItemOwner']>[0]) => reader ? readerReaches(reader, tenants.workItemOwner(target)) : tenants.reachesWorkItem(user, target);
               let query; try { query = focusExportQuery(url.searchParams); } catch (error) { if (error instanceof FocusQueryError) fault(400, 'cost_export_filter', error.message); throw error; }
               const teams = (await ploeg.teams(user, fresh)).map(team => team.id);
               const linkedCosts = () => linkedWorkCharges(linkedUsage, id => linked.store.get(id), query.from, query.to, async id => {
                 const { item } = await ploeg.detail(user, id, fresh);
-                if (!teams.includes(item.team) || !tenants.reachesWorkItem(user, item.target)) return undefined;
+                if (!teams.includes(item.team) || !reachesTarget(item.target)) return undefined;
                 return { item: { id: item.id, title: item.title, team: item.team, target: item.target ? { owner: item.target.owner, repo: item.target.repo } : null, externalRef: ploegTrackerReference(item.provider, item.externalId) ?? '' }, owner: tenants.workItemOwner(item.target) };
               });
-              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => tenants.reachesWorkItem(user, facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts, markup: (owner, source, dayStart) => linkedUsage.markups.at(owner, source, dayStart) }));
+              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => reachesTarget(facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts, markup: (owner, source, dayStart) => linkedUsage.markups.at(owner, source, dayStart) }));
               const file = focusFile(result, query);
               res.writeHead(200, { 'Content-Type': file.contentType, 'Content-Disposition': `attachment; filename="${file.filename}"`, 'Cache-Control': 'no-store', ...file.headers });
               res.end(file.body); return;

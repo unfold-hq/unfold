@@ -217,6 +217,15 @@ config:
   #   simplicate:
   #     domain: agency
   #     tokenEnv: UNFOLD_SIMPLICATE_TOKEN
+  # costExportReaders (optional, none when absent; Unfold ADR 0071): billing systems that read GET /api/ploeg/cost-export
+  # with their own projected service account token, scoped to one Tenant and its Teams. A non-empty list also grants the
+  # workbench tokenreviews create, cluster-wide (apps/unfold/docs/operations/focus-cost-export.md).
+  # costExportReaders:
+  #   - id: billing
+  #     serviceAccount: billing/focus-reader
+  #     audience: unfold-cost-export
+  #     tenant: default
+  #     teams: [delivery]
   # ploeg.personTokens (optional, off when absent; Unfold ADR 0055): exchange each person's sign-in token for a
   # Ploeg-audience token sent with every change Unfold makes for them. The secret comes from credentialsSecret.
   # ploeg:

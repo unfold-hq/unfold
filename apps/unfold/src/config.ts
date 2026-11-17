@@ -19,6 +19,7 @@ import { defaultJudgeModels } from './run-health/judge.ts';
 import { acceptanceCalendarSettings } from './delivery-ledger.ts';
 import { configuredOwnership, describeOwnership, ownership, repositoryKey, sameOwnership, type Ownership } from './tenancy.ts';
 import { tenancySettings } from './tenant-scope.ts';
+import { costExportReaderSettings } from './cost-export-readers.ts';
 import { auditSettings } from './audit/settings.ts';
 import { outboundEventsSettings } from './outbound/address.ts';
 import { intakeConfig } from './intake/limiter.ts';
@@ -635,5 +636,6 @@ export function loadConfig(argv = process.argv.slice(2)): AppConfig {
   const billing = billingSettings(raw.billing, billingExporters, { env: process.env, dataDir, agentEnvironment: config.runtime.agentEnvironment ?? [] });
   if (billing) config.billing = billing;
   if (raw.identity !== undefined) config.identity = identitySettings(raw.identity, { oidc: Boolean(config.auth.oidc), baseUrl: config.baseUrl });
+  if (raw.costExportReaders !== undefined) config.costExportReaders = costExportReaderSettings(raw.costExportReaders, config);
   return config;
 }

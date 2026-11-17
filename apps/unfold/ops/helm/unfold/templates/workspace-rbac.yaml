@@ -71,3 +71,27 @@ roleRef:
   kind: ClusterRole
   name: {{ .Release.Namespace }}-{{ include "unfold.name" . }}-pool-tokens
 {{- end }}
+{{- if .Values.config.costExportReaders }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "unfold.name" . }}-reader-tokens
+rules:
+  - apiGroups: [authentication.k8s.io]
+    resources: [tokenreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Namespace }}-{{ include "unfold.name" . }}-reader-tokens
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "unfold.name" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Namespace }}-{{ include "unfold.name" . }}-reader-tokens
+{{- end }}

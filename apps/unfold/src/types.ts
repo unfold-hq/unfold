@@ -7,6 +7,7 @@ import type { FlagSettings } from './flags.ts';
 import type { McpHttpSettings } from './mcp-auth.ts';
 import type { PersonTokenSettings } from './person-proof.ts';
 import type { Membership } from './tenancy.ts';
+import type { CostExportReader } from './cost-export-readers.ts';
 import type { IntakeConfig } from './intake/limiter.ts';
 import type { OpenBaoSettings } from './audit/signer.ts';
 import type { ObjectStoreSettings } from './audit/object-store.ts';
@@ -104,6 +105,8 @@ export type AppConfig = {
   billing?: BillingSettings;
   /** SCIM provisioning and the Shared Signals receiver (`identity`), each behind its own flag. */
   identity?: IdentitySettings;
+  /** The machines that read the FOCUS cost export with their own Kubernetes service account token (ADR 0071). Absent means none. */
+  costExportReaders?: CostExportReader[];
 };
 
 /** Where Report a problem files: a connection to a tracker whose adapter files issues (a named task source, or one of its own), the repository or project, and an optional line the success screen shows. */
