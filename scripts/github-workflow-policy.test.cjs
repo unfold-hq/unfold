@@ -265,7 +265,10 @@ test('publication signs keyless only in on_release_published.yml at a release ta
   assert.match(buildStep.run, /--platform "linux\/\$ARCH"/);
   assert.match(buildStep.run, /--label org\.opencontainers\.image\.source="\$SOURCE"/);
   assert.match(buildStep.run, /--provenance=mode=max/);
-  assert.match(buildStep.run, /--output "type=image,name=\$\{IMAGE\}:\$\{VERSION\}-\$\{ARCH\},push=true"/, 'the docker driver cannot push by digest, so each platform pushes under its own tag');
+  assert.match(buildStep.run, /--output "type=image,name=\$\{IMAGE\}:build-\$\{VERSION\}-\$\{ARCH\},push=true"/, 'the docker driver cannot push by digest, so each platform pushes under its own build tag');
+  const pushedTags = [...buildStep.run.matchAll(/name=\$\{IMAGE\}:([^,"]+)/g)].map(match => match[1].replace('${VERSION}', '0.4.0-rc.134').replace('${ARCH}', 'arm64'));
+  assert.deepEqual(pushedTags, ['build-0.4.0-rc.134-arm64']);
+  for (const tag of pushedTags) assert.doesNotMatch(tag, /^v?\d/, 'a platform tag never reads as a version, or a consumer\'s Renovate takes it for a newer release than the multi-platform index');
   assert.equal(buildStep.env.SOURCE, 'https://github.com/unfold-hq/unfold');
   for (const name of platforms.strategy.matrix.name) {
     for (const arch of platforms.strategy.matrix.arch) assert.equal(platforms.outputs[`${name}-${arch}`], `\${{ steps.build.outputs.${name}-${arch} }}`);
