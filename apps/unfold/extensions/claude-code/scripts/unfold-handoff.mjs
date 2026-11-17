@@ -7,9 +7,11 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { pathToFileURL } from 'node:url';
 import { workItemArgument } from './unfold-start.mjs';
+import { resolveCredential } from './credentials.mjs';
 
 const unfoldUrl = (process.env.UNFOLD_URL ?? '').trim().replace(/\/+$/, '');
-const token = (process.env.UNFOLD_TOKEN ?? '').trim();
+let resolvedToken;
+const token = () => (resolvedToken ??= resolveCredential(unfoldUrl).token);
 
 /** What `/unfold:handoff` shows, scans and sends at most. */
 export const handoffLimits = { diffBytes: 100_000, scanBytes: 20_000_000, items: 8, item: 300, title: 200, untrackedShown: 20, pendingMs: 15 * 60_000 };
@@ -186,7 +188,7 @@ function pendingDir() {
 }
 
 async function call(path, init = {}) {
-  const response = await fetch(`${unfoldUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin', ...(init.body ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20_000) });
+  const response = await fetch(`${unfoldUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token()}`, accept: 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin', ...(init.body ? { 'content-type': 'application/json' } : {}), ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20_000) });
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -346,7 +348,7 @@ async function send(code) {
 
 async function main() {
   const [mode, ...rest] = process.argv.slice(2);
-  if (!unfoldUrl || !token) { say('Set UNFOLD_URL and UNFOLD_TOKEN in ~/.claude/settings.json first; see Settings › Agent sessions in Unfold.'); return 2; }
+  if (!unfoldUrl || !token()) { say(unfoldUrl ? 'This machine is not signed in to Unfold. Run /unfold:login, approve it in your browser, then run this again.' : 'Set UNFOLD_URL first: your organisation sets it in Claude Code’s managed settings, or add it to the env block of ~/.claude/settings.json.'); return 2; }
   if (mode === 'preview') return preview(rest);
   if (mode === 'send') return send(rest[0]);
   say('Use preview [work item] [--team <team> [--target <repository>]] --findings <file or ->, or send <code>.');

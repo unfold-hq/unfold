@@ -9,9 +9,11 @@ import { deliver } from './inbox.mjs';
 import { pushAgentTrace } from './push-agent-trace.mjs';
 import { awaitRemoteAnswer, waitSettings } from './permission.mjs';
 import { recordEvidence } from './evidence.mjs';
+import { credentialKey, credentialStore, redacted, resolveCredential, unfoldAddress } from './credentials.mjs';
+import { signInNotice } from './sign-in.mjs';
 
-const unfoldUrl = (process.env.UNFOLD_URL ?? '').trim().replace(/\/+$/, '');
-const token = (process.env.UNFOLD_TOKEN ?? '').trim();
+const unfoldUrl = unfoldAddress(process.env.UNFOLD_URL);
+let token = '';
 const timeoutMs = Number(process.env.UNFOLD_HOOK_TIMEOUT_MS) || 3000;
 const gitTimeoutMs = Number(process.env.UNFOLD_HOOK_GIT_TIMEOUT_MS) || 2000;
 const commitAttempts = 3;
@@ -50,7 +52,7 @@ function git(cwd, args, input) {
 }
 
 function debug(message) {
-  if (process.env.UNFOLD_HOOK_DEBUG) process.stderr.write(`unfold: ${message}\n`);
+  if (process.env.UNFOLD_HOOK_DEBUG) process.stderr.write(`unfold: ${redacted(message)}\n`);
 }
 
 function transcriptFacts(transcriptPath) {
@@ -83,7 +85,7 @@ function learn(input, state) {
 async function post(path, body, waitMs = timeoutMs) {
   const response = await fetch(`${unfoldUrl}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin' }, body: JSON.stringify(body), signal: AbortSignal.timeout(waitMs) });
   const text = await response.text();
-  if (!response.ok) throw new Error(`Unfold answered ${response.status}: ${text.slice(0, 200)}`);
+  if (!response.ok) throw Object.assign(new Error(`Unfold answered ${response.status}: ${text.slice(0, 200)}`), { status: response.status });
   return text ? JSON.parse(text) : {};
 }
 
@@ -180,6 +182,7 @@ async function handle(input) {
     case 'SessionStart': {
       learn(input, state);
       const { answer, repo } = await report(input, state, 'start', { remoteApproval, ...(input.session_title ? { title: input.session_title } : {}) });
+      state.started = true;
       if (repo) tracked(state, repo.top);
       const hookSpecificOutput = { hookEventName: 'SessionStart', additionalContext: String(answer.context ?? '') };
       if (answer.suggestedTitle && !input.session_title && ['startup', 'resume', 'fork'].includes(input.source)) hookSpecificOutput.sessionTitle = answer.suggestedTitle;
@@ -187,6 +190,13 @@ async function handle(input) {
       break;
     }
     case 'UserPromptSubmit': {
+      if (!state.started && !state.link) {
+        learn(input, state);
+        const { answer, repo } = await report(input, state, 'start', { remoteApproval });
+        state.started = true;
+        if (repo) tracked(state, repo.top);
+        if (answer.context) output.hookSpecificOutput = { hookEventName: 'UserPromptSubmit', additionalContext: String(answer.context) };
+      }
       const named = mentionsIn(String(input.prompt ?? ''), state.prefixes, unfoldUrl);
       await report(input, state, 'prompt', named ? { mentions: named } : {});
       break;
@@ -216,7 +226,10 @@ async function handle(input) {
     }
     default: break;
   }
-  Object.assign(output, await deliver(input, state, post));
+  const delivered = await deliver(input, state, post);
+  const context = [output.hookSpecificOutput?.additionalContext, delivered.hookSpecificOutput?.additionalContext].filter(Boolean).join('\n\n');
+  Object.assign(output, delivered);
+  if (context) output.hookSpecificOutput = { ...output.hookSpecificOutput, additionalContext: context };
   saveState(input.session_id, state);
   return output;
 }
@@ -239,14 +252,42 @@ async function main() {
     try { recordEvidence(input); } catch (error) { if (process.env.UNFOLD_HOOK_DEBUG) process.stderr.write(`unfold: ${error.message}\n`); }
   }
   if (input.hook_event_name === 'PostToolUseFailure') return;
-  if (!unfoldUrl || !token) return;
-  try {
-    const output = input.hook_event_name === 'PermissionRequest' ? await permission(input) : await handle(input);
-    if (Object.keys(output).length) process.stdout.write(`${JSON.stringify(output)}\n`);
-  } catch (error) {
-    debug(error.message);
+  if (!unfoldUrl) return;
+  const event = input.hook_event_name;
+  const credential = resolveCredential(unfoldUrl);
+  token = credential.token;
+  const asking = event === 'SessionStart' || event === 'UserPromptSubmit';
+  const notify = async current => { try { return await signInNotice({ url: unfoldUrl, credential: current, event, timeoutMs }); } catch (error) { debug(error.message); return null; } };
+  let notice = asking ? await notify(credential) : null;
+  let output = {};
+  if (token) {
+    try {
+      output = event === 'PermissionRequest' ? await permission(input) : await handle(input);
+    } catch (error) {
+      debug(error.message);
+      if (error.status === 401 && credential.source === 'stored') {
+        forgetRefused(credential.token);
+        if (asking && !notice) notice = await notify({ ...credential, token: '', source: 'none' });
+      }
+    }
   }
+  if (notice) output = withNotice(output, notice, event);
+  if (Object.keys(output).length) process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 
-await main();
+function forgetRefused(refused) {
+  try {
+    const store = credentialStore();
+    const key = credentialKey(unfoldUrl);
+    if (store.read(key)?.token === refused) store.forget(key);
+  } catch (error) { debug(error.message); }
+}
+
+function withNotice(output, notice, event) {
+  const next = { ...output, systemMessage: notice.systemMessage };
+  if (notice.context) next.hookSpecificOutput = { hookEventName: event, ...output.hookSpecificOutput, additionalContext: [output.hookSpecificOutput?.additionalContext, notice.context].filter(Boolean).join('\n\n') };
+  return next;
+}
+
+await main().catch(error => debug(error.message));
 process.exitCode = 0;

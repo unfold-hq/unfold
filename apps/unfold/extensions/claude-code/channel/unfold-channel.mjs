@@ -2,9 +2,10 @@
 import { createInterface } from 'node:readline';
 import { collect, framed, sessionIdle, sessionOfProcess, sessionTranscript } from '../scripts/inbox.mjs';
 import { readConversation } from '../scripts/conversation.mjs';
+import { resolveCredential, unfoldAddress } from '../scripts/credentials.mjs';
 
-const unfoldUrl = (process.env.UNFOLD_URL ?? '').trim().replace(/\/+$/, '');
-const token = (process.env.UNFOLD_TOKEN ?? '').trim();
+const unfoldUrl = unfoldAddress(process.env.UNFOLD_URL);
+const token = () => resolveCredential(unfoldUrl).token;
 const enabled = process.env.UNFOLD_CHANNEL === '1';
 const timeoutMs = Number(process.env.UNFOLD_HOOK_TIMEOUT_MS) || 3000;
 const everyMs = Math.max(5000, Number(process.env.UNFOLD_CHANNEL_POLL_MS) || 20_000);
@@ -22,7 +23,7 @@ class UnfoldRefused extends Error {
 }
 
 async function post(path, body, waitMs = timeoutMs) {
-  const response = await fetch(`${unfoldUrl}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-channel' }, body: JSON.stringify(body), signal: AbortSignal.timeout(waitMs) });
+  const response = await fetch(`${unfoldUrl}${path}`, { method: 'POST', headers: { authorization: `Bearer ${token()}`, 'content-type': 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-channel' }, body: JSON.stringify(body), signal: AbortSignal.timeout(waitMs) });
   const text = await response.text();
   if (!response.ok) throw new UnfoldRefused(response.status, text);
   return text ? JSON.parse(text) : {};
@@ -38,6 +39,7 @@ function answerOf(sessionId, want) {
 }
 
 async function relayOnce() {
+  if (!token()) return relayAbsentMs;
   const sessionId = sessionOfProcess(process.ppid);
   if (!sessionId) return relayRetryMs;
   const path = `/api/linked-sessions/${encodeURIComponent(sessionId)}/conversation`;
@@ -64,7 +66,7 @@ let initialized = false;
 let busy = false;
 
 async function poll() {
-  if (busy || !initialized || !enabled || !unfoldUrl || !token) return;
+  if (busy || !initialized || !enabled || !unfoldUrl || !token()) return;
   busy = true;
   try {
     const sessionId = sessionOfProcess(process.ppid);
@@ -97,5 +99,5 @@ lines.on('line', line => {
   if (message && typeof message === 'object' && !Array.isArray(message)) answer(message);
 });
 lines.on('close', () => process.exit(0));
-if (relaying && unfoldUrl && token) void relay();
+if (relaying && unfoldUrl) void relay();
 setInterval(() => { void poll().catch(error => { if (process.env.UNFOLD_HOOK_DEBUG) process.stderr.write(`unfold channel: ${error.message}\n`); }); }, everyMs).unref();
