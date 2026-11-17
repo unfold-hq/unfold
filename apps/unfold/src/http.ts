@@ -729,6 +729,10 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           const answer = await tenantExportRoute(tenantExports, { method, path, user, scope: auth.scope(req), body: () => body(req), res });
           return answer ? json(res, answer.status, answer.body) : undefined;
         }
+        if (path === '/api/onboarding/spend-cap') {
+          if (method === 'POST') return json(res, 200, sanitize({ confirmation: await onboarding.confirmCap(user, await body(req)) }));
+          fault(405, 'method', 'Confirm a Team’s spend cap with POST.');
+        }
         if (method === 'GET' && path === '/api/onboarding') { await storedRepositories(); return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1'))); }
         if (method === 'GET' && path === '/api/bootstrap') return json(res, 200, sanitize({
           user, mode: config.mode, onboarding: onboarding.landing(user), sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,

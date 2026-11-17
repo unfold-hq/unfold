@@ -306,3 +306,15 @@ test('webhook, intake source, billing and Tenant export administration are Entit
     assert.deepEqual(ocsfErrors({ ...event, metadata: { ...event.metadata, uid: 'x', tenant_uid: 'acme', sequence: 1 } }), [], name);
   }
 });
+
+test('a spend cap confirmation is an Entity Management record with the confirmed cap, and a refused one a failure outside any Tenant chain', () => {
+  const signedIn = { id: 'u-ada', name: 'ada', role: 'admin' as const };
+  const tap = (status: number, inputs: Record<string, unknown>) => capture({ method: 'POST', path: '/api/onboarding/spend-cap', query: new URLSearchParams(), status, user: () => signedIn, inputs: () => inputs, userByName: () => undefined, signedInByResponse: () => undefined, editorLabel: () => undefined });
+  const confirmed = tap(200, { team: 'delivery', usd: 20, period: 'day' });
+  assert.equal(confirmed?.fact.kind, 'entity');
+  assert.deepEqual(confirmed?.fact.kind === 'entity' ? [confirmed.fact.action, confirmed.fact.entity, confirmed.fact.outcome, confirmed.actor?.id, confirmed.tenants] : null, ['create', { type: 'Spend cap confirmation', uid: 'delivery', name: 'Spend cap of Team delivery confirmed', data: { usd: 20, period: 'day' } }, 'success', 'u-ada', ['default']]);
+  const refused = tap(409, { team: 'delivery', usd: 25, period: 'day' });
+  assert.deepEqual(refused?.fact.kind === 'entity' ? [refused.fact.outcome, refused.fact.reason, refused.tenants] : null, ['failure', 'conflict', undefined]);
+  const event = ocsfEvent({ fact: confirmed!.fact, actor: { user: ada }, at });
+  assert.deepEqual(ocsfErrors({ ...event, metadata: { ...event.metadata, uid: 'x', tenant_uid: 'default', sequence: 1 } }), []);
+});

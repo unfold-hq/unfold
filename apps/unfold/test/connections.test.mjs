@@ -95,3 +95,17 @@ test('every configured board and repository says it is configured by the install
   const html = connectionsMarkup(connectionsModel(data(), at), { now: at });
   assert.equal(html.match(/Configured by the installation/g).length, 3);
 });
+
+test('the Budget line offers one confirm button per unconfirmed cap, naming the amount, its period and the Team in full', () => {
+  const budgetLine = { id: 'budget', stage: 6, title: 'Budget', status: 'pending', text: 'delivery: USD 12.50 a week, not confirmed yet.', action: { label: 'Confirm the spend cap', kind: 'confirm-cap' } };
+  const cap = { usd: 12.5, period: 'week', periodEnd: '2026-11-23T00:00:00.000Z', remainingUsd: 12.5 };
+  const html = checklistMarkup({ manage: true, stages: [budgetLine], installValues: [], budget: [
+    { team: 'delivery', spendCap: cap, confirmed: null, changed: null, bindable: true },
+    { team: 'research', spendCap: { ...cap, usd: 20, period: 'day' }, confirmed: { team: 'research', usd: 20, period: 'day', at: '2026-11-17T10:00:00.000Z' }, changed: null, bindable: true },
+    { team: 'bronze', spendCap: null, confirmed: null, changed: null, bindable: false },
+  ] });
+  assert.match(html, /data-action="connections-confirm-cap"[^>]*data-team="delivery"[^>]*data-usd="12\.5"[^>]*data-period="week"/);
+  assert.match(html, /Confirm USD 12\.50 a week for delivery/);
+  assert.equal(html.match(/connections-confirm-cap/g).length, 1, 'a confirmed cap and a Team without one get no button');
+  assert.doesNotMatch(html, /…/);
+});

@@ -4093,12 +4093,12 @@ paths:
         - $ref: '#/components/parameters/Refresh'
       responses:
         '200':
-          description: '`{demo, manage, onboarding, pinnedBundle, stages, installValues, storedRepositories, connections, reads, fetchedAt}`'
+          description: '`{demo, manage, onboarding, pinnedBundle, stages, installValues, storedRepositories, connections, reads, fetchedAt, budget}`'
           content:
             application/json:
               schema:
                 type: object
-                required: [demo, manage, onboarding, pinnedBundle, stages, installValues, storedRepositories, connections, reads, fetchedAt]
+                required: [demo, manage, onboarding, pinnedBundle, stages, installValues, storedRepositories, connections, reads, fetchedAt, budget]
                 properties:
                   demo: { type: boolean }
                   manage: { type: boolean }
@@ -4121,15 +4121,67 @@ paths:
                         configured: { type: boolean }
                         configEntry: { type: string }
                         waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } }
-                        action: { type: object, properties: { label: { type: string }, href: { type: string }, kind: { type: string, enum: [link, refresh, install-values, config-entry] } } }
+                        action: { type: object, properties: { label: { type: string }, href: { type: string }, kind: { type: string, enum: [link, refresh, install-values, config-entry, confirm-cap] } } }
                         checks: { type: array, items: { type: object } }
                   installValues: { type: array, items: { type: object, properties: { prerequisite: { type: string }, value: { type: string }, read: { type: string } } } }
                   storedRepositories: { type: array, description: 'Repositories added in Unfold, with `state` `active`, `shadowed` by the configuration, or `off` while the repositories.stored flag is off.', items: { type: object, properties: { id: { type: string }, name: { type: string }, url: { type: string }, state: { type: string, enum: [active, shadowed, off] } } } }
                   connections: { type: [object, 'null'] }
                   reads: { type: object, properties: { connections: { type: [string, 'null'] }, teams: { type: [string, 'null'] } } }
                   fetchedAt: { type: string }
+                  budget:
+                    type: array
+                    description: 'One entry per Team of Ploeg''s Teams read. `spendCap` is the Team''s cap as Ploeg reports it, null for none and left out when this Ploeg does not report caps. `confirmed` is the Admin confirmation that matches it, `changed` a confirmation of an earlier cap. `by` names who confirmed only for a person who manages the Tenant. `bindable` is false for a Team without a cap: onboarding binds no List to it.'
+                    items:
+                      type: object
+                      required: [team, confirmed, changed, bindable]
+                      properties:
+                        team: { type: string }
+                        spendCap: { type: [object, 'null'] }
+                        confirmed: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/SpendCapConfirmation' }] }
+                        changed: { oneOf: [{ type: 'null' }, { $ref: '#/components/schemas/SpendCapConfirmation' }] }
+                        bindable: { type: boolean }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/spend-cap:
+    post:
+      tags: [Ploeg]
+      operationId: confirmOnboardingSpendCap
+      summary: 'Confirm a Team''s spend cap on the onboarding checklist'
+      description: 'Records that the person confirmed the spend cap Ploeg''s Teams read reports for `team`, with who and when, as an OCSF Entity Management record. The confirmation is bound to the cap shown: `usd` and `period` must be what Ploeg reports now, or 409 `spend_cap_changed`. 409 `budget_missing` when Ploeg reports no cap for the Team, 501 `ploeg_unsupported` when this Ploeg reports no caps, 409 `ploeg_demo` in the demo, 404 `ploeg_not_found` for a Team the person cannot see. Nothing is sent to Ploeg. Readiness work is refused with 409 `spend_cap_unconfirmed` until the cap Ploeg reports is confirmed. 403 for anyone who does not manage the Tenant.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [team, usd, period]
+              properties:
+                team: { type: string, maxLength: 100 }
+                usd: { type: number, exclusiveMinimum: 0, description: 'The cap in US dollars as it was shown.' }
+                period: { type: string, enum: [day, week, month] }
+      responses:
+        '200':
+          description: '`{confirmation}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [confirmation]
+                properties:
+                  confirmation: { $ref: '#/components/schemas/SpendCapConfirmation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/ploeg/connections:
     get:
@@ -7964,6 +8016,16 @@ components:
               receiptId: { type: string }
               policySha256: { type: string }
   schemas:
+    SpendCapConfirmation:
+      type: object
+      description: 'An Admin''s confirmation of a Team''s spend cap: the cap in US dollars per UTC period as Ploeg reported it, who confirmed it and when.'
+      required: [team, usd, period, at]
+      properties:
+        team: { type: string }
+        usd: { type: number }
+        period: { type: string, enum: [day, week, month] }
+        by: { type: object, properties: { id: { type: string }, name: { type: string } } }
+        at: { type: string, format: date-time }
     UsageMoney:
       type: object
       description: 'Money from one source in a period. `usd` sums the known amounts and is null when there are items and none has a known amount; `unknown` counts items without one, so a partial sum is a lower bound. `final` is true only when every amount is known and settled.'

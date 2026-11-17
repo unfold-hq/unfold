@@ -26,7 +26,7 @@ function workItem(state: string, team = 'silver', provider = 'vikunja', external
   return { id: '9001', provider, externalId, revision: at, team, state, title: 'Round the totals', description: '', url: '', priority: 0, attempts: 1, infraFailures: 0, nextEligibleAt: null, createdAt: at, updatedAt: at, target: null, latestShift: state === 'queued' ? null : shift, lease: null };
 }
 
-type PloegState = { items: ReturnType<typeof workItem>[]; ploegDown: boolean; olderPloeg: boolean; itemsDown: boolean; pins: Record<string, string[]>; teams?: [string, string[]][] };
+type PloegState = { items: ReturnType<typeof workItem>[]; ploegDown: boolean; olderPloeg: boolean; itemsDown: boolean; pins: Record<string, string[]>; teams?: [string, string[]][]; uncapped?: boolean };
 
 async function ploegStub(state: PloegState, bearer: string, t: TestContext): Promise<string> {
   return listen((req, res) => {
@@ -34,7 +34,7 @@ async function ploegStub(state: PloegState, bearer: string, t: TestContext): Pro
     const send = (value: unknown, status = 200) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...value as object }));
     if (req.headers.authorization !== `Bearer ${bearer}` || req.method !== 'GET') return send({}, 401);
     if (state.ploegDown) return send({}, 503);
-    const team = (id: string, assignees: string[]) => ({ id, paused: false, queueDepth: 2, roles: [{ id: 'implementer', queueDepth: 1 }], ...(state.olderPloeg ? {} : { assignees, pinnedScopes: state.pins[id] ?? [] }) });
+    const team = (id: string, assignees: string[]) => ({ id, paused: false, queueDepth: 2, roles: [{ id: 'implementer', queueDepth: 1 }], ...(state.olderPloeg ? {} : { assignees, pinnedScopes: state.pins[id] ?? [] }), ...(state.uncapped ? { spendCap: null } : {}) });
     if (url.pathname === '/api/v1/operator/teams') return send({ teams: (state.teams ?? [['silver', ['silver']], ['bronze', ['bronze']], ['unfold', []], ['gold', ['gold']]]).map(([id, assignees]) => team(id, assignees)) });
     if (url.pathname === '/api/v1/operator/work-items') {
       if (state.itemsDown) return send({}, 503);
@@ -62,6 +62,7 @@ async function fixture(t: TestContext) {
     items: [] as ReturnType<typeof workItem>[],
     ploegDown: false, olderPloeg: false, itemsDown: false,
     pins: {} as Record<string, string[]>,
+    uncapped: false,
   };
   const vikunja = await listen((req, res, body) => {
     const url = new URL(req.url!, 'http://fixture.invalid');
@@ -205,6 +206,18 @@ test('hand-off assigns the team’s tracker user as the workbench, comments once
   const csrf = await request(f.server.url, '/api/task-sources/board/tasks/1505/handoff', { method: 'POST', cookie: f.operator.cookie, csrf: false, body: { team: 'bronze', revision } });
   assert.equal(csrf.status, 403, csrf.text);
   assert.equal(f.state.writes.length, 2);
+});
+
+test('hand-off from a configured source proceeds for a Team without a spend cap, because the onboarding spend-cap gate never applies to it', { timeout: testTimeout(15_000) }, async t => {
+  const f = await fixture(t);
+  f.state.uncapped = true;
+  const before = await f.status();
+  assert.equal(before.teams.find((team: { id: string }) => team.id === 'silver').spendCap, null, 'Ploeg reports no cap for the Team');
+  const result = await f.handOff({ team: 'silver', revision: await f.revision() });
+  assert.equal(result.status, 200, result.text);
+  assert.notEqual(result.body?.error?.code, 'budget_missing');
+  assert.deepEqual(result.body.assignedTeams, ['silver']);
+  assert.deepEqual(f.state.writes.map(write => [write.method, write.path]), [['PUT', '/api/v1/tasks/1505/assignees'], ['PUT', '/api/v1/tasks/1505/comments']]);
 });
 
 test('hand-off refuses viewers, unsupported sources, unknown teams, closed tasks and stale revisions without writing', { timeout: testTimeout(15_000) }, async t => {

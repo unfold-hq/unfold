@@ -38,10 +38,10 @@ function fakePloeg(options: { teams?: PloegTeam[]; connections?: PloegConnection
   };
 }
 
-function setup(t: TestContext, store: Store, ploeg: ReturnType<typeof fakePloeg>, config: Partial<AppConfig> = {}, stored?: StoredEntries) {
+function setup(t: TestContext, store: Store, ploeg: ReturnType<typeof fakePloeg>, config: Partial<AppConfig> = {}, stored?: StoredEntries, steps?: typeof ploegSteps) {
   const insight = new InsightService(store, { mode: 'live' } as AppConfig, '9.9.9', clock, { schedule: false });
   t.after(() => insight.stop());
-  return new Onboarding({ store, ploeg, insight, now: clock, config: { repositories: [], taskSources: [], ...config }, ...(stored ? { stored } : {}) });
+  return new Onboarding({ store, ploeg, insight, now: clock, config: { repositories: [], taskSources: [], ...config }, ...(stored ? { stored } : {}), ...(steps ? { steps } : {}) });
 }
 
 const events = (store: Store) => store.db.prepare('SELECT * FROM product_event ORDER BY id').all() as Record<string, string>[];
@@ -233,7 +233,7 @@ test('the pinned Ploeg bundle comes from ploeg-release.json, and the step record
   for (const step of ploegSteps.steps) assert(step.read === null || /^[a-z][a-z-]+$/.test(step.read), `${step.id} names an operator read route`);
 });
 
-async function ploegServer(t: TestContext, answers: Record<string, number>) {
+async function ploegServer(t: TestContext, answers: Record<string, number>, bodies: Record<string, unknown> = {}) {
   const env = `UNFOLD_ONBOARDING_TEST_${randomBytes(6).toString('hex').toUpperCase()}`;
   process.env[env] = randomBytes(24).toString('hex');
   const seen: { method: string; path: string }[] = [];
@@ -241,7 +241,7 @@ async function ploegServer(t: TestContext, answers: Record<string, number>) {
     const path = new URL(req.url!, 'http://fixture.invalid').pathname;
     seen.push({ method: req.method!, path });
     const status = answers[path] ?? 404;
-    if (status === 200) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', bindings: [] }));
+    if (status === 200) res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...(bodies[path] as object ?? { bindings: [] }) }));
     else res.writeHead(status).end();
   });
   server.listen(0, '127.0.0.1');
@@ -266,13 +266,14 @@ test('a step whose read route answers 404 is refused with ploeg_step_unavailable
 test('a Ploeg that serves the read route later makes the step available without a restart', async t => {
   const store = await withStore(t);
   const answers: Record<string, number> = {};
-  const upstream = await ploegServer(t, answers);
+  const upstream = await ploegServer(t, answers, { '/api/v1/operator/teams': { teams: [{ id: 'bronze', paused: false, queueDepth: 0, roles: [], assignees: [], pinnedScopes: [], spendCap: { usd: 20, period: 'day', periodEnd: '2026-11-18T00:00:00Z', remainingUsd: 20 } }] } });
+  answers['/api/v1/operator/teams'] = 200;
   const ploeg = new PloegClient({ ...configuration('/unused', 'live'), ploeg: upstream.config });
   const onboarding = new Onboarding({ store, ploeg, now: clock, config: { repositories: [], taskSources: [] } });
   assert.equal((await onboarding.available(admin, 'bind-lists', true)).served, false);
   answers['/api/v1/operator/tracker-bindings'] = 200;
   assert.equal((await onboarding.available(admin, 'bind-lists', true)).served, true);
-  await onboarding.admit(admin, 'bind-lists');
+  await onboarding.admit(admin, 'bind-lists', 'bronze');
   answers['/api/v1/operator/tracker-bindings'] = 500;
   assert.equal((await onboarding.available(admin, 'bind-lists', true)).served, null, 'a Ploeg that cannot be asked is unknown, not unavailable');
   assert(upstream.seen.every(entry => entry.method === 'GET'));
@@ -288,4 +289,88 @@ test('GET /api/onboarding serves the demo checklist, which says it is a demo and
   assert(answer.body.stages.every((entry: ChecklistLine) => entry.status !== 'ok' || entry.id === 'sign-in' || entry.configured || entry.checks), 'the demo marks nothing done that it did not read');
   const bootstrap = await request(demo.url, '/api/bootstrap');
   assert.deepEqual(bootstrap.body.onboarding, { land: false }, 'the demo has configured sources, so nobody lands on the checklist');
+});
+
+const servedSteps = { ...ploegSteps, steps: ploegSteps.steps.map(step => ({ ...step, read: step.read ?? step.id })) };
+const allServed = Object.fromEntries(servedSteps.steps.map(step => [step.read!, true]));
+
+test('the spend-cap gate refuses readiness work and onboarding bindings for a Team without a cap, and asks Ploeg only reads', async t => {
+  const store = await withStore(t);
+  const ploeg = fakePloeg({ teams: [team('bronze', null), team('silver', dayCap)], served: allServed });
+  const onboarding = setup(t, store, ploeg, {}, undefined, servedSteps);
+  onboarding.landing(admin);
+  const refusedWith = (code: string, status = 409) => (error: unknown) => error instanceof PloegError && error.status === status && error.code === code;
+  await assert.rejects(onboarding.admit(admin, 'prepare-repository', 'bronze'), (error: unknown) => refusedWith('budget_missing')(error) && /executor\.spendCap/.test((error as Error).message) && /sent Ploeg nothing/.test((error as Error).message));
+  await assert.rejects(onboarding.admit(admin, 'bind-lists', 'bronze'), refusedWith('budget_missing'), 'a Team without a cap cannot be bound during onboarding');
+  await onboarding.admit(admin, 'register-repositories', 'bronze');
+  await onboarding.admit(admin, 'connect-clickup');
+  await onboarding.admit(admin, 'bind-lists', 'silver');
+  await assert.rejects(onboarding.admit(admin, 'bind-lists'), refusedWith('invalid_input', 400), 'a gated step names its Team');
+  await assert.rejects(onboarding.admit(admin, 'bind-lists', 'gold'), refusedWith('ploeg_not_found', 404));
+  await assert.rejects(onboarding.admit(admin, 'prepare-repository', 'silver'), refusedWith('spend_cap_unconfirmed'), 'readiness work waits for an Admin to confirm the cap');
+  await assert.rejects(onboarding.admit(developer, 'prepare-repository', 'bronze'), refusedWith('forbidden', 403));
+
+  const confirmation = await onboarding.confirmCap(admin, { team: 'silver', usd: 20, period: 'day' });
+  assert.deepEqual(confirmation, { team: 'silver', usd: 20, period: 'day', by: { id: 'admin-1', name: 'Admin' }, at: '2026-11-17T10:00:00.000Z' });
+  await onboarding.admit(admin, 'prepare-repository', 'silver');
+  const refused = events(store).filter(row => row.name === 'onboarding.step_refused').map(row => JSON.parse(row.props));
+  assert.deepEqual(refused.map(props => [props.step, props.reason]), [['prepare-repository', 'budget_missing'], ['bind-lists', 'budget_missing'], ['prepare-repository', 'spend_cap_unconfirmed']]);
+  assert(ploeg.asked.every(route => servedSteps.steps.some(step => step.read === route)), 'only read routes were asked');
+});
+
+test('an Admin confirms the cap Ploeg reports now, never another one, and only an Admin may', async t => {
+  const store = await withStore(t);
+  const onboarding = setup(t, store, fakePloeg({ teams: [team('bronze', null), team('silver', dayCap), team('old', undefined)] }));
+  const refusedWith = (code: string, status: number) => (error: unknown) => error instanceof PloegError && error.status === status && error.code === code;
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'silver', usd: 25, period: 'day' }), refusedWith('spend_cap_changed', 409));
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'silver', usd: 20, period: 'week' }), refusedWith('spend_cap_changed', 409));
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'bronze', usd: 20, period: 'day' }), refusedWith('budget_missing', 409));
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'old', usd: 20, period: 'day' }), refusedWith('ploeg_unsupported', 501), 'a Ploeg that reports no caps has nothing to confirm');
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'silver', usd: 0, period: 'day' }), refusedWith('invalid_input', 400));
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'silver', usd: 20, period: 'year' }), refusedWith('invalid_input', 400));
+  await assert.rejects(onboarding.confirmCap(developer, { team: 'silver', usd: 20, period: 'day' }), refusedWith('forbidden', 403));
+  assert.equal((await onboarding.checklist(admin)).budget.find(entry => entry.team === 'silver')?.confirmed, null, 'nothing refused was recorded');
+});
+
+test('the Budget line shows each cap in USD with its period, who confirmed it and when, and asks again when the cap changed', async t => {
+  const store = await withStore(t);
+  const teams = [team('silver', dayCap), team('bronze', null)];
+  const onboarding = setup(t, store, fakePloeg({ teams }));
+  const before = await onboarding.checklist(admin);
+  assert.equal(line(before.stages, 'budget').status, 'pending');
+  assert.equal(line(before.stages, 'budget').action?.kind, 'confirm-cap');
+  assert.match(line(before.stages, 'budget').text, /^silver: USD 20 a day, not confirmed yet\. bronze has no spend cap, so Unfold starts no readiness work for it and binds no List to it during onboarding\.$/);
+  assert.deepEqual(before.budget.map(entry => [entry.team, entry.bindable]), [['silver', true], ['bronze', false]]);
+
+  await onboarding.confirmCap(admin, { team: 'silver', usd: 20, period: 'day' });
+  const after = await onboarding.checklist(admin);
+  assert.equal(line(after.stages, 'budget').status, 'warning', 'a Team without a cap stays named');
+  assert.match(line(after.stages, 'budget').text, /^silver: USD 20 a day, confirmed by Admin on 2026-11-17 10:00 UTC\./);
+  assert.equal(line(after.stages, 'budget').action, undefined, 'nothing is left to confirm');
+  const reader = await onboarding.checklist(developer);
+  assert.match(line(reader.stages, 'budget').text, /^silver: USD 20 a day, confirmed on 2026-11-17 10:00 UTC\./, 'someone who does not manage the Tenant is not told which Admin confirmed it');
+  assert.equal(reader.budget[0].confirmed?.by, undefined);
+
+  teams[1] = team('bronze', { ...dayCap, usd: 12.5, period: 'week' });
+  teams[0] = team('silver', { ...dayCap, usd: 30 });
+  const changed = await onboarding.checklist(admin);
+  assert.equal(line(changed.stages, 'budget').status, 'pending');
+  assert.match(line(changed.stages, 'budget').text, /silver: USD 30 a day now; USD 20 a day was confirmed by Admin on 2026-11-17 10:00 UTC\./);
+  assert.match(line(changed.stages, 'budget').text, /bronze: USD 12\.50 a week, not confirmed yet\./);
+  assert.equal(changed.budget[0].confirmed, null);
+  assert.equal(changed.budget[0].changed?.usd, 20);
+  await assert.rejects(onboarding.admit(admin, 'prepare-repository', 'silver'));
+
+  await onboarding.confirmCap(admin, { team: 'silver', usd: 30, period: 'day' });
+  await onboarding.confirmCap(admin, { team: 'bronze', usd: 12.5, period: 'week' });
+  assert.equal(line((await onboarding.checklist(admin)).stages, 'budget').status, 'ok');
+});
+
+test('the demo Budget line says it is a demo and offers nothing to confirm', async t => {
+  const store = await withStore(t);
+  const onboarding = setup(t, store, fakePloeg({ teams: [team('delivery', undefined)], connections: { ...emptyConnections, demo: true } }));
+  const checklist = await onboarding.checklist(admin);
+  assert.match(line(checklist.stages, 'budget').text, /^Demo · no Run starts and no money is spent/);
+  assert.equal(line(checklist.stages, 'budget').action, undefined);
+  await assert.rejects(onboarding.confirmCap(admin, { team: 'delivery', usd: 20, period: 'day' }), (error: unknown) => error instanceof PloegError && error.code === 'ploeg_demo');
 });

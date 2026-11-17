@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { PloegError, type PloegConnections, type PloegTeam } from './ploeg.ts';
+import type { TeamSpendCap } from './hand-off-spend.ts';
 import { defaultTenant } from './tenancy.ts';
 import type { AppConfig, InsightEvent, User } from './types.ts';
 
@@ -42,7 +43,7 @@ export const installValues: readonly { prerequisite: string; value: string; read
 
 /** What one checklist line says: `ok` green, `problem` red, `warning` amber, `unknown` not known yet, `pending` not started, `unavailable` refused because Ploeg does not serve the step. */
 export type LineStatus = 'ok' | 'problem' | 'warning' | 'unknown' | 'pending' | 'unavailable';
-export type ChecklistAction = { label: string; href?: string; kind: 'link' | 'refresh' | 'install-values' | 'config-entry' };
+export type ChecklistAction = { label: string; href?: string; kind: 'link' | 'refresh' | 'install-values' | 'config-entry' | 'confirm-cap' };
 export type ChecklistLine = {
   id: string; stage: number; title: string; status: LineStatus; text: string;
   fix?: string; action?: ChecklistAction; install?: string; reason?: string; configured?: boolean;
@@ -54,9 +55,19 @@ export type Checklist = {
   stages: ChecklistLine[]; installValues: typeof installValues;
   storedRepositories: ReturnType<StoredEntries['repositories']>;
   connections: PloegConnections | null; reads: { connections: string | null; teams: string | null }; fetchedAt: string;
+  budget: TeamBudget[];
 };
+/** An Admin's confirmation of a Team's spend cap: the cap as Ploeg reported it when they confirmed, who confirmed it and when. */
+export type CapConfirmation = { team: string; usd: number; period: TeamSpendCap['period']; by: { id: string; name: string }; at: string };
+/**
+ * One Team on the Budget stage: its `spendCap` as Ploeg's Teams read reports it (null for none, left out when this
+ * Ploeg does not report it), the confirmation that still matches it, and whether onboarding may bind a List to it.
+ */
+export type TeamBudget = { team: string; spendCap?: TeamSpendCap | null; confirmed: ShownConfirmation | null; changed: ShownConfirmation | null; bindable: boolean };
+/** A confirmation as the checklist shows it: who confirmed it only to someone who manages the Tenant. */
+export type ShownConfirmation = Omit<CapConfirmation, 'by'> & { by?: CapConfirmation['by'] };
 
-type StepState = { startedAt?: string; lines: Record<string, LineStatus>; completed: string[]; refused: string[]; optIn: OptInRefusal[]; firstAgent?: { at: string; kind: 'readiness' | 'task' }; firstTask?: string };
+type StepState = { startedAt?: string; lines: Record<string, LineStatus>; completed: string[]; refused: string[]; optIn: OptInRefusal[]; firstAgent?: { at: string; kind: 'readiness' | 'task' }; firstTask?: string; caps?: Record<string, CapConfirmation> };
 type StateStore = { getSecret<T>(id: string): T | undefined; setSecret(id: string, value: unknown): void };
 type PloegReads = {
   connections(user: User, fresh?: boolean): Promise<PloegConnections>;
@@ -71,7 +82,14 @@ type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: 
 const stateId = (tenant: string) => `onboarding:${tenant}`;
 const askAdmin = 'Ask an administrator to connect this.';
 const list = (items: string[]) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
-const cap = (team: PloegTeam) => team.spendCap ? `${team.id}: USD ${team.spendCap.usd} a ${team.spendCap.period}` : team.id;
+const cap = (team: PloegTeam) => team.spendCap ? `${team.id}: ${amount(team.spendCap)}` : team.id;
+const amount = (value: { usd: number; period: string }) => `USD ${Number.isInteger(value.usd) ? value.usd : value.usd.toFixed(2)} a ${value.period}`;
+const periods: readonly TeamSpendCap['period'][] = ['day', 'week', 'month'];
+const matches = (confirmation: CapConfirmation | undefined, spendCap: TeamSpendCap | null | undefined) => Boolean(confirmation && spendCap && confirmation.usd === spendCap.usd && confirmation.period === spendCap.period);
+const minute = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+const confirmedBy = (confirmation: ShownConfirmation) => `${confirmation.by ? ` by ${confirmation.by.name}` : ''} on ${minute(confirmation.at)}`;
+/** The onboarding steps that spend or lead to spend, refused with `409 budget_missing` for a Team without a spend cap. */
+export const capGatedSteps: ReadonlySet<StepId> = new Set(['prepare-repository', 'bind-lists']);
 
 /**
  * Compares two Ploeg release versions such as `0.2.0` and `0.2.0-rc.108`: negative when `a` is older. A release
@@ -148,13 +166,57 @@ export class Onboarding {
    * and `503 ploeg_step_unavailable` naming the release that adds it when this Ploeg does not serve the step. It
    * learns that from the step's read route or the pinned bundle, never by sending the write.
    */
-  async admit(user: User, id: StepId): Promise<void> {
+  async admit(user: User, id: StepId, team?: string): Promise<void> {
     if (!this.manages(user)) throw new PloegError(403, 'forbidden', 'Only an administrator connects accounts and adds repositories and Lists.');
     const { step, served } = await this.available(user, id, true);
-    if (served === true) return;
+    if (served === true) return capGatedSteps.has(id) ? this.capGate(user, id, team) : undefined;
     if (served === null) throw new PloegError(503, 'ploeg_unavailable', 'Ploeg could not be reached to check this step. Try again in a minute.');
     this.refused(user, step.id, step.release ?? 'unreleased', 'not_served');
     throw new PloegError(503, 'ploeg_step_unavailable', `${unavailableText(step, this.pinned)} Use the configuration entry for this step instead.`);
+  }
+
+  /**
+   * The spend-cap gate (OpenSpec change `self-serve-onboarding`, slice S6) of a step that spends or leads to spend:
+   * `409 budget_missing` while Ploeg's Teams read reports the Team's `spendCap` as null, and for readiness work also
+   * `409 spend_cap_unconfirmed` until an Admin confirmed the cap Ploeg reports now. It reads the Teams fresh and sends
+   * Ploeg nothing. Hand-off and import from configured sources never pass through it.
+   */
+  private async capGate(user: User, id: StepId, team: string | undefined): Promise<void> {
+    if (!team) throw new PloegError(400, 'invalid_input', 'Name the Team the work is for.');
+    const found = (await this.ploeg.routing(user, true)).all.find(entry => entry.id === team);
+    if (!found) throw new PloegError(404, 'ploeg_not_found', `Ploeg reports no Team ${team}.`);
+    if (found.spendCap === null) {
+      this.refused(user, id, this.pinned, 'budget_missing');
+      throw new PloegError(409, 'budget_missing', `Team ${team} has no spend cap, so Unfold starts no onboarding work for it and sent Ploeg nothing. Ask your installer to set the Team’s spend cap: ${installValues[1].value}.`);
+    }
+    if (id !== 'prepare-repository' || matches(this.read().caps?.[team], found.spendCap)) return;
+    this.refused(user, id, this.pinned, 'spend_cap_unconfirmed');
+    throw new PloegError(409, 'spend_cap_unconfirmed', found.spendCap ? `Confirm Team ${team}’s spend cap of ${amount(found.spendCap)} on the Budget line of the onboarding checklist first.` : `This Ploeg does not report Team ${team}’s spend cap, so there is no cap to confirm and Unfold starts no readiness work.`);
+  }
+
+  /**
+   * Records that `user` confirmed a Team's spend cap, bound to the cap they were shown: `{team, usd, period}` must be
+   * what Ploeg's Teams read reports now, or `409 spend_cap_changed`. `409 budget_missing` for a Team without a cap,
+   * `501 ploeg_unsupported` when this Ploeg reports no caps, `409 ploeg_demo` in the demo. Only an Admin confirms.
+   */
+  async confirmCap(user: User, input: unknown): Promise<CapConfirmation> {
+    if (!this.manages(user)) throw new PloegError(403, 'forbidden', 'Only an administrator confirms a Team’s spend cap.');
+    const data = input && typeof input === 'object' && !Array.isArray(input) ? input as Record<string, unknown> : {};
+    const team = typeof data.team === 'string' ? data.team.trim() : '';
+    const period = periods.find(entry => entry === data.period);
+    if (!team || team.length > 100 || typeof data.usd !== 'number' || !Number.isFinite(data.usd) || data.usd <= 0 || !period) throw new PloegError(400, 'invalid_input', 'Send the Team and the cap you were shown: {team, usd, period}, with period day, week or month.');
+    const [connections, teams] = await Promise.all([this.ploeg.connections(user).catch(() => null), this.ploeg.routing(user, true)]);
+    if (connections?.demo) throw new PloegError(409, 'ploeg_demo', 'The demo has no spend cap to confirm: no Run starts and no money is spent.');
+    const found = teams.all.find(entry => entry.id === team);
+    if (!found) throw new PloegError(404, 'ploeg_not_found', `Ploeg reports no Team ${team}.`);
+    if (found.spendCap === null) throw new PloegError(409, 'budget_missing', `Team ${team} has no spend cap to confirm. Ask your installer to set the Team’s spend cap: ${installValues[1].value}.`);
+    if (found.spendCap === undefined) throw new PloegError(501, 'ploeg_unsupported', 'This Ploeg does not report Team spend caps, so there is no cap to confirm.');
+    if (found.spendCap.usd !== data.usd || found.spendCap.period !== period) throw new PloegError(409, 'spend_cap_changed', `Ploeg now reports ${amount(found.spendCap)} for Team ${team}, not the cap you confirmed. Read it again and confirm it.`);
+    const confirmation: CapConfirmation = { team, usd: found.spendCap.usd, period: found.spendCap.period, by: { id: user.id, name: user.name }, at: this.now().toISOString() };
+    const state = this.read();
+    state.caps = { ...state.caps, [team]: confirmation };
+    this.write(state);
+    return confirmation;
   }
 
   /**
@@ -194,13 +256,14 @@ export class Onboarding {
     const state = this.read();
     const manage = this.manages(user);
     const storedRepositories = this.stored.repositories();
-    const stages = this.stages({ connections, teams, served, state, manage, storedRepositories });
+    const budget = (teams ?? []).map(entry => budgetOf(entry, state, manage));
+    const stages = this.stages({ connections, teams, served, state, manage, storedRepositories, budget });
     this.track(user, state, stages);
-    return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.pinned, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString() };
+    return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.pinned, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString(), budget };
   }
 
-  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']> }): ChecklistLine[] {
-    const { connections, teams, served, state, manage, storedRepositories } = input;
+  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']>; budget: TeamBudget[] }): ChecklistLine[] {
+    const { connections, teams, served, state, manage, storedRepositories, budget } = input;
     const step = (id: StepId) => this.steps.steps.find(entry => entry.id === id)!;
     const repositories = connections?.repositories ?? [];
     const boards = connections?.boards ?? [];
@@ -255,7 +318,7 @@ export class Onboarding {
       ? { id: 'pick-lists', stage: 5, title: 'Pick Lists', status: 'ok', configured: true, text: `${sources.length === 1 ? '1 task source shows' : `${sources.length} task sources show`} in Tasks.` }
       : { id: 'pick-lists', stage: 5, title: 'Pick Lists', status: 'pending', text: 'No List or board shows in Tasks yet.', fix: manage ? 'Pick a board by name, check that Unfold can read it, and save it.' : askAdmin, action: action({ label: 'Connect a tracker', href: '#settings/task-setup', kind: 'link' }) });
 
-    lines.push(this.budgetLine(teams, manage));
+    lines.push(this.budgetLine(teams, budget, manage, Boolean(connections?.demo)));
 
     lines.push(notServed('prepare-repository', 'Prepare a repository', 'Add an AGENTS.md at the root of the repository’s base branch by hand.', notReady.length ? ` ${list(notReady.map(repository => `${repository.owner}/${repository.repo}`))} ${notReady.length === 1 ? 'needs' : 'need'} one.` : ''));
 
@@ -304,14 +367,28 @@ export class Onboarding {
     return lines;
   }
 
-  private budgetLine(teams: PloegTeam[] | null, manage: boolean): ChecklistLine {
+  private budgetLine(teams: PloegTeam[] | null, budget: TeamBudget[], manage: boolean, demo: boolean): ChecklistLine {
     const base = { id: 'budget', stage: 6, title: 'Budget' };
+    if (demo) return { ...base, status: 'pending', text: 'Demo · no Run starts and no money is spent, so there is no spend cap to confirm.' };
     if (teams === null) return { ...base, status: 'unknown', text: 'Ploeg’s Teams could not be read.' };
     if (!teams.length) return { ...base, status: 'pending', text: 'Needs a Team first.' };
-    const uncapped = teams.filter(team => team.spendCap === null);
-    if (uncapped.length) return { ...base, status: 'problem', text: `${list(uncapped.map(team => team.id))} ${uncapped.length === 1 ? 'has' : 'have'} no spend cap.`, fix: manage ? 'Ask your installer to set the Team’s spend cap.' : askAdmin };
-    const known = teams.filter(team => team.spendCap);
-    return { ...base, status: 'pending', text: `${known.length ? `${list(known.map(cap))}. ` : 'This Ploeg does not report Team spend caps. '}Confirming the cap before the first paid step comes in a later Unfold release.` };
+    const uncapped = budget.filter(entry => entry.spendCap === null).map(entry => entry.team);
+    const capped = budget.filter(entry => entry.spendCap);
+    const confirmed = capped.filter(entry => entry.confirmed);
+    const open = capped.filter(entry => !entry.confirmed);
+    const changed = open.filter(entry => entry.changed);
+    const confirmAction: ChecklistAction | undefined = manage && open.length ? { label: 'Confirm the spend cap', kind: 'confirm-cap' } : undefined;
+    const parts = [
+      ...confirmed.map(entry => `${entry.team}: ${amount(entry.confirmed!)}, confirmed${confirmedBy(entry.confirmed!)}.`),
+      ...open.map(entry => entry.changed ? `${entry.team}: ${amount(entry.spendCap!)} now; ${amount(entry.changed)} was confirmed${confirmedBy(entry.changed)}.` : `${entry.team}: ${amount(entry.spendCap!)}, not confirmed yet.`),
+      uncapped.length ? `${list(uncapped)} ${uncapped.length === 1 ? 'has' : 'have'} no spend cap, so Unfold starts no readiness work for ${uncapped.length === 1 ? 'it' : 'them'} and binds no List to ${uncapped.length === 1 ? 'it' : 'them'} during onboarding.` : '',
+      !capped.length && !uncapped.length ? 'This Ploeg does not report Team spend caps, so Unfold cannot show one to confirm.' : '',
+    ].filter(Boolean);
+    const text = parts.join(' ');
+    if (!capped.length && uncapped.length) return { ...base, status: 'problem', reason: 'budget_missing', text, fix: manage ? 'Ask your installer to set the Team’s spend cap.' : askAdmin };
+    if (!capped.length) return { ...base, status: 'unknown', text };
+    if (confirmed.length) return { ...base, status: changed.length || uncapped.length ? 'warning' : 'ok', text, ...(changed.length || uncapped.length ? { fix: manage ? changed.length ? 'Confirm the cap Ploeg reports now.' : 'Ask your installer to set the spend cap of the Teams without one.' : askAdmin } : {}), ...(confirmAction ? { action: confirmAction } : {}) };
+    return { ...base, status: 'pending', text, fix: manage ? 'Confirm the spend cap before the first paid step. Ploeg starts no Run that would take the Team’s spend this period over it.' : askAdmin, ...(confirmAction ? { action: confirmAction } : {}) };
   }
 
   private track(user: User, state: StepState, stages: ChecklistLine[]): void {
@@ -354,6 +431,13 @@ export class Onboarding {
   }
 
   private write(state: StepState): void { this.store.setSecret(stateId(defaultTenant), state); }
+}
+
+function budgetOf(team: PloegTeam, state: StepState, manage: boolean): TeamBudget {
+  const held = state.caps?.[team.id];
+  const shown = held ? (manage ? held : { team: held.team, usd: held.usd, period: held.period, at: held.at }) : null;
+  const confirmed = matches(held, team.spendCap) ? shown : null;
+  return { team: team.id, ...(team.spendCap === undefined ? {} : { spendCap: team.spendCap }), confirmed, changed: !confirmed && team.spendCap ? shown : null, bindable: team.spendCap !== null };
 }
 
 /** "This Ploeg does not … yet (Unfold is built against Ploeg `<pinned>`). Ploeg `<release>` adds it." for a step Ploeg does not serve. */
