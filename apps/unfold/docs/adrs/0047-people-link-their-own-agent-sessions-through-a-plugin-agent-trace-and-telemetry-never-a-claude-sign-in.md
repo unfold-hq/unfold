@@ -144,3 +144,14 @@ The owner asked for one Unfold plugin that installs in every client that support
 * **Hooks.** They stay in Claude Code's `hooks/hooks.json`. Portable hooks wait on [agent-plugins-spec #89](https://github.com/agentplugins/agent-plugins-spec/pull/89), still a draft.
 
 Confirmation: `test/agent-plugin.test.ts` validates `plugin.json`, the generated `plugin.json` and `mcp.json` against the vendored Agent Plugins 1.0.0 schemas, and checks that the generated URL is the configured one and that no file carries a credential.
+
+## Update, 2026-11-17
+
+The owner set developer experience first: "nobody should ever generate or paste a token". Until now a person ran `npm run mcp -- login`, copied the `vle_` credential into `UNFOLD_TOKEN` and repeated that every 30 days. Plugin 0.19.0 signs the person in by itself, still with the same editor credential and the same approval page ([ADR 0037](0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md)), so the decision's "the `vle_` editor credential is the only credential involved" holds.
+
+* **Setup is one setting.** An organisation puts `UNFOLD_URL`, the marketplace and `enabledPlugins` in Claude Code's managed settings ([how-to](../../../../docs/how-to/link-claude-code-sessions.md#1-install-the-plugin-with-your-unfold-address)). No token is distributed.
+* **Sign-in.** Without a credential, `SessionStart` starts the editor sign-in as `Claude Code on <host>` (Unfold now names the `claude-code` client), shows the code and page in one line, and leaves the polling to a detached process, so no hook waits for a person. The approved credential is kept per Unfold address in the macOS Keychain, or in a 0600 file elsewhere. `UNFOLD_TOKEN` still wins when set.
+* **Renewal.** The 30-day absolute lifetime of ADR 0037 stays. The plugin starts a new sign-in eight days before the end, before Unfold's one-week warning, and signs the replaced credential out. A credential Unfold refuses is forgotten and replaced the same way. While the browser holds a company sign-in, a renewal is one click on **Approve** about every three weeks.
+* **Proposed, not built: silent renewal.** A fully silent renewal needs a server change: an endpoint that exchanges a live editor credential for a new one (rotation), or a sliding expiry on use. Either changes ADR 0037's "thirty days from approval, absolute" and its threat model: a stolen credential would live as long as it is used. It needs the owner's decision first.
+
+Confirmation: `test/claude-code-sign-in.test.ts` covers storage per address, the `UNFOLD_TOKEN` override, the Keychain store taking the token on standard input, the detached waiter storing the credential and signing the old one out, a denied, expired or unavailable sign-in, renewal timing, a refused credential being forgotten, and hooks that exit at once while Unfold does not answer. `test/editor-sign-in.test.ts` covers the `Claude Code on <host>` name.
