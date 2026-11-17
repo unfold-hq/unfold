@@ -19,6 +19,7 @@ import { defaultJudgeModels } from './run-health/judge.ts';
 import { acceptanceCalendarSettings } from './delivery-ledger.ts';
 import { configuredOwnership, describeOwnership, ownership, repositoryKey, sameOwnership, type Ownership } from './tenancy.ts';
 import { tenancySettings } from './tenant-scope.ts';
+import { costExportReaderSettings } from './cost-export-readers.ts';
 import { auditSettings } from './audit/settings.ts';
 import { outboundEventsSettings } from './outbound/address.ts';
 import { intakeConfig } from './intake/limiter.ts';
@@ -52,6 +53,16 @@ function configuredUrl(value: string, name: string): string {
   const parsed = new URL(value);
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error(`${name} must be an HTTP(S) URL without embedded credentials`);
   return value.replace(/\/$/, '');
+}
+
+function oidcExchange(value: any): { audiences: string[]; match: 'subject' | 'email' } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('auth.oidc.exchange must be an object');
+  const unknown = Object.keys(value).find(key => key !== 'audiences' && key !== 'match');
+  if (unknown) throw new Error(`auth.oidc.exchange.${unknown} is not a setting; it takes audiences and match`);
+  if (!Array.isArray(value.audiences) || !value.audiences.length || value.audiences.length > 20 || value.audiences.some((entry: unknown) => typeof entry !== 'string' || !/^[!-~]{1,300}$/.test(entry))) throw new Error('auth.oidc.exchange.audiences must list the 1 to 20 audiences whose tokens may be traded for an editor credential');
+  const match = value.match ?? 'subject';
+  if (match !== 'subject' && match !== 'email') throw new Error('auth.oidc.exchange.match must be subject or email');
+  return { audiences: [...new Set<string>(value.audiences)], match };
 }
 
 function gitRewrites(value: unknown): GitRewrite[] {
@@ -583,9 +594,10 @@ export function loadConfig(argv = process.argv.slice(2)): AppConfig {
     for (const role of ['admin', 'operator', 'viewer']) if (!Array.isArray(roles[role]) || roles[role].length > 20 || roles[role].some((group: unknown) => typeof group !== 'string' || !/^[A-Za-z0-9_.:@ -]{1,100}$/.test(group))) throw new Error(`auth.oidc.roles.${role} must list group names`);
     for (const key of ['roleClaim', 'groupsClaim', 'displayName', 'clientSecretEnv']) if (oidc[key] !== undefined && (typeof oidc[key] !== 'string' || !oidc[key] || oidc[key].length > 100)) throw new Error(`auth.oidc.${key} must be a short string`);
     if (oidc.subjectNamespace !== undefined && (typeof oidc.subjectNamespace !== 'string' || !oidc.subjectNamespace.trim() || oidc.subjectNamespace.length > 300)) throw new Error('auth.oidc.subjectNamespace must be a non-empty string of at most 300 characters');
+    const exchange = oidc.exchange === undefined ? undefined : oidcExchange(oidc.exchange);
     const clientSecret = oidc.clientSecretEnv ? process.env[oidc.clientSecretEnv] : undefined;
     if (oidc.clientSecretEnv && !clientSecret) throw new Error(`auth.oidc.clientSecretEnv names ${oidc.clientSecretEnv}, which is not set`);
-    config.auth.oidc = { issuer: configuredUrl(oidc.issuer, 'auth.oidc.issuer'), ...(oidc.subjectNamespace !== undefined ? { subjectNamespace: oidc.subjectNamespace.replace(/\/$/, '') } : {}), clientId: oidc.clientId, ...(clientSecret ? { clientSecret } : {}), scopes, displayName: oidc.displayName ?? 'Authentik', roleClaim: oidc.roleClaim ?? 'unfold_role', groupsClaim: oidc.groupsClaim ?? 'groups', roles: roles as Record<'admin' | 'operator' | 'viewer', string[]> };
+    config.auth.oidc = { issuer: configuredUrl(oidc.issuer, 'auth.oidc.issuer'), ...(oidc.subjectNamespace !== undefined ? { subjectNamespace: oidc.subjectNamespace.replace(/\/$/, '') } : {}), clientId: oidc.clientId, ...(clientSecret ? { clientSecret } : {}), scopes, displayName: oidc.displayName ?? 'Authentik', roleClaim: oidc.roleClaim ?? 'unfold_role', groupsClaim: oidc.groupsClaim ?? 'groups', roles: roles as Record<'admin' | 'operator' | 'viewer', string[]>, ...(exchange ? { exchange } : {}) };
   } else delete (config.auth as { oidc?: unknown }).oidc;
   config.auth.localLogin = localLoginSetting(raw.auth?.localLogin);
   if (!config.auth.localLogin && !config.auth.oidc) throw new Error('Local password sign-in is turned off (auth.localLogin or UNFOLD_LOCAL_LOGIN is false) and auth.oidc is not configured, so nobody could sign in. Configure auth.oidc, or turn local sign-in back on.');
@@ -624,5 +636,6 @@ export function loadConfig(argv = process.argv.slice(2)): AppConfig {
   const billing = billingSettings(raw.billing, billingExporters, { env: process.env, dataDir, agentEnvironment: config.runtime.agentEnvironment ?? [] });
   if (billing) config.billing = billing;
   if (raw.identity !== undefined) config.identity = identitySettings(raw.identity, { oidc: Boolean(config.auth.oidc), baseUrl: config.baseUrl });
+  if (raw.costExportReaders !== undefined) config.costExportReaders = costExportReaderSettings(raw.costExportReaders, config);
   return config;
 }

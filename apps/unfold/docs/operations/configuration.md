@@ -317,6 +317,9 @@ How people sign in.
 | `auth.oidc.roles.admin` | list of string (at most 20 entries) | `["unfold-admins"]` | Entries that make a person an administrator. |
 | `auth.oidc.roles.operator` | list of string (at most 20 entries) | `["unfold-operators"]` | Entries that make a person an operator. |
 | `auth.oidc.roles.viewer` | list of string (at most 20 entries) | `["unfold-viewers"]` | Entries that make a person a viewer. |
+| `auth.oidc.exchange` | object |  | Lets an editor trade a token from this issuer for an editor credential without a browser approval (RFC 8693). Off unless set. |
+| `auth.oidc.exchange.audiences` | list of string (1–20 entries) |  | Audiences a traded token's aud must name one of, such as the client id of the tool that already signs people in. |
+| `auth.oidc.exchange.match` | one of `subject`, `email` | `subject` | How a traded token finds its account: by sub, as browser sign-in does, or by verified email for a client whose sub differs. |
 
 ### `ploeg`
 
@@ -723,3 +726,15 @@ SCIM provisioning and the Shared Signals receiver; both need auth.oidc.
 | `identity.sharedSignals.transmitters[].jwksUri` | string |  | Its signing keys; https except on loopback. |
 | `identity.sharedSignals.transmitters[].audience` | string |  | Audience its tokens name, when not the receiver's. |
 | `identity.sharedSignals.transmitters[].authorizationEnv` | string |  | UNFOLD_ environment variable holding the Authorization value it pushes with. |
+
+### `costExportReaders`
+
+Machines that read the FOCUS cost export (GET /api/ploeg/cost-export) with their own projected Kubernetes service account token instead of a person's sign-in (ADR 0071). A reader reaches only that route, and only its own Tenant and Teams. Needs live mode and a real Ploeg connection; the Helm chart then lets the workbench create TokenReviews. Default: `[]`.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `costExportReaders[].id` | string |  | Unique name of the reader; the audit names it as reader: followed by this id. |
+| `costExportReaders[].serviceAccount` | string |  | The reader's Kubernetes service account as namespace/name, such as billing/focus-reader; unique across readers. |
+| `costExportReaders[].audience` | string |  | The audience the reader's projected token must carry, such as unfold-cost-export; never unfold-relay, the warm pool's. |
+| `costExportReaders[].tenant` | string |  | The one Tenant whose cost the reader reads. |
+| `costExportReaders[].teams` | list of string (1–50 entries) |  | The Ploeg Teams whose cost the reader reads; within ploeg.teams when that is set. |

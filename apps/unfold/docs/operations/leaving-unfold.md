@@ -65,7 +65,7 @@ schemas/<entity>.schema.json  JSON Schema 2020-12 for each line of data/<entity>
 
 `manifest.json` holds:
 
-* `format: "unfold-tenant-export"` and `formatVersion: 1`, the Tenant, whether Tenant checks were enforced, when and by whom it was made, and the Unfold version.
+* `format: "unfold-tenant-export"` and `formatVersion: 2`, the Tenant, whether Tenant checks were enforced, when and by whom it was made, and the Unfold version.
 * `entities`: for each entity its file, schema, `schemaVersion`, row count, the tables or configuration it came from, and the rule that decided which rows belong to the Tenant. `derived: true` marks the delivery ledger, which Unfold computes from Ploeg's facts; `unavailable` says why an entity is empty when its source could not be read.
 * `files`: every other member with its media type, size and SHA-256.
 * `excluded`: every table left out, with the reason.
@@ -97,7 +97,11 @@ Fields are the stored columns in camelCase. A column that holds JSON is parsed i
 | `account-states`, `scim-users`, `scim-groups`, `scim-group-members` | Disabled accounts, and the people and groups the identity provider provisioned through SCIM. |
 | `intake-sources`, `intake-requests`, `intake-messages` | Request intake sources without their signing secrets, the Requests received, and which mail message belongs to which Request. |
 | `notify-preferences`, `notify-targets` | The channels and triggers each person chose to be notified on, and which ntfy topics and Web Push subscriptions they have, without the topic, the push endpoint or its keys. |
+| `integration-accounts`, `tracker-connection-sources` | Tracker connections people added from the screen, as Integration Accounts with role `tracker`, without their tokens, and the task sources added under them, each with its `clientProjectId`: the Client Project, Own work, that a source without a Client belongs to. |
+| `stored-repositories`, `repository-grants`, `client-projects` | Repositories people added from the screen, with ids that start with `r-`, which Client Project may route work to each, and the Tenant's Client Projects. No credential. |
 | `outbound-subscriptions`, `outbound-events`, `outbound-deliveries` | Outbound webhook subscriptions without their signing secrets and with only the origin of the receiver URL, the events still in the outbox, and the delivery log of each subscription. Events are signed when sent, so the outbox holds no secret. |
+
+**Format version 2** renamed the entity `tracker-connections` to `integration-accounts` (the same rows, now with `role` and `accountId`), added `clientProjectId` to `tracker-connection-sources`, and added `stored-repositories`, `repository-grants` and `client-projects`. An importer written for version 1 reads `integration-accounts` rows with `role` `tracker` where it read `tracker-connections`.
 
 The signing secrets of outbound webhook subscriptions and intake sources are not exported; issue new ones at the destination. The manifest says so under `notExported`.
 
@@ -120,6 +124,7 @@ No secret is exported: password hashes, sign-in and editor token hashes, the OID
 | `notify_outbox` | The queue of notices to send over ntfy and Web Push. What they report is exported itself. |
 | `jobs` | The [background job queue](background-jobs.md): when each waiting delivery, notice, billing line, report or comment runs next. The records it works on are exported or left out under their own tables. |
 | `notify_cursors`, `outbound_cursors`, `outbound_sign_off_changes` | How far notifications and webhooks have read their sources. |
+| `tracker_connections` | The copy of the tracker connections an Unfold image from before Integration Accounts reads after a rollback. The same rows leave as `integration-accounts`. |
 | `mcp_event_subscriptions`, `mcp_event_verifications` | The MCP key, lifetime and delivery status of MCP Events subscriptions, and which callback URLs a person proved. The MCP client owns its subscriptions and subscribes again at the destination; the subscription rows themselves leave as `outbound-subscriptions`. |
 
 `test/tenant-export.test.ts` fails when a table is added anywhere in `src/` without being exported or listed here with a reason.

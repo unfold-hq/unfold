@@ -276,6 +276,16 @@
                 "operator": { "$ref": "#/$defs/groupList", "default": ["unfold-operators"], "description": "Entries that make a person an operator." },
                 "viewer": { "$ref": "#/$defs/groupList", "default": ["unfold-viewers"], "description": "Entries that make a person a viewer." }
               }
+            },
+            "exchange": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["audiences"],
+              "description": "Lets an editor trade a token from this issuer for an editor credential without a browser approval (RFC 8693). Off unless set.",
+              "properties": {
+                "audiences": { "type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^[!-~]{1,300}$" }, "description": "Audiences a traded token's aud must name one of, such as the client id of the tool that already signs people in." },
+                "match": { "enum": ["subject", "email"], "default": "subject", "description": "How a traded token finds its account: by sub, as browser sign-in does, or by verified email for a client whose sub differs." }
+              }
             }
           }
         }
@@ -987,6 +997,24 @@
               }
             }
           }
+        }
+      }
+    },
+    "costExportReaders": {
+      "type": "array",
+      "maxItems": 20,
+      "default": [],
+      "description": "Machines that read the FOCUS cost export (GET /api/ploeg/cost-export) with their own projected Kubernetes service account token instead of a person's sign-in (ADR 0071). A reader reaches only that route, and only its own Tenant and Teams. Needs live mode and a real Ploeg connection; the Helm chart then lets the workbench create TokenReviews.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "serviceAccount", "audience", "tenant", "teams"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "description": "Unique name of the reader; the audit names it as reader: followed by this id." },
+          "serviceAccount": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?/[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$", "description": "The reader's Kubernetes service account as namespace/name, such as billing/focus-reader; unique across readers." },
+          "audience": { "type": "string", "pattern": "^[!-~]{1,253}$", "description": "The audience the reader's projected token must carry, such as unfold-cost-export; never unfold-relay, the warm pool's." },
+          "tenant": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$", "description": "The one Tenant whose cost the reader reads." },
+          "teams": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string", "minLength": 1, "maxLength": 100 }, "description": "The Ploeg Teams whose cost the reader reads; within ploeg.teams when that is set." }
         }
       }
     }

@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { actionContext, channelOf, confirmationOf, describeAction, isAction, outcomeOf, recordedInputs } from './action-records.ts';
 import type { AppConfig, User, RuntimeKind, Session } from './types.ts';
 import { trackerDisplay } from './tracker-display.ts';
+import { Onboarding } from './onboarding.ts';
 import { Auth, signedInUser, editorCredentialDays, editorLabel, localLoginEnabled, localLoginOff, type EditorRequestView } from './auth.ts';
 import type { Engine } from './engine.ts';
 import { publicSession, type Store } from './store.ts';
@@ -12,6 +13,7 @@ import { getTask, listTasks, presentTask, publicTaskSource, sourceLinkProvider, 
 import { readCandidate, unavailableCandidate } from './candidates.ts';
 import { placements } from './config.ts';
 import type { WorkerRelay } from './runtime/relay.ts';
+import { KubernetesClient } from './runtime/kubernetes.ts';
 import type { AgentHost } from './ahp/host.ts';
 import { parseEditorWindow } from './ahp/editor-window.ts';
 import { agentHostTokenId, type AgentsWindowTarget, repositoryFolderPaths, protocolBaselines as agentHostProtocolVersions, protocolVersion as agentHostProtocolVersion } from './ahp/host.ts';
@@ -35,6 +37,7 @@ import { FocusQueryError, focusExportQuery, focusFile, readFocusExport } from '.
 import { TaskHandoff } from './task-handoff.ts';
 import { handedOffBy } from './notify/handed-off.ts';
 import { TenantScope } from './tenant-scope.ts';
+import { CostExportReaders, kubernetesTokenReviewer, readerReaches, withReaderTeams } from './cost-export-readers.ts';
 import { membershipsFromGroups, ownership } from './tenancy.ts';
 import { StaticFiles } from './static.ts';
 import { Collection, CollectionError } from './collection.ts';
@@ -61,7 +64,7 @@ import { defaultTenant } from './insight.ts';
 import { createMcpHttp } from './mcp-http.ts';
 import { taskKeyRing } from './mcp-tasks.ts';
 import { McpEvents } from './mcp-events.ts';
-import { entitledRole } from './oidc.ts';
+import { entitledRole, exchangedAccountId } from './oidc.ts';
 import { LinkedSessions, parseLinkedEvent } from './linked-sessions.ts';
 import { TaskReferenceResolver } from './linked-references.ts';
 import { LinkedUsage, linkedWorkCharges, ploegRunUsage } from './linked-usage.ts';
@@ -234,6 +237,9 @@ function loopbackUrl(address: AddressInfo): string {
   return `http://${host}:${address.port}`;
 }
 
+const tokenExchangeGrant = 'urn:ietf:params:oauth:grant-type:token-exchange';
+const exchangedTokenTypes = ['urn:ietf:params:oauth:token-type:id_token', 'urn:ietf:params:oauth:token-type:access_token', 'urn:ietf:params:oauth:token-type:jwt'];
+
 function mutationGuard(req: IncomingMessage, config: AppConfig): void {
   if (req.headers['x-unfold-request'] !== '1') fault(403, 'csrf', 'Unfold refused this change because it lacks the header X-Unfold-Request: 1. Reload the page; a script must send that header with every change.');
   const origin = req.headers.origin;
@@ -270,7 +276,10 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   if (!connections) trackerConnections.sync();
   const audit = new AuditTrail({ store, jobs, settings: config.audit, config, owner: path => trackerConnections.ownerOf(path), exportEnabled: tenant => flags.getBooleanValue('audit.export', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), schedule: true });
   const auth = new Auth(store, config);
-  const ploeg = new PloegClient(config, ploegCompatibility);
+  auth.onFamilyRevoked = signIns => { for (const signIn of signIns) agentHost?.revokeSignIn(signIn); };
+  const ploeg = new PloegClient(withReaderTeams(config), ploegCompatibility);
+  const readers = new CostExportReaders(config.costExportReaders ?? [], kubernetesTokenReviewer(new KubernetesClient(config.kubernetes ?? {})));
+  auth.useReaders(readers);
   if (config.ploeg && !ploeg.isDemo) { trackerConnections.useRoutes(() => ploeg.routes()); void trackerConnections.refreshRoutes(); }
   const cards = config.ploeg && !config.ploeg.demo ? new CardService(ploeg, new CardStore(store.db), { settings: config.cards?.rules ?? {}, publish: config.cards?.publishPullRequestComment === true }) : undefined;
   if (cards) ploeg.useCards(cards);
@@ -285,6 +294,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   void delivery.reconcileAll().catch(() => undefined);
   const handoff = new TaskHandoff(config, ploeg);
   const tenants = new TenantScope(config);
+  trackerConnections.onSync(() => tenants.rebuild());
   const references = new TaskReferenceResolver(async user => (await Promise.all(tenants.sources(user).map(async source => {
     const provider = sourceLinkProvider(source);
     if (!provider) return source;
@@ -316,6 +326,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const cardArt = new CardArtGenerator(config);
   const upkeep = new StoreUpkeep(store, errors);
   const insight = new InsightService(store, config, applicationVersion, undefined, { upkeep: () => upkeep.run() });
+  const onboarding = new Onboarding({ store, ploeg, config, insight, stored: { repositories: () => trackerConnections.repositories.repositories().map(repository => ({ id: repository.id, name: repository.name, url: repository.url, state: trackerConnections.repositories.state(repository) })), sources: () => trackerConnections.sources().length } });
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });
   const secrets = knownSecrets(config);
   trackerConnections.onSecret(secret => { if (!secrets.includes(secret)) secrets.push(secret); engine.redact(secret); });
@@ -341,6 +352,13 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   agentHost?.useChat(new ChatService(chatAuthority, chatTools, { demo: config.mode === 'demo', gatewayUrl: config.litellm?.baseUrl, secrets }));
   const flags = new FeatureFlags({ registry: loadRegistry(), settings: config.flags ?? { document: {}, unknown: [] }, store });
   flags.watch();
+  const storedRepositories = async (): Promise<boolean> => {
+    const on = await flags.getBooleanValue('repositories.stored', false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode });
+    trackerConnections.joinStoredRepositories(on);
+    return on;
+  };
+  const storedRepositoryWrites = async (): Promise<void> => { if (!await storedRepositories()) fault(404, 'repositories_off', 'Adding repositories from the screen is off: turn on the repositories.stored flag.'); };
+  void storedRepositories();
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
@@ -469,6 +487,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         const refusal = limiter.take([addressLimit], clientAddress(req, config.trustedProxies));
         if (refusal) return refuse(res, refusal, addressLimit === 'scim');
       } else if (path.startsWith('/api/') && !path.startsWith('/api/relay/')) {
+        if (await readers.authenticate(req) && !readers.allows(method, path)) fault(403, 'reader_route', 'A cost export reader reads only GET /api/ploeg/cost-export.');
         const limits = personLimits(method, path);
         const caller = limits.length ? auth.user(req) : undefined;
         const refusal = caller && limiter.take(limits, config.mode === 'demo' ? `address:${clientAddress(req, config.trustedProxies)}` : `user:${caller.id}`);
@@ -478,10 +497,11 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
       if (relay && await relay.handle(req, res, url)) return;
       if (lifecycle.handles(path)) return await lifecycle.handle(req, res, url);
       if (notifications.handlesPublic(path)) { const answer = await notifications.publicRoute(method, path, req.headers, await rawBody(req, 262_144)); return json(res, answer.status, answer.body); }
-      const editorCollect = path.match(/^\/api\/auth\/editor\/([A-Za-z0-9_-]{8,32})$/);
+      const editorExchange = path === '/api/auth/editor/exchange';
+      const editorCollect = editorExchange ? null : path.match(/^\/api\/auth\/editor\/([A-Za-z0-9_-]{8,32})$/);
       const ofrep = path.startsWith('/api/ofrep/v1/evaluate/flags');
       if (path.startsWith('/api/intake/') && await intakeRoute(req, res, path, url.searchParams, { service: intake, user: () => auth.user(req), guard: () => mutationGuard(req, config), readJson: () => body(req), enabledFor: user => flags.getBooleanValue('intake.requests', false, flagContext(user)), baseUrl: config.baseUrl ?? `http://${req.headers.host}`, trustedProxies: config.trustedProxies, send: (status, value) => json(res, status, sanitize(value)) })) return;
-      if (['POST','PUT','PATCH','DELETE'].includes(method) && path !== '/api/auth/editor' && !editorCollect && !ofrep) mutationGuard(req, config);
+      if (['POST','PUT','PATCH','DELETE'].includes(method) && path !== '/api/auth/editor' && !editorCollect && !editorExchange && !ofrep) mutationGuard(req, config);
       if (method === 'POST' && path === '/api/login') {
         if (!localLoginEnabled(config)) throw localLoginOff();
         const data = await body(req);
@@ -495,6 +515,19 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         const requested = req.headers['content-type']?.startsWith('application/json') ? await body(req) : {};
         const started = auth.beginEditor(clientAddress(req, config.trustedProxies), editorLabel(requested.client, requested.host));
         return json(res, 200, { code: started.code, secret: started.secret, userCode: started.userCode, expiresIn: started.expiresIn, interval: started.interval, url: `${config.baseUrl ?? `http://${req.headers.host}`}/api/auth/oidc?editor=${encodeURIComponent(started.code)}` });
+      }
+      if (method === 'POST' && editorExchange) {
+        const exchange = oidc?.configured() ? config.auth.oidc?.exchange : undefined;
+        if (!oidc || !exchange) return fault(404, 'exchange_off', 'This Unfold does not trade identity-provider tokens for editor credentials. Sign the editor in through the browser.');
+        const data = req.headers['content-type']?.startsWith('application/x-www-form-urlencoded') ? Object.fromEntries(new URLSearchParams((await rawBody(req, 32_768)).toString('utf8'))) : await body(req);
+        if (data.grant_type !== tokenExchangeGrant) fault(400, 'unsupported_grant_type', `Send grant_type ${tokenExchangeGrant}.`);
+        if (typeof data.subject_token_type !== 'string' || !exchangedTokenTypes.includes(data.subject_token_type)) fault(400, 'invalid_request', `Send subject_token_type as one of ${exchangedTokenTypes.join(', ')}.`);
+        const claims = await oidc.exchangeClaims(typeof data.subject_token === 'string' ? data.subject_token : '');
+        const userId = exchangedAccountId(config.auth.oidc!, claims, name => store.getUserByName(name));
+        if (!userId) fault(403, 'exchange_unknown_person', 'The token names nobody Unfold can match to an account. Sign in to Unfold in the browser once, then try again.');
+        const issued = auth.exchangeEditor(userId!, editorLabel(data.client, data.host));
+        console.log(JSON.stringify({ level: 'info', event: 'editor.exchanged', actor: issued.user.id, audience: claims.aud, match: exchange.match }));
+        return json(res, 200, { access_token: issued.token, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token', token_type: 'Bearer', expires_in: Math.floor((Date.parse(issued.expiresAt) - Date.now()) / 1000), expiresAt: issued.expiresAt, familyExpiresAt: issued.familyExpiresAt, user: issued.user });
       }
       if (method === 'POST' && editorCollect) {
         const data = await body(req);
@@ -552,6 +585,11 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         res.writeHead(303, { Location: location });
         res.end();
         return;
+      }
+      if (method === 'POST' && path === '/api/auth/editor/rotate') {
+        const rotated = auth.rotateEditor(auth.bearer(req));
+        console.log(JSON.stringify({ level: 'info', event: 'editor.rotated', actor: rotated.user.id, familyExpiresAt: rotated.familyExpiresAt }));
+        return json(res, 200, rotated);
       }
       if (path.startsWith('/api/')) {
         const user = auth.user(req);
@@ -700,8 +738,9 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           const answer = await tenantExportRoute(tenantExports, { method, path, user, scope: auth.scope(req), body: () => body(req), res });
           return answer ? json(res, answer.status, answer.body) : undefined;
         }
+        if (method === 'GET' && path === '/api/onboarding') { await storedRepositories(); return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1'))); }
         if (method === 'GET' && path === '/api/bootstrap') return json(res, 200, sanitize({
-          user, mode: config.mode, version: applicationVersion, sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,
+          user, mode: config.mode, version: applicationVersion, onboarding: onboarding.landing(user), sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,
           gatewayPolicy: config.gatewayPolicy ?? null,
           observability: config.observability ?? null,
           insight: { events: config.productEvents !== false && user.role !== 'viewer' },
@@ -829,15 +868,15 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           fault(405, 'method', 'Change a task source with PATCH or remove it with DELETE.');
         }
         if (path === '/api/repositories') {
-          if (method === 'GET') return json(res, 200, sanitize({ repositories: trackerConnections.repositories.list(user), manageTenants: trackerConnections.managedTenants(user) }));
-          if (method === 'POST') { const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); return json(res, 201, sanitize({ repository })); }
+          if (method === 'GET') { await storedRepositories(); return json(res, 200, sanitize({ repositories: trackerConnections.repositories.list(user), manageTenants: trackerConnections.managedTenants(user) })); }
+          if (method === 'POST') { await storedRepositoryWrites(); const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); res.setHeader('Location', `/api/repositories/${repository.id}`); return json(res, 201, sanitize({ repository })); }
           fault(405, 'method', 'List stored repositories with GET and add one with POST.');
         }
         const repositoryRoute = path.match(/^\/api\/repositories\/([a-z0-9][a-z0-9-]{0,63})$/);
         if (repositoryRoute) {
           const repositoryId = repositoryRoute[1];
-          if (method === 'PATCH') { const repository = trackerConnections.repositories.update(user, repositoryId, await body(req)); trackerConnections.sync(); return json(res, 200, sanitize({ repository })); }
-          if (method === 'DELETE') { trackerConnections.repositories.remove(user, repositoryId, id => trackerConnections.sources().filter(source => source.repositoryId === id).map(source => source.name)); trackerConnections.sync(); return json(res, 200, { removed: repositoryId }); }
+          if (method === 'PATCH') { await storedRepositoryWrites(); const repository = trackerConnections.repositories.update(user, repositoryId, await body(req)); trackerConnections.sync(); return json(res, 200, sanitize({ repository })); }
+          if (method === 'DELETE') { await storedRepositoryWrites(); trackerConnections.repositories.remove(user, repositoryId, id => trackerConnections.sources().filter(source => source.repositoryId === id).map(source => source.name)); trackerConnections.sync(); return json(res, 200, { removed: repositoryId }); }
           fault(405, 'method', 'Change a stored repository with PATCH or remove it with DELETE.');
         }
         if (method === 'GET' && path === '/api/client-projects') {
@@ -1190,15 +1229,17 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
               res.end(deliveriesCsv(ledger?.rows ?? [])); return;
             }
             if (path === '/api/ploeg/cost-export') {
-              if (user.role === 'viewer') fault(403, 'forbidden', 'Only operators and administrators export cost.');
+              const reader = readers.readerOf(user);
+              if (user.role === 'viewer' && !reader) fault(403, 'forbidden', 'Only operators and administrators export cost.');
+              const reachesTarget = (target: Parameters<TenantScope['workItemOwner']>[0]) => reader ? readerReaches(reader, tenants.workItemOwner(target)) : tenants.reachesWorkItem(user, target);
               let query; try { query = focusExportQuery(url.searchParams); } catch (error) { if (error instanceof FocusQueryError) fault(400, 'cost_export_filter', error.message); throw error; }
               const teams = (await ploeg.teams(user, fresh)).map(team => team.id);
               const linkedCosts = () => linkedWorkCharges(linkedUsage, id => linked.store.get(id), query.from, query.to, async id => {
                 const { item } = await ploeg.detail(user, id, fresh);
-                if (!teams.includes(item.team) || !tenants.reachesWorkItem(user, item.target)) return undefined;
+                if (!teams.includes(item.team) || !reachesTarget(item.target)) return undefined;
                 return { item: { id: item.id, title: item.title, team: item.team, target: item.target ? { owner: item.target.owner, repo: item.target.repo } : null, externalRef: ploegTrackerReference(item.provider, item.externalId) ?? '' }, owner: tenants.workItemOwner(item.target) };
               });
-              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => tenants.reachesWorkItem(user, facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts, markup: (owner, source, dayStart) => linkedUsage.markups.at(owner, source, dayStart) }));
+              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => reachesTarget(facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts, markup: (owner, source, dayStart) => linkedUsage.markups.at(owner, source, dayStart) }));
               const file = focusFile(result, query);
               res.writeHead(200, { 'Content-Type': file.contentType, 'Content-Disposition': `attachment; filename="${file.filename}"`, 'Cache-Control': 'no-store', ...file.headers });
               res.end(file.body); return;

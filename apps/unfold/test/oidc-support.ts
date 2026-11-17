@@ -39,7 +39,12 @@ export async function provider(options: { groups?: string[]; role?: string; wron
   };
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   issuer = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  return { issuer, exchanges, pendingNonce, close: () => new Promise<void>(done => server.close(() => done())) };
+  const mint = (claims: Record<string, unknown>, key = privateKey) => {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', kid: 'k1', typ: 'JWT' })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    return `${header}.${payload}.${sign('sha256', Buffer.from(`${header}.${payload}`), key).toString('base64url')}`;
+  };
+  return { issuer, exchanges, pendingNonce, mint, close: () => new Promise<void>(done => server.close(() => done())) };
 }
 
 export async function workbench(t: test.TestContext, options: Parameters<typeof provider>[0] & { subjectNamespace?: string; configure?: (config: AppConfig) => void } = {}) {

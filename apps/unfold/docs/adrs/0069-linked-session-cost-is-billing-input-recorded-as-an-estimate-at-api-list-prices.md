@@ -94,3 +94,4 @@ Chosen option: "**Record cumulative readings, bill per Work Item and day, dated 
 * Amends ADR 0068's "no new store" driver for the Linked Session estimate, and its consequence that no record keeps spend by day.
 * Re-evaluate when Claude Code or the agency's plan reports billed cost per session, when invoices are disputed over attribution, or when Ploeg reports linked work itself.
 * 2026-11-17: proposed with its implementation; the same day extended with markups per source on Ploeg Run costs, at the owner's decision.
+* 2026-11-17: amended by [ADR 0071](0071-a-billing-system-reads-the-cost-export-with-its-own-service-account-token.md) (proposed): a configured cost export reader reads the export with its own Kubernetes service account token, within its Tenant and Teams.

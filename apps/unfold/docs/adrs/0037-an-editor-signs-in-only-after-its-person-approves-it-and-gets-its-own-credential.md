@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-10-03
+date: 2026-11-17
 decision-makers: Ryan Grippeling
 review-by: 2027-01-03
 ---
@@ -51,14 +51,26 @@ Signing in alone never makes a ticket collectable. The attacker in the phishing 
 * **What it is.** A random 256-bit token with the prefix `vle_`, issued at the poll after approval, returned once, and sent by the extension as `Authorization: Bearer vle_…`. It is never an `unfold` cookie, and a request that carries a malformed or unknown bearer token is unauthenticated even if it also carries a cookie.
 * **Storage.** Unfold stores only the SHA-256 hash of the token, in the `editor_credentials` table with an id, the user, a label (`VS Code`), the scope, the creation, expiry and last-use times. The extension keeps the token in VS Code SecretStorage, where it kept the cookie before. The ticket itself lives in memory for ten minutes and never holds a token: the credential is minted at collection, so an approved ticket that nobody collects leaves nothing behind.
 * **Scope `editor`.** The credential acts as its person with their current role on every API route the extension uses, including issuing Agent Host Protocol connection tokens. It cannot approve or deny editor sign-ins, or list or revoke editor credentials: those routes answer 403 `browser_only`, so a stolen editor credential cannot mint more editors.
-* **Lifetime.** Thirty days from approval, absolute: use records `lastUsedAt` but never extends the expiry. The browser session keeps `auth.sessionHours`.
+* **Lifetime.** Thirty days from approval or rotation: use records `lastUsedAt` but never extends the expiry. Rotation (below) replaces the credential within a family that ends ninety days after the approval. The browser session keeps `auth.sessionHours`.
 * **Revocation.** **Settings › Signed-in editors** (`#settings/editors`) lists the person's live editor credentials (when approved, last used, when they end) and signs one out with `DELETE /api/editor-credentials/<id>`. Signing out from the extension (`POST /api/logout` with the bearer token) deletes that credential only. Either way, the Agent Host Protocol connection tokens the credential issued are revoked with it and their connections closed. The browser session is untouched.
+
+### Rotation
+
+Amended on 2026-11-17 so that one browser approval lasts ninety days instead of thirty.
+
+* **What it does.** `POST /api/auth/editor/rotate`, with a live editor credential as bearer token, returns a new credential for the same person with the same name and marks the presented one rotated. The new one lasts thirty days, but never past its family's end.
+* **The family.** Every credential descends from one approval, or from one token exchange ([ADR 0070](0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). The family ends ninety days after it, and rotation never moves that end. `familyExpiresAt` is in every answer that issues a credential and in **Settings › Signed-in editors**. A credential approved before this amendment is its own family, ending ninety days after its approval.
+* **Idle expiry stays.** A credential unused for fourteen days still signs out, and rotation cannot revive it, because rotation needs a live credential.
+* **Grace.** The rotated credential keeps working for two minutes, so requests already on their way with it still succeed. Several hook processes of the Claude Code plugin can hold the old token at the same time.
+* **Reuse detection.** Presenting a rotated credential to the rotation route, or using it for anything once its two minutes are over, signs out every credential of its family, rotated or not, and ends the Agent Host tokens they issued. Unfold logs `editor.family_revoked`. Either the holder lost a race to a copy of its token, or a copy is in use after the holder moved on, and Unfold cannot tell which.
+* **Who rotates.** The Claude Code plugin rotates its stored credential in the background once it is a week old. Near the family's end it asks for one browser approval again, or trades an identity-provider token if the installation allows it ([ADR 0070](0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). The VS Code extension does not rotate yet.
 
 ### Limits
 
 * Starting: 20 tickets per client address per ten minutes, and 1000 waiting tickets in total; more answers 429 `rate_limited`.
 * Polling: a poll sooner than one second after the previous one answers 429 `slow_down`, after which the extension adds a second to its interval, as RFC 8628 section 3.5 asks.
 * Five polls with a wrong secret end the ticket.
+* Rotation and token exchange count against the per-address sign-in limit (`rateLimits.signIn`).
 
 ### Threat model
 
@@ -69,7 +81,10 @@ Signing in alone never makes a ticket collectable. The attacker in the phishing 
 | A cross-site request approves in the victim's browser | Not applicable | Approve and Deny need the mutation header and same-origin checks |
 | The attacker guesses the secret or code | 256-bit secret; unlimited polls | The same, and five wrong secrets end the ticket |
 | A leaked editor token | A browser session: full scope until `sessionHours` | `editor` scope, thirty days, visible in Settings and revocable at once, with its Agent Host tokens |
+| A leaked editor token, after rotation (2026-11-17) | Usable for at most thirty days | A thief who rotates it first can keep rotating until the family's end, ninety days after the approval, unless the person revokes it in Settings. Once the real holder uses its copy after the two-minute grace, or the thief uses theirs after the holder rotated, the whole family is signed out |
 | Ticket flooding | 1000 waiting tickets, no per-address limit | 20 per address per ten minutes, 1000 in total, polling by interval |
+
+Rotation trades a longer worst case for fewer approvals: a stolen credential stays usable until the family deadline unless it is revoked or reuse gives it away. Reuse detection usually gives it away within a week, because the plugin rotates weekly; a machine that stops using its credential never presents the old copy, so on that machine nothing gives the thief away.
 
 Out of scope: a person who approves a request they did not start despite the warning, and a compromised identity provider or browser. Behind a reverse proxy every client shares the proxy's address, so the per-address start limit becomes a workbench-wide limit; the login rate limit has the same property today.
 
@@ -79,6 +94,8 @@ Out of scope: a person who approves a request they did not start despite the war
 * Good, because the person sees and controls each editor that acts as them, apart from their browser session.
 * Good, because the credential has its own scope and lifetime, and revoking it also ends what it issued.
 * Bad, because signing in an editor takes one more click (Approve) in the browser.
+* Good, because with rotation a person who uses the Claude Code plugin approves it once every ninety days instead of every thirty, and never when the installation allows token exchange.
+* Bad, because a stolen credential that its thief keeps rotating lives up to ninety days instead of thirty, and two processes that rotate the same credential at once sign out their own family; the plugin rotates under a lock to avoid that.
 * Bad, because an extension built before this change cannot complete a browser sign-in against a workbench with it: the server no longer returns a `cookie`, so the old extension waits until its ten minutes run out. The extension and the server ship in the same release train.
 * Neutral: the waiting tickets stay in memory, as before, so a restart cancels sign-ins in progress. Issued credentials are in SQLite and survive restarts.
 * Neutral: the local password sign-in in the extension still stores a session cookie. It is not part of this flow; the person types their own password into their own editor.
@@ -87,6 +104,7 @@ Out of scope: a person who approves a request they did not start despite the war
 
 * [`test/api-editor-sign-in.test.ts`](../../test/api-editor-sign-in.test.ts) runs the original phishing flow and shows the attacker's polls stay pending and then fail after a denial; it covers approval, single collection, bearer use, the `browser_only` scope, revocation from Settings including the Agent Host token, sign-out from the editor, other people and second sign-ins, and the rate limits.
 * [`test/editor-sign-in.test.ts`](../../test/editor-sign-in.test.ts) covers expired, denied, consumed and mismatched tickets and the credential's lifetime with a mocked clock.
+* [`test/editor-sign-in.test.ts`](../../test/editor-sign-in.test.ts) also covers rotation: thirty days within the family, a family deadline weekly rotation never moves, the two-minute grace, reuse at the route and after the grace revoking the family and its Agent Host tokens, idle expiry still applying, and a credential from before rotation. [`test/api-editor-exchange.test.ts`](../../test/api-editor-exchange.test.ts) rotates and replays over HTTP. Mutating the family cap, the deadline, either reuse check, the grace or the idle filter fails these tests.
 * [`extensions/vscode/test/browser-login.test.ts`](../../extensions/vscode/test/browser-login.test.ts) and the end-to-end test in [`extensions/vscode/test/client.test.ts`](../../extensions/vscode/test/client.test.ts) show the extension displays the code, waits for approval against the real server, keeps the bearer credential and loses it when it is revoked.
 
 ## Pros and Cons of the Options
@@ -120,4 +138,5 @@ Out of scope: a person who approves a request they did not start despite the war
 ### History
 
 * 2026-10-03: accepted with the implementation. The owner approved the ticket's approach (approval page with a shared code, a separate revocable editor credential) on 2026-10-03, so the record starts as accepted.
+* 2026-11-17 — Owner decided: an editor credential can be rotated silently within a family that ends ninety days after its approval and is never extended; the idle expiry stays; presenting a rotated credential revokes the whole family. The Claude Code plugin rotates in the background and asks for a browser approval only after the family ends. Amended with the implementation.
 * 2026-10-17 — Owner decided: an editor credential left unused for fourteen days (from its last use, or from approval when never used) signs out on its own, exactly like an expired one, ending its Agent Host connections too; the thirty-day lifetime stays. A VS Code sign-in is named after its machine, `VS Code on <host>`, built by Unfold from the host the extension sends, and Signed-in editors shows dates with the month named and how far away they are, plus when an unused editor will be signed out.

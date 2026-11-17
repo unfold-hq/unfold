@@ -1,6 +1,6 @@
 import { escape } from './core/dom.js';
 import { icon } from './core/icons.js';
-import { badge } from './core/ui.js';
+import { badge, button, disclosure } from './core/ui.js';
 import { plural, relative } from './core/format.js';
 
 const looks = {
@@ -9,6 +9,14 @@ const looks = {
   warning: { tone: 'attention', glyph: 'alert', label: 'Check' },
   unknown: { tone: 'neutral', glyph: 'help-circle', label: 'Unknown' },
   info: { tone: 'neutral', glyph: 'circle-dashed', label: 'Not checked' },
+};
+const stageLooks = {
+  ok: { tone: 'success', glyph: 'check-circle', label: 'Done' },
+  problem: { tone: 'danger', glyph: 'x-circle', label: 'Fix this' },
+  warning: { tone: 'attention', glyph: 'alert', label: 'Check' },
+  unknown: { tone: 'neutral', glyph: 'help-circle', label: 'Unknown' },
+  pending: { tone: 'neutral', glyph: 'circle', label: 'Not started' },
+  unavailable: { tone: 'neutral', glyph: 'circle-slash', label: 'Not available yet' },
 };
 const trackerNames = { vikunja: 'Vikunja', clickup: 'ClickUp', github: 'GitHub Issues', demo: 'Demo' };
 const forgeHooks = { forgejo: 'Forgejo', github: 'GitHub', gitlab: 'GitLab' };
@@ -122,7 +130,7 @@ function checkRow(check, entryId) {
 function entryCard(entry) {
   const glyph = entry.kind === 'repository' ? 'folder' : 'inbox';
   const titleId = escape(`${entry.id}-title`);
-  return `<section class="card settings-card connection-card" aria-labelledby="${titleId}"><header class="card-header"><div class="card-heading"><h3 class="card-title" id="${titleId}">${icon(glyph)}<span>${escape(entry.title)}</span></h3>${entry.subtitle ? `<p class="card-subtitle">${escape(entry.subtitle)}</p>` : ''}</div></header><ol class="health-list">${entry.checks.map(check => checkRow(check, entry.id)).join('')}</ol></section>`;
+  return `<section class="card settings-card connection-card" aria-labelledby="${titleId}"><header class="card-header"><div class="card-heading"><h3 class="card-title" id="${titleId}">${icon(glyph)}<span>${escape(entry.title)}</span></h3>${entry.subtitle ? `<p class="card-subtitle">${escape(entry.subtitle)}</p>` : ''}</div>${badge({ tone: 'neutral', label: 'Configured by the installation', size: 'sm' })}</header><ol class="health-list">${entry.checks.map(check => checkRow(check, entry.id)).join('')}</ol></section>`;
 }
 
 /**
@@ -140,4 +148,57 @@ export function connectionsMarkup(model, { now = Date.now() } = {}) {
   const unrouted = model.unrouted.length ? `<section class="card settings-card connection-card" aria-labelledby="connections-unrouted-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="connections-unrouted-title">In Unfold, not routed by Ploeg <span class="count">${model.unrouted.length}</span></h2><p class="card-subtitle">Task sources that hand work to Ploeg on a board Ploeg ignores.</p></div></header><ol class="health-list">${model.unrouted.map(source => checkRow(source.check, `unrouted-${source.id}`)).join('')}</ol></section>` : '';
   const group = (id, title, subtitle, entries) => entries.length ? `<section class="connections-group" aria-labelledby="${id}"><h2 class="connections-group-title" id="${id}">${escape(title)} <span class="count">${entries.length}</span></h2><p class="connections-group-note">${escape(subtitle)}</p><div class="connections-grid">${entries.map(entryCard).join('')}</div></section>` : '';
   return `${head}${unrouted}${group('connections-boards', 'Boards', 'Where tasks are handed to a Team.', model.boards)}${group('connections-repositories', 'Repositories', 'Where agents open pull requests.', model.repositories)}`;
+}
+
+function stageAction(line, values) {
+  const action = line.action;
+  if (!action) return '';
+  if (action.kind === 'link') return button({ label: action.label, href: action.href, size: 'sm', icon: 'arrow' });
+  if (action.kind === 'refresh') return button({ label: action.label, size: 'sm', icon: 'refresh', action: 'connections-refresh' });
+  if (action.kind === 'config-entry' && line.configEntry) return disclosure({ summary: action.label, plain: true, body: `<p class="checklist-entry">${escape(line.configEntry)}</p><p class="checklist-entry-note">The configuration wins over anything added on this page later, and Unfold never rewrites it.</p>` });
+  if (action.kind === 'install-values' && values.length) return disclosure({ summary: action.label, plain: true, body: `<p class="checklist-entry-note">Hand these to the person who installed Unfold and Ploeg. They set them once.</p><dl class="checklist-values">${values.map(entry => `<div><dt>${escape(entry.prerequisite)}</dt><dd><code>${escape(entry.value)}</code></dd><dd class="checklist-read">Read from Ploeg: ${escape(entry.read)}</dd></div>`).join('')}</dl>` });
+  return '';
+}
+
+function stageRow(line, values, nested = false) {
+  const look = stageLooks[line.status] || stageLooks.pending;
+  const heading = nested ? 'h4' : 'h3';
+  const id = escape(`checklist-${line.id}`);
+  const number = nested ? '' : `<span class="checklist-number">${line.stage}</span>`;
+  const configured = line.configured ? badge({ tone: 'neutral', label: 'Configured by the installation', size: 'sm' }) : '';
+  const optIn = line.reason && line.status === 'problem' && line.install && line.reason !== 'check_failed' ? badge({ tone: 'danger', label: 'Not opted in', size: 'sm' }) : '';
+  const waits = line.waitsFor ? `<p class="checklist-waits">Waits for ${escape(line.waitsFor.record)}${line.waitsFor.release ? ` (Ploeg ${escape(line.waitsFor.release)})` : ''}.</p>` : '';
+  const install = line.install && line.status !== 'ok' ? `<p class="checklist-install">Install value: <code>${escape(line.install)}</code></p>` : '';
+  const fix = line.fix && line.status !== 'ok' ? `<p class="health-next">${icon('arrow')}<span>${escape(line.fix)}</span></p>` : '';
+  const action = stageAction(line, values);
+  const checks = line.checks?.length ? `<ol class="health-list checklist-checks" aria-labelledby="${id}">${line.checks.map(check => stageRow(check, values, true)).join('')}</ol>` : '';
+  return `<li class="health-check checklist-line" data-tone="${look.tone}" data-status="${line.status}">${number || `<span class="health-icon" aria-hidden="true">${icon(look.glyph)}</span>`}<div class="health-main"><div class="health-heading"><${heading} class="health-title" id="${id}">${escape(line.title)}</${heading}>${badge({ tone: look.tone, glyph: look.glyph, label: look.label, size: 'sm' })}${configured}${optIn}</div><p class="health-detail">${escape(line.text)}</p>${install}${waits}${fix}${action ? `<div class="checklist-action">${action}</div>` : ''}${checks}</div></li>`;
+}
+
+/**
+ * One sentence over the checklist: how many stages are done and which one is next.
+ * @param {{ stages: object[] }} checklist A `GET /api/onboarding` response.
+ * @returns {string}
+ */
+export function checklistHeadline(checklist) {
+  const stages = Array.isArray(checklist?.stages) ? checklist.stages : [];
+  const done = stages.filter(line => line.status === 'ok').length;
+  const next = stages.find(line => line.status === 'problem') || stages.find(line => line.status !== 'ok');
+  if (!next) return `All ${stages.length} stages are done.`;
+  return `${done} of ${stages.length} stages done. Next: ${next.title}.`;
+}
+
+/**
+ * The onboarding checklist (ADR-0059): one line per stage from sign-in to the first pull request, each with its
+ * state, what failed and the action that fixes it. Someone who does not manage the Tenant reads the same lines with
+ * "Ask an administrator" in place of the actions.
+ * @param {object} checklist A `GET /api/onboarding` response.
+ * @returns {string}
+ */
+export function checklistMarkup(checklist) {
+  const stages = Array.isArray(checklist?.stages) ? checklist.stages : [];
+  if (!stages.length) return '';
+  const values = Array.isArray(checklist.installValues) ? checklist.installValues : [];
+  const intro = checklist.manage ? 'From signing in to the first agent pull request. Each line is checked against Ploeg, not against what was submitted.' : 'You can read these lines. Ask an administrator to connect what is missing.';
+  return `<section class="card settings-card checklist" aria-labelledby="checklist-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="checklist-title">Onboarding checklist</h2><p class="card-subtitle">${escape(intro)}</p></div></header><p class="checklist-headline">${escape(checklistHeadline(checklist))}</p><ol class="health-list checklist-stages">${stages.map(line => stageRow(line, values)).join('')}</ol></section>`;
 }

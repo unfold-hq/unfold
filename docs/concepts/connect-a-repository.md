@@ -2,8 +2,8 @@
 type: explanation
 audience: [owner, contributor, agent]
 owner: unfold
-last_verified: 2026-10-19
-verified_by: "Source read on 2026-10-19 of ploeg-hq/ploeg origin/development fc604d4 (pkg/config/config.go, pkg/config/resolve.go, pkg/target/resolver.go and readiness.go, pkg/worker/target.go, cmd/ploegd, docs/how-to/route-a-multi-repo-board.md and connect-github-as-a-forge.md), the owner's cluster repository main c6078236 (kubernetes/apps/ploeg/ploeg/app/helmrelease.yaml and tracker-wiring.cronjob.yaml, kubernetes/apps/ploeg/unfold/app/helmrelease.yaml, kubernetes/apps/forgejo/forgejo-actions-secrets/app/glide-forge-webhook.job.yaml) and apps/unfold/src/tasks.ts and task-handoff.ts. Prompted by Vikunja #2025, refused on 2026-10-13 because repo/ploeg names no target. Nothing was run. The owner agreed to the five directions on 2026-10-19; directions 1 and 2 were then built (Ploeg PR ploeg-hq #196, cluster repository PR #826 and the Unfold Connections page), checked with unit tests and the demo."
+last_verified: 2026-11-17
+verified_by: "Source read on 2026-10-19 of ploeg-hq/ploeg origin/development fc604d4 (pkg/config/config.go, pkg/config/resolve.go, pkg/target/resolver.go and readiness.go, pkg/worker/target.go, cmd/ploegd, docs/how-to/route-a-multi-repo-board.md and connect-github-as-a-forge.md), the owner's cluster repository main c6078236 (kubernetes/apps/ploeg/ploeg/app/helmrelease.yaml and tracker-wiring.cronjob.yaml, kubernetes/apps/ploeg/unfold/app/helmrelease.yaml, kubernetes/apps/forgejo/forgejo-actions-secrets/app/glide-forge-webhook.job.yaml) and apps/unfold/src/tasks.ts and task-handoff.ts. Prompted by Vikunja #2025, refused on 2026-10-13 because repo/ploeg names no target. Nothing was run. The owner agreed to the five directions on 2026-10-19; directions 1 and 2 were then built (Ploeg PR ploeg-hq #196, cluster repository PR #826 and the Unfold Connections page), checked with unit tests and the demo. The onboarding checklist section was checked on 2026-11-17 against apps/unfold/src/onboarding.ts and its tests, and the demo."
 ---
 
 # Connect a repository
@@ -29,18 +29,39 @@ How a repository and a tracker board get connected to Ploeg and Unfold, so that 
 | 4. Tell Unfold about the repository and the board | Unfold's configuration file in the cluster repository | partly: a second `repositories` and `taskSources` entry for the same pair, keyed by board id where Ploeg keys by name; nothing compares the two lists |
 | 5. Let the Team see the board | the tracker | partly: a job shares Team users and registers the tracker webhook every 15 minutes, but only after a person shares the Ploeg bot into the board by hand |
 | 6. Hear about reviews | the forge | missing outside the Unfold repository itself: the review webhook is registered on that one repository, so request-changes rework does not reach Ploeg for any other repository. The fix, one job over every routed repository, is a pull request in the owner\'s cluster repository |
-| 7. Check it works | Unfold | partly: **Settings → Connections** shows every board and repository with each check and its fix. It needs a Ploeg release with the connections read ([ploeg-hq #196](https://github.com/ploeg-hq/ploeg/pull/196), Ploeg ADR-0129); until then it says the release does not report them |
+| 7. Check it works | Unfold | partly: **Settings → Connections** opens with the [onboarding checklist](#the-onboarding-checklist), then shows every board and repository with each check and its fix. It needs a Ploeg release with the connections read ([ploeg-hq #196](https://github.com/ploeg-hq/ploeg/pull/196), Ploeg ADR-0129); until then it says the release does not report them |
 
 Every stage leaves Unfold. Stages 3 and 4 are the same fact written twice in two files.
 
 ## States
 
-- **First time.** The operator has no checklist in the product; the steps live in Ploeg's how-to pages and comments in the cluster's Helm values.
+- **First time.** The checklist on Settings → Connections names every stage, but the steps that connect and register still live in Ploeg's how-to pages and the cluster's Helm values until Ploeg serves them.
 - **Label names no target.** Ploeg refuses the task (`label_unregistered`) and comments on it. Unfold lists it under *Could not start*. This is what happened to Vikunja #2025.
 - **Board without a rule.** Ploeg runs the task against the Team's fallback repository. Nothing warns.
 - **Board unknown to Ploeg but listed in Unfold.** The hand-off assigns the Team user and nothing happens. Today the Dark Factory board is in this state.
 - **Bot not shared, webhook missing.** Only a job log line or a `/readyz` count. The person who handed the task over sees nothing.
 - **Repository on a second forge.** Ploeg can route and inspect a GitHub repository, but its workers push to one forge per release (`pkg/worker/target.go`: "forge is global today"). A GitHub target on the Forgejo installation would be accepted and then fail at push.
+
+## The onboarding checklist
+
+[ADR-0059](../adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md) turns this journey into one checklist on **Settings → Connections**, designed in the OpenSpec change `self-serve-onboarding`. Slice S1 is built: the lines, their states and the refusals. The steps that connect, register, bind and prepare from the screen are later slices and wait for Ploeg; until Ploeg serves a step, its line says so and shows the configuration entry instead. Nothing on the checklist is green unless a live read says so.
+
+| # | Stage | Green when | Built |
+|---|---|---|---|
+| 0 | Sign in | the checklist is shown | yes; an Admin of a Tenant with no source and no repository lands here, and `onboarding.started` is recorded once per Tenant |
+| 1 | Installation | every install value Unfold can read is set: a Team, its spend cap, webhooks reaching Ploeg; the opt-ins Ploeg does not report turn red when a dry run answers that the installation has not opted in | yes, with **Show the install values** |
+| 2 | Connect GitHub | Ploeg reports a GitHub forge that reaches a repository | shown as configured or not available yet; waits for Ploeg's connection contract, and on an installation on another forge for Ploeg ADR-0192 |
+| 3 | Register repositories | each repository is registered | shown as configured or not available yet; waits for Ploeg ADR-0193 |
+| 4 | Connect ClickUp | Ploeg reports a ClickUp connection as the Unfold member | shown as configured or not available yet; waits for the connection contract |
+| 5 | Pick Lists | each List is saved | yes, through **Connect a tracker** |
+| 6 | Budget | an Admin confirmed a Team whose spend cap is not null | the cap is shown and a missing one is red; confirming it is a later slice |
+| 7 | Prepare | the readiness pull request is open | not available yet; waits for Ploeg ADR-0194 |
+| 8 | Review and merge | the repository is ready | shown from the connections read |
+| 9 | Bind Lists | the binding is `active` | shown as configured or not available yet; waits for Ploeg ADR-0186 |
+| 10 | First task | a Work Item exists for it | the next action only |
+| 11 | First pull request | a Run opened it | not measured on the page yet |
+
+How each line is read, and how a step Ploeg does not serve is refused, is in [Diagnose a connection](../../apps/unfold/docs/operations/task-connections.md#diagnose-a-connection).
 
 ## Why Vikunja #2025 cannot run today
 

@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import type { AppConfig, InsightEvent, User } from './types.ts';
 import type { ProductEventDaily, Store, StoredProductEvent } from './store.ts';
 
-/** Every event name RFC-0001 lists, RFC-0007's two Run health events and RFC-0008's tripwire verdict, with the properties its entry allows. `screen` is always a top-level field. */
+/** Every event name RFC-0001 lists, RFC-0007's two Run health events, RFC-0008's tripwire verdict and ADR-0059's onboarding events, with the properties its entry allows. `screen` is always a top-level field. */
 export const insightCatalogue: Readonly<Record<string, readonly string[]>> = Object.freeze({
   'screen.viewed': [],
   'needs_you.verdict_shown': ['verdict', 'path', 'group_size'],
@@ -21,10 +21,16 @@ export const insightCatalogue: Readonly<Record<string, readonly string[]>> = Obj
   'run.health.changed': ['old', 'new', 'signal', 'run'],
   'run.health.judge_wrong': ['run', 'judgement', 'health', 'model'],
   'run.tripwire.verdict': ['run', 'hit', 'check', 'score', 'verdict', 'decider', 'model'],
+  'onboarding.started': [],
+  'onboarding.step_completed': ['step', 'seconds'],
+  'onboarding.step_failed': ['step', 'code'],
+  'onboarding.step_refused': ['step', 'release', 'reason'],
+  'onboarding.first_agent_pr_opened': ['seconds', 'kind'],
+  'onboarding.first_task_pr_opened': ['seconds', 'readiness_first'],
 });
 
 /** Events only the server records. A browser that posts one has it dropped like an unknown name. */
-export const serverOnlyEvents: ReadonlySet<string> = new Set(['ui.link_out_burst', 'work_item.back_in_needs_you', 'report.filed', 'run.health.changed', 'run.health.judge_wrong', 'run.tripwire.verdict']);
+export const serverOnlyEvents: ReadonlySet<string> = new Set(['ui.link_out_burst', 'work_item.back_in_needs_you', 'report.filed', 'run.health.changed', 'run.health.judge_wrong', 'run.tripwire.verdict', 'onboarding.started', 'onboarding.step_completed', 'onboarding.step_failed', 'onboarding.step_refused', 'onboarding.first_agent_pr_opened', 'onboarding.first_task_pr_opened']);
 /** How many `link_out.opened` on one Work Item before one `needs_you.command_sent` make a `ui.link_out_burst`. */
 export const linkOutBurst = 3;
 const burstLookbackMs = 86_400_000;

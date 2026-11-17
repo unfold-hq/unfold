@@ -13,17 +13,19 @@ export const ownWorkName = 'Own work';
 const ownWorkSlug = 'own-work';
 const migrationActor = 'migration';
 
+const repositoriesTable = 'CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, key TEXT NOT NULL, integration_account_id TEXT REFERENCES integration_accounts(id), created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, key))';
 const tables = `
   CREATE TABLE IF NOT EXISTS client_projects (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, client TEXT, slug TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, body TEXT NOT NULL);
   CREATE UNIQUE INDEX IF NOT EXISTS client_projects_key ON client_projects(tenant, ifnull(client, ''), slug);
   CREATE UNIQUE INDEX IF NOT EXISTS client_projects_default ON client_projects(tenant) WHERE is_default = 1;
   CREATE TABLE IF NOT EXISTS integration_accounts (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('tracker', 'forge')), provider TEXT NOT NULL, base_url TEXT NOT NULL, account_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, provider, base_url, account_id));
-  CREATE TABLE IF NOT EXISTS tracker_connection_sources (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES integration_accounts(id), tenant TEXT NOT NULL, client TEXT, client_project_id TEXT REFERENCES client_projects(id), created_at TEXT NOT NULL, body TEXT NOT NULL);
-  CREATE INDEX IF NOT EXISTS tracker_connection_sources_connection ON tracker_connection_sources(connection_id);
-  CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, key TEXT NOT NULL UNIQUE, integration_account_id TEXT REFERENCES integration_accounts(id), created_at TEXT NOT NULL, body TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS tracker_connections (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, provider TEXT NOT NULL, base_url TEXT NOT NULL, created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, provider, base_url));
+  ${repositoriesTable};
   CREATE TABLE IF NOT EXISTS repository_grants (client_project_id TEXT NOT NULL REFERENCES client_projects(id), repository_id TEXT NOT NULL REFERENCES repositories(id), granted_at TEXT NOT NULL, granted_by TEXT NOT NULL, PRIMARY KEY (client_project_id, repository_id));
   CREATE INDEX IF NOT EXISTS repository_grants_repository ON repository_grants(repository_id);
 `;
+const sourcesTable = 'CREATE TABLE tracker_connection_sources (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, tenant TEXT NOT NULL, client TEXT, client_project_id TEXT REFERENCES client_projects(id), created_at TEXT NOT NULL, body TEXT NOT NULL)';
+const sourcesIndex = 'CREATE INDEX IF NOT EXISTS tracker_connection_sources_connection ON tracker_connection_sources(connection_id)';
 
 const exists = (db: DatabaseSync, table: string) => Boolean(db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?").get(table));
 
@@ -35,36 +37,140 @@ function insertOwnWork(db: DatabaseSync, tenant: string, by: string, at: string)
 
 const defaultProject = (db: DatabaseSync, tenant: string) => db.prepare('SELECT body FROM client_projects WHERE tenant=? AND is_default=1').get(tenant) as { body: string } | undefined;
 
-/**
- * Moves the store of ADR-0064 to the Integration Account model of system ADR-0048: `tracker_connections` becomes
- * `integration_accounts` with `role` `tracker`, and each saved source without a Client joins its Tenant's Own work.
- * Ids and bodies are copied unchanged, so each token stays sealed in `internal_state` under the same id.
- */
-function migrateTrackerConnections(db: DatabaseSync, at: string): void {
-  db.exec('PRAGMA foreign_keys=OFF');
+function transaction(db: DatabaseSync, work: () => void, foreignKeysOff = false): void {
+  if (foreignKeysOff) db.exec('PRAGMA foreign_keys=OFF');
   db.exec('BEGIN IMMEDIATE');
-  try {
-    db.exec('ALTER TABLE tracker_connection_sources RENAME TO tracker_connection_sources_before');
-    db.exec('DROP INDEX IF EXISTS tracker_connection_sources_connection');
-    db.exec(tables);
-    db.exec("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) SELECT id, tenant, 'tracker', provider, base_url, '', created_at, body FROM tracker_connections");
-    const sources = db.prepare('SELECT id, connection_id, tenant, client, created_at, body FROM tracker_connection_sources_before ORDER BY created_at, id').all() as { id: string; connection_id: string; tenant: string; client: string | null; created_at: string; body: string }[];
-    const insert = db.prepare('INSERT INTO tracker_connection_sources(id,connection_id,tenant,client,client_project_id,created_at,body) VALUES(?,?,?,?,?,?,?)');
-    const ownWork = (tenant: string): string => { const found = defaultProject(db, tenant); return found ? (JSON.parse(found.body) as ClientProject).id : insertOwnWork(db, tenant, migrationActor, at).id; };
-    for (const source of sources) insert.run(source.id, source.connection_id, source.tenant, source.client, source.client === null ? ownWork(source.tenant) : null, source.created_at, source.body);
-    db.exec('DROP TABLE tracker_connection_sources_before');
-    db.exec('DROP TABLE tracker_connections');
-    const broken = db.prepare('PRAGMA foreign_key_check(tracker_connection_sources)').all();
-    if (broken.length) throw new Error(`The tracker connection migration left ${broken.length} rows without the row they refer to`);
-    db.exec('COMMIT');
-  } catch (error) { db.exec('ROLLBACK'); throw error; } finally { db.exec('PRAGMA foreign_keys=ON'); }
+  try { work(); db.exec('COMMIT'); } catch (error) { db.exec('ROLLBACK'); throw error; } finally { if (foreignKeysOff) db.exec('PRAGMA foreign_keys=ON'); }
 }
 
-/** Creates the tables of Integration Accounts, saved sources, repositories, Repository Grants and Client Projects, migrating an older store first. */
-export function ensureIntegrationSchema(db: DatabaseSync, at: string): void {
-  if (exists(db, 'tracker_connections') && !exists(db, 'integration_accounts')) migrateTrackerConnections(db, at);
-  else db.exec(tables);
+/**
+ * Gives `tracker_connection_sources` the shape every Unfold since ADR-0064 can write: `client_project_id` added, and no
+ * foreign key on `connection_id`, so an image from before the Integration Accounts, which writes `tracker_connections`,
+ * and one that writes only `integration_accounts` can both add a source after a rollback. Rows are copied unchanged.
+ */
+function reshapeSources(db: DatabaseSync): void {
+  if (!exists(db, 'tracker_connection_sources')) { db.exec(sourcesTable); db.exec(sourcesIndex); return; }
+  const columns = (db.prepare('PRAGMA table_info(tracker_connection_sources)').all() as { name: string }[]).map(column => column.name);
+  const keyed = (db.prepare('PRAGMA foreign_key_list(tracker_connection_sources)').all() as { from: string }[]).some(key => key.from === 'connection_id');
+  if (columns.includes('client_project_id') && !keyed) { db.exec(sourcesIndex); return; }
+  transaction(db, () => {
+    db.exec('ALTER TABLE tracker_connection_sources RENAME TO tracker_connection_sources_before');
+    db.exec('DROP INDEX IF EXISTS tracker_connection_sources_connection');
+    db.exec(sourcesTable);
+    db.exec(`INSERT INTO tracker_connection_sources(id,connection_id,tenant,client,client_project_id,created_at,body) SELECT id, connection_id, tenant, client, ${columns.includes('client_project_id') ? 'client_project_id' : 'NULL'}, created_at, body FROM tracker_connection_sources_before`);
+    db.exec('DROP TABLE tracker_connection_sources_before');
+    db.exec(sourcesIndex);
+    const broken = db.prepare('PRAGMA foreign_key_check(tracker_connection_sources)').all();
+    if (broken.length) throw new Error(`Reshaping the saved task sources left ${broken.length} rows without the Client Project they refer to`);
+  }, true);
 }
+
+/** Makes a repository key unique per Tenant instead of across Unfold, so adding one never tells an Admin what another Tenant holds. */
+function reshapeRepositories(db: DatabaseSync): void {
+  const unique = (db.prepare('PRAGMA index_list(repositories)').all() as { name: string; unique: number }[]).filter(index => index.unique);
+  const globalKey = unique.some(index => (db.prepare(`PRAGMA index_info("${index.name.replace(/"/g, '""')}")`).all() as { name: string }[]).map(column => column.name).join(',') === 'key');
+  if (!globalKey) return;
+  db.exec('PRAGMA legacy_alter_table=ON');
+  try {
+    transaction(db, () => {
+      db.exec('ALTER TABLE repositories RENAME TO repositories_before');
+      db.exec(repositoriesTable);
+      db.exec('INSERT INTO repositories(id,tenant,key,integration_account_id,created_at,body) SELECT id, tenant, key, integration_account_id, created_at, body FROM repositories_before');
+      db.exec('DROP TABLE repositories_before');
+      const broken = db.prepare('PRAGMA foreign_key_check(repository_grants)').all();
+      if (broken.length) throw new Error(`Reshaping the stored repositories left ${broken.length} Repository Grants without their repository`);
+    }, true);
+  } finally { db.exec('PRAGMA legacy_alter_table=OFF'); }
+}
+
+/**
+ * Gives each stored repository an id that starts with `r-`, so no configured repository id can take over its work.
+ * Its Repository Grants follow, and so does each saved source of the same Tenant that named the old id.
+ */
+function namespaceStoredRepositories(db: DatabaseSync): number {
+  const plain = db.prepare("SELECT id, tenant, body FROM repositories WHERE id NOT LIKE 'r-%' ORDER BY created_at, id").all() as { id: string; tenant: string; body: string }[];
+  if (!plain.length) return 0;
+  transaction(db, () => {
+    const taken = (id: string) => Boolean(db.prepare('SELECT 1 FROM repositories WHERE id=?').get(id));
+    const sources = db.prepare('SELECT id, tenant, body FROM tracker_connection_sources').all() as { id: string; tenant: string; body: string }[];
+    for (const row of plain) {
+      let next = `r-${row.id}`.slice(0, 64);
+      while (taken(next)) next = `r-${row.id.slice(0, 54)}-${randomBytes(3).toString('hex')}`;
+      db.prepare('UPDATE repositories SET id=?, body=? WHERE id=?').run(next, JSON.stringify({ ...JSON.parse(row.body), id: next }), row.id);
+      db.prepare('UPDATE repository_grants SET repository_id=? WHERE repository_id=?').run(next, row.id);
+      for (const source of sources) {
+        const body = JSON.parse(source.body) as { repositoryId?: string };
+        if (source.tenant === row.tenant && body.repositoryId === row.id) db.prepare('UPDATE tracker_connection_sources SET body=? WHERE id=?').run(JSON.stringify({ ...body, repositoryId: next }), source.id);
+      }
+    }
+  }, true);
+  return plain.length;
+}
+
+type ConnectionRow = { id: string; tenant: string; provider: string; base_url: string; created_at: string; body: string };
+const updatedAt = (body: string): string => { try { return String((JSON.parse(body) as { updatedAt?: unknown }).updatedAt ?? ''); } catch { return ''; } };
+
+/** What {@link reconcileTrackerConnections} changed: rows copied into each table, and bodies brought up to the newer copy. */
+export type ConnectionReconcile = { toIntegrationAccounts: number; toTrackerConnections: number; refreshed: number; renamedRepositories?: number };
+
+/**
+ * Keeps `tracker_connections` and the `tracker` rows of `integration_accounts` equal, so an image from before the
+ * Integration Accounts still sees every connection after a rollback, and what it added or changed there is back after a
+ * roll-forward. A row only one table has is copied to the other with its id and body; a row both have takes the body
+ * with the later `updatedAt`. Nothing is deleted, and each token stays sealed under the connection id.
+ */
+export function reconcileTrackerConnections(db: DatabaseSync): ConnectionReconcile {
+  const result: ConnectionReconcile = { toIntegrationAccounts: 0, toTrackerConnections: 0, refreshed: 0 };
+  transaction(db, () => {
+    const old = new Map((db.prepare('SELECT id, tenant, provider, base_url, created_at, body FROM tracker_connections').all() as ConnectionRow[]).map(row => [row.id, row]));
+    const current = new Map((db.prepare("SELECT id, tenant, provider, base_url, created_at, body FROM integration_accounts WHERE role='tracker'").all() as ConnectionRow[]).map(row => [row.id, row]));
+    const intoAccounts = db.prepare("INSERT OR IGNORE INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) VALUES(?,?,'tracker',?,?,'',?,?)");
+    const intoOld = db.prepare('INSERT OR IGNORE INTO tracker_connections(id,tenant,provider,base_url,created_at,body) VALUES(?,?,?,?,?,?)');
+    for (const [id, row] of old) {
+      const found = current.get(id);
+      if (!found) { result.toIntegrationAccounts += Number(intoAccounts.run(id, row.tenant, row.provider, row.base_url, row.created_at, row.body).changes); continue; }
+      if (found.body === row.body) continue;
+      if (updatedAt(row.body) > updatedAt(found.body)) db.prepare("UPDATE integration_accounts SET body=? WHERE id=? AND role='tracker'").run(row.body, id);
+      else db.prepare('UPDATE tracker_connections SET body=? WHERE id=?').run(found.body, id);
+      result.refreshed++;
+    }
+    for (const [id, row] of current) if (!old.has(id)) result.toTrackerConnections += Number(intoOld.run(id, row.tenant, row.provider, row.base_url, row.created_at, row.body).changes);
+  });
+  return result;
+}
+
+/** Puts each saved source without a Client and without a Client Project into its Tenant's Own work, made when missing. */
+function placeInOwnWork(db: DatabaseSync, at: string): void {
+  const loose = db.prepare('SELECT id, tenant FROM tracker_connection_sources WHERE client IS NULL AND client_project_id IS NULL ORDER BY created_at, id').all() as { id: string; tenant: string }[];
+  if (!loose.length) return;
+  transaction(db, () => {
+    const ownWork = (tenant: string): string => { const found = defaultProject(db, tenant); return found ? (JSON.parse(found.body) as ClientProject).id : insertOwnWork(db, tenant, migrationActor, at).id; };
+    for (const source of loose) db.prepare('UPDATE tracker_connection_sources SET client_project_id=? WHERE id=?').run(ownWork(source.tenant), source.id);
+  });
+}
+
+/**
+ * Creates the tables of Integration Accounts, saved sources, repositories, Repository Grants and Client Projects next
+ * to the ADR-0064 `tracker_connections` table, which stays so an older image can be rolled back to. Each start
+ * reconciles the two connection tables and places saved sources in Own work. Nothing is dropped.
+ */
+export function ensureIntegrationSchema(db: DatabaseSync, at: string): ConnectionReconcile {
+  db.exec(tables);
+  const reconciled = reconcileTrackerConnections(db);
+  reshapeSources(db);
+  placeInOwnWork(db, at);
+  reshapeRepositories(db);
+  const renamedRepositories = namespaceStoredRepositories(db);
+  return renamedRepositories ? { ...reconciled, renamedRepositories } : reconciled;
+}
+
+/** Writes a tracker connection to `tracker_connections` as well, the table an image from before the Integration Accounts reads. */
+export function mirrorTrackerConnection(db: DatabaseSync, connection: { id: string; tenant: string; provider: string; baseUrl: string; createdAt: string }, body: string): void {
+  db.prepare('INSERT INTO tracker_connections(id,tenant,provider,base_url,created_at,body) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(connection.id, connection.tenant, connection.provider, connection.baseUrl, connection.createdAt, body);
+}
+
+/** Removes a tracker connection from `tracker_connections` too. */
+export function unmirrorTrackerConnection(db: DatabaseSync, id: string): void { db.prepare('DELETE FROM tracker_connections WHERE id=?').run(id); }
 
 /**
  * Each Tenant's Client Projects. Own work, the one without a Client, is made the first time something needs it.

@@ -1,6 +1,6 @@
 # Write release notes
 
-Unfold's release notes are written by hand, one file per change, in [`apps/unfold/changes/`](../../changes/README.md) ([ADR 0070](../adrs/0070-release-notes-are-written-per-change-and-the-workbench-shows-what-is-new.md)). The release build turns them into three things:
+Unfold's release notes are written by hand, one file per change, in [`apps/unfold/changes/`](../../changes/README.md) ([ADR 0072](../adrs/0072-release-notes-are-written-per-change-and-the-workbench-shows-what-is-new.md)). The release build turns them into three things:
 
 - the top of each [GitHub release](https://github.com/unfold-hq/unfold/releases), above a folded list of its commits;
 - **What's new** in the workbench: the version at the bottom of the sidebar opens it, a dot on the version means there are notes you have not read, and a highlight opens it once by itself after an upgrade;

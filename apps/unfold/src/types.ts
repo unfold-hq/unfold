@@ -7,6 +7,7 @@ import type { FlagSettings } from './flags.ts';
 import type { McpHttpSettings } from './mcp-auth.ts';
 import type { PersonTokenSettings } from './person-proof.ts';
 import type { Membership } from './tenancy.ts';
+import type { CostExportReader } from './cost-export-readers.ts';
 import type { IntakeConfig } from './intake/limiter.ts';
 import type { OpenBaoSettings } from './audit/signer.ts';
 import type { ObjectStoreSettings } from './audit/object-store.ts';
@@ -59,7 +60,7 @@ export type AppConfig = {
   docker?: { image: string; socketPath?: string; network?: string; cpus?: number; memoryMb?: number; pidsLimit?: number; gatewayUrl?: string; provisionTimeoutMs?: number; user?: string; transport?: WorkspaceTransport; relayUrl?: string };
   litellm?: { baseUrl: string; adminUrl: string; masterKey: string; models: string[]; ttl: string; settlementDelayMs?: number };
   kubernetes?: { namespace: string; image: string; storageClass?: string; storageSize: string; cpu: string; memory: string; cpuRequest?: string; memoryRequest?: string; apiUrl?: string; tokenFile?: string; caFile?: string; pullPolicy?: string; ingressFrom?: Record<string, unknown>[]; egress?: Record<string, unknown>[]; gitSecretName?: string; gitRewrites?: GitRewrite[]; agentSecrets?: string[]; imagePullSecrets?: string[]; provisionTimeoutMs?: number; transport?: WorkspaceTransport; relayUrl?: string; provisioner?: 'pod' | 'sandbox'; userNamespaces?: boolean; runtimeClassName?: string; sandbox?: { runtimeClassName?: string; warmPool?: string }; workspaceRetentionDays?: number; volumeDeleteAnnotations?: Record<string, string> };
-  auth: { secureCookies: boolean; sessionHours: number; localLogin?: boolean; agentHostOrigins?: string[]; agentHostOriginMode?: 'report' | 'enforce'; bootstrapPassword?: string; bootstrapName: string; oidc?: { issuer: string; subjectNamespace?: string; clientId: string; clientSecret?: string; scopes: string[]; displayName: string; roleClaim: string; groupsClaim: string; roles: Record<UserRole, string[]> } };
+  auth: { secureCookies: boolean; sessionHours: number; localLogin?: boolean; agentHostOrigins?: string[]; agentHostOriginMode?: 'report' | 'enforce'; bootstrapPassword?: string; bootstrapName: string; oidc?: { issuer: string; subjectNamespace?: string; clientId: string; clientSecret?: string; scopes: string[]; displayName: string; roleClaim: string; groupsClaim: string; roles: Record<UserRole, string[]>; exchange?: { audiences: string[]; match: 'subject' | 'email' } } };
   /** `unfold-mcp` served over Streamable HTTP on its own path, from `UNFOLD_MCP_*`; off when absent. */
   mcp?: McpHttpSettings;
   maxConcurrentSessions: number; maxBudgetUsd: number;
@@ -104,6 +105,8 @@ export type AppConfig = {
   billing?: BillingSettings;
   /** SCIM provisioning and the Shared Signals receiver (`identity`), each behind its own flag. */
   identity?: IdentitySettings;
+  /** The machines that read the FOCUS cost export with their own Kubernetes service account token (ADR 0071). Absent means none. */
+  costExportReaders?: CostExportReader[];
 };
 
 /** Where Report a problem files: a connection to a tracker whose adapter files issues (a named task source, or one of its own), the repository or project, and an optional line the success screen shows. */

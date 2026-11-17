@@ -16,8 +16,12 @@ const editorPollSeconds = 2;
 const editorStartsPerAddress = 20;
 const editorSecretFailures = 5;
 const userCodeAlphabet = 'BCDFGHJKLMNPQRSTVWXZ';
-/** Editor credentials last this many days from approval and are never renewed. */
+/** An editor credential lasts this many days from its approval or rotation; use never extends it. */
 export const editorCredentialDays = 30;
+/** No credential rotated from one approval lives past this many days after that approval. */
+export const editorFamilyDays = 90;
+/** A rotated credential keeps working this long, so requests already on their way with it still succeed. */
+export const editorRotationGraceMs = 120_000;
 /** An editor credential left unused for this many days stops working, as if it had expired. */
 export const editorIdleDays = 14;
 /** Every editor credential starts with this prefix, so it is never mistaken for a browser session. */
@@ -91,6 +95,15 @@ function failure(status: number, code: string, message: string): Error { return 
 export const localLoginOff = () => failure(404, 'local_login_off', 'Sign-in with a name and password is turned off here. Use single sign-on.');
 
 const unknownEditor = () => failure(404, 'editor_login_unknown', 'This editor sign-in is unknown or has expired. Start it again from your editor.');
+const refusedEditor = () => failure(401, 'unauthenticated', 'This editor credential is unknown, expired or revoked. Sign the editor in again.');
+
+/** The approval an editor credential descends from and the moment its family ends: its own id and approval plus `editorFamilyDays` for a credential that predates rotation. */
+export function editorFamily(credential: EditorCredential): { id: string; expiresAt: string } {
+  return { id: credential.familyId ?? credential.id, expiresAt: credential.familyExpiresAt ?? new Date(Date.parse(credential.createdAt) + editorFamilyDays * 86_400_000).toISOString() };
+}
+
+/** An editor credential just issued: the token, returned once, with when it and its family end. */
+export type IssuedEditorCredential = { user: User; token: string; expiresAt: string; familyExpiresAt: string };
 
 /**
  * The person a stored account signs in as, acting with `role`. A local password account holds `role` in the default
@@ -160,6 +173,8 @@ export class Auth {
   }
   user(req: IncomingMessage): User | undefined {
     if (this.config.mode === 'demo') return { id: 'demo-operator', name: 'Demo operator', role: 'admin', memberships: defaultMemberships('admin') };
+    const reader = this.readers?.principal(req);
+    if (reader) return reader;
     if (this.bearer(req) !== undefined) return this.editorUser(req);
     const token = this.token(req);
     if (!token || token.length > 200) return undefined;
@@ -168,6 +183,9 @@ export class Auth {
     const user = this.account(login.userId);
     return user ? signedInUser(user) : undefined;
   }
+  private readers?: { principal(req: IncomingMessage): User | undefined };
+  /** Lets `user` answer the cost export reader a request proved before it reached the handler (ADR 0071). */
+  useReaders(readers: { principal(req: IncomingMessage): User | undefined }): void { this.readers = readers; }
   private account(id: string) {
     const user = this.store.getUser(id);
     return user && (user.passwordHash === '' || localLoginEnabled(this.config)) && !accountDisabled(this.store.db, id) ? user : undefined;
@@ -212,6 +230,9 @@ export class Auth {
     return entry.proof.source === 'request' && entry.proof.expiresAt <= now ? undefined : entry.proof;
   }
 
+  /** Called with the token hashes of a family that reuse detection just revoked, so what they issued ends too. */
+  onFamilyRevoked?: (signIns: string[]) => void;
+
   private editorUser(req: IncomingMessage): User | undefined {
     const bearer = this.bearer(req);
     if (bearer && delegatedTokenPattern.test(bearer)) {
@@ -223,8 +244,9 @@ export class Auth {
     }
     if (!bearer || !editorTokenPattern.test(bearer)) return undefined;
     const credential = this.store.getEditorCredential(digest(bearer));
-    const user = credential && this.account(credential.userId);
-    if (!credential || !user) return undefined;
+    if (!credential) { this.detectReuse(digest(bearer)); return undefined; }
+    const user = this.account(credential.userId);
+    if (!user) return undefined;
     const now = Date.now();
     if (!credential.lastUsedAt || now - Date.parse(credential.lastUsedAt) >= 60_000) this.store.touchEditorCredential(credential.id, new Date(now).toISOString());
     return signedInUser(user);
@@ -294,8 +316,67 @@ export class Auth {
     return this.editorRequest(code, user)!;
   }
 
+  /**
+   * Revokes the whole family of a credential presented after a rotation replaced it and its grace ran out: either the
+   * holder lost the race to a copy of its token, or a copy is being used after the holder moved on. Returns whether it did.
+   */
+  private detectReuse(tokenHash: string): boolean {
+    const presented = this.store.anyEditorCredential(tokenHash);
+    if (!presented?.rotatedAt) return false;
+    const family = editorFamily(presented);
+    const ended = this.store.deleteEditorFamily(family.id);
+    console.error(JSON.stringify({ level: 'warn', event: 'editor.family_revoked', reason: 'rotated_credential_reused', user: presented.userId, family: family.id, credentials: ended.length }));
+    this.onFamilyRevoked?.(ended);
+    return true;
+  }
+
+  private mint(user: User, label: string, now: number, family: { id: string; expiresAt: string }): { record: EditorCredential; issued: IssuedEditorCredential } {
+    const token = `${editorTokenPrefix}${randomBytes(32).toString('base64url')}`;
+    const expiresAt = new Date(Math.min(now + editorCredentialDays * 86_400_000, Date.parse(family.expiresAt))).toISOString();
+    const record: EditorCredential = { id: randomBytes(12).toString('hex'), tokenHash: digest(token), userId: user.id, label, scope: 'editor', createdAt: new Date(now).toISOString(), expiresAt, familyId: family.id, familyExpiresAt: family.expiresAt };
+    return { record, issued: { user, token, expiresAt, familyExpiresAt: family.expiresAt } };
+  }
+
+  private approved(user: User, label: string): IssuedEditorCredential {
+    const now = Date.now();
+    const { record, issued } = this.mint(user, label, now, { id: randomBytes(12).toString('hex'), expiresAt: new Date(now + editorFamilyDays * 86_400_000).toISOString() });
+    this.store.createEditorCredential(record);
+    return issued;
+  }
+
+  /**
+   * Replaces the live editor credential `bearer` with a new one of the same family, person and name: it lasts
+   * `editorCredentialDays` but never past the family's end, and the old one stops working after
+   * `editorRotationGraceMs`. A credential that was already rotated revokes its whole family instead.
+   */
+  rotateEditor(bearer: string | undefined): IssuedEditorCredential {
+    if (!bearer || !editorTokenPattern.test(bearer)) throw refusedEditor();
+    const tokenHash = digest(bearer);
+    const presented = this.store.anyEditorCredential(tokenHash);
+    if (presented?.rotatedAt) {
+      this.detectReuse(tokenHash);
+      throw failure(401, 'editor_credential_reused', 'This editor credential was already replaced, so Unfold signed out every credential that came from the same approval. Sign the editor in again.');
+    }
+    const live = this.store.getEditorCredential(tokenHash);
+    const record = live && this.account(live.userId);
+    if (!live || !record) throw refusedEditor();
+    const now = Date.now();
+    const family = editorFamily(live);
+    if (Date.parse(family.expiresAt) <= now) throw refusedEditor();
+    const { record: next, issued } = this.mint(signedInUser(record), live.label, now, family);
+    if (!this.store.rotateEditorCredential(live.id, new Date(now).toISOString(), next)) throw refusedEditor();
+    return issued;
+  }
+
+  /** Issues a new editor credential, as its own family, for the existing account `userId` named `label`, after an identity-provider token proved who asks. */
+  exchangeEditor(userId: string, label: string): IssuedEditorCredential {
+    const record = this.account(userId);
+    if (!record) throw failure(403, 'exchange_unknown_person', 'Unfold has no account for the person this token names. Sign in to Unfold in the browser once, then try again.');
+    return this.approved(signedInUser(record), label);
+  }
+
   /** Polls an editor sign-in with its secret. An approved ticket yields a new editor credential once; every other state yields none. */
-  collectEditor(code: string, secret: string): { status: 'pending' } | { status: 'ready'; user: User; token: string; expiresAt: string } {
+  collectEditor(code: string, secret: string): { status: 'pending' } | ({ status: 'ready' } & IssuedEditorCredential) {
     const item = this.liveTicket(code);
     if (!item) throw unknownEditor();
     if (item.secretHash !== digest(secret)) {
@@ -313,16 +394,15 @@ export class Auth {
     this.editors.delete(code);
     const record = this.account(item.signedInBy);
     if (!record) throw unknownEditor();
-    const user = signedInUser(record);
-    const token = `${editorTokenPrefix}${randomBytes(32).toString('base64url')}`;
-    const expiresAt = new Date(now + editorCredentialDays * 86_400_000).toISOString();
-    this.store.createEditorCredential({ id: randomBytes(12).toString('hex'), tokenHash: digest(token), userId: user.id, label: item.label, scope: 'editor', createdAt: new Date(now).toISOString(), expiresAt });
-    return { status: 'ready', user, token, expiresAt };
+    return { status: 'ready', ...this.approved(signedInUser(record), item.label) };
   }
 
   /** A person's live editor credentials, without their token hashes, each with the moment it signs out if it stays unused. */
-  editorCredentials(user: User): Array<Omit<EditorCredential, 'tokenHash' | 'userId'> & { idleExpiresAt: string }> {
-    return this.store.editorCredentials(user.id).map(({ id, label, scope, createdAt, expiresAt, lastUsedAt }) => ({ id, label, scope, createdAt, expiresAt, ...(lastUsedAt ? { lastUsedAt } : {}), idleExpiresAt: new Date(Date.parse(lastUsedAt ?? createdAt) + editorIdleDays * 86_400_000).toISOString() }));
+  editorCredentials(user: User): Array<Pick<EditorCredential, 'id' | 'label' | 'scope' | 'createdAt' | 'expiresAt' | 'lastUsedAt'> & { idleExpiresAt: string; familyExpiresAt: string }> {
+    return this.store.editorCredentials(user.id).map(credential => {
+      const { id, label, scope, createdAt, expiresAt, lastUsedAt } = credential;
+      return { id, label, scope, createdAt, expiresAt, ...(lastUsedAt ? { lastUsedAt } : {}), idleExpiresAt: new Date(Date.parse(lastUsedAt ?? createdAt) + editorIdleDays * 86_400_000).toISOString(), familyExpiresAt: editorFamily(credential).expiresAt };
+    });
   }
 
   /** Revokes one of a person's editor credentials and returns the sign-in it identified. */

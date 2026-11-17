@@ -29,7 +29,8 @@ export function dataDir(env = process.env) {
 
 function validEntry(entry) {
   if (!entry || typeof entry !== 'object' || typeof entry.token !== 'string' || !tokenPattern.test(entry.token)) return null;
-  return { token: entry.token, expiresAt: typeof entry.expiresAt === 'string' ? entry.expiresAt : '', user: typeof entry.user === 'string' ? entry.user.slice(0, 200) : '' };
+  const family = typeof entry.familyExpiresAt === 'string' && entry.familyExpiresAt ? { familyExpiresAt: entry.familyExpiresAt } : {};
+  return { token: entry.token, expiresAt: typeof entry.expiresAt === 'string' ? entry.expiresAt : '', user: typeof entry.user === 'string' ? entry.user.slice(0, 200) : '', ...family };
 }
 
 function encoded(entry) { return Buffer.from(JSON.stringify(entry), 'utf8').toString('base64url'); }
@@ -106,7 +107,7 @@ export function credentialStore(env = process.env, platform = process.platform) 
  * The credential hooks and commands send to `url`. `UNFOLD_TOKEN` wins when set; otherwise the stored credential for
  * that address, unless it has expired. `source` is `env`, `stored` or `none`.
  * @param {string} url
- * @param {{ env?: Record<string, string | undefined>, store?: { read: (key: string) => { token: string, expiresAt: string, user: string } | null }, now?: number }} [options]
+ * @param {{ env?: Record<string, string | undefined>, store?: { read: (key: string) => { token: string, expiresAt: string, user: string, familyExpiresAt?: string } | null }, now?: number }} [options]
  */
 export function resolveCredential(url, { env = process.env, store, now = Date.now() } = {}) {
   const fromEnv = String(env.UNFOLD_TOKEN ?? '').trim();

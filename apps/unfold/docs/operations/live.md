@@ -442,6 +442,31 @@ Local sign-in is the name-and-password door: the bootstrap administrator from `U
 
 Unfold refuses to start with local sign-in off and no `auth.oidc`, because nobody could sign in; the chart refuses to render the same combination.
 
+### One sign-in for editors
+
+Editors sign in through the browser and approve it once ([ADR 0037](../adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md)). The Claude Code plugin then rotates its credential by itself for ninety days. To spare people even that approval, Unfold can trade a token from the same identity provider for an editor credential ([ADR 0070](../adrs/0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). That fits an organisation that already signs its people in on their machines with a command-line helper of its own. It is off until `auth.oidc.exchange` is set:
+
+```json
+"auth": {
+  "oidc": {
+    "issuer": "https://idp.example.org/application/o/unfold/",
+    "clientId": "unfold",
+    "exchange": { "audiences": ["machine-helper"], "match": "subject" }
+  }
+}
+```
+
+In the chart this goes under `config.auth.oidc.exchange`. What the installation needs:
+
+1. **The same issuer.** The helper's tokens must come from `auth.oidc.issuer`, signed with a key from its JWKS. Unfold refuses tokens from any other issuer, so a helper on another identity provider cannot be used.
+2. **An audience.** List in `audiences` the `aud` the helper's tokens carry: usually the helper's client id, for its ID tokens. Unfold accepts a token only for a listed audience. To keep tokens for other applications away from Unfold, have the provider put Unfold's own client id in the token's audience and list only that.
+3. **Short tokens.** A token must carry `iat` and live at most 24 hours. ID tokens and access tokens usually live minutes to an hour.
+4. **The same person.** With `match: subject` the token's `sub` must be the one the browser sign-in gets. That holds when the provider gives a person one `sub` in every application, as Authentik, Keycloak, Okta and Google do. When each application gets its own `sub`, as in Microsoft Entra ID, use `match: email`. The token must then carry `email` with `email_verified: true`, equal to the address the person signs in to Unfold with.
+5. **An existing account.** The exchange never creates an account or changes a role. A person signs in through the browser once, after which the account exists. A person the provider turned off through SCIM or Shared Signals is refused ([Provision and deprovision people](provision-and-deprovision-people.md)).
+6. **The machines.** Set `UNFOLD_IDP_TOKEN_COMMAND` in Claude Code's managed settings, next to `UNFOLD_URL`, to a command that prints the token on its first line within five seconds, for example `"UNFOLD_IDP_TOKEN_COMMAND": "machine-helper token --id-token"`. The plugin runs it through the shell only when it has no credential or its family is about to end, sends the token only over HTTPS, and falls back to the browser when anything fails.
+
+Unfold logs `editor.exchanged` with the account and audience for each exchange, and `editor.family_revoked` when reuse of a rotated credential signs a family out. Exchange and rotation count against the per-address `rateLimits.signIn`. `POST /api/auth/editor/exchange` answers 404 `exchange_off` while the block is absent.
+
 ## Behind a reverse proxy
 
 Behind an ingress controller or load balancer, the socket's peer is the proxy, not the person's browser. Unfold then counts every local sign-in attempt, every editor sign-in start and every Request intake delivery against the proxy's address, so one client that fails ten passwords locks every other client out for five minutes. Set the top-level `trustedProxies` to the addresses and CIDR ranges of the proxies themselves, in the chart under `config.trustedProxies`:

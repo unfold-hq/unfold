@@ -152,7 +152,7 @@ export class WorkspaceManager {
     if (!/^[a-zA-Z0-9_-]{1,80}$/.test(session.id)) throw new Error('Invalid workspace identity');
     const configured = this.config.repositories.find(item => item.id === repository.id);
     if (!configured || configured.url !== repository.url || configured.baseBranch !== repository.baseBranch) throw new Error('Repository is not configured for this workbench');
-    const target: Repository = repository.access ? { ...configured, access: repository.access } : configured;
+    const target: Repository = repository.access && !configured.stored ? { ...configured, access: repository.access } : configured;
     const placement = sessionPlacement(this.config, session);
     if (this.config.runtime.kind === 'command' && placement !== 'local') throw new Error('The command adapter requires the local backend');
     if (placement === 'kubernetes') {

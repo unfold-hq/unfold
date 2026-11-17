@@ -8,12 +8,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { credentialKey, fileStore, keychainService, keychainStore, redacted, resolveCredential } from '../extensions/claude-code/scripts/credentials.mjs';
-import { mayStart, readSignIn, renewWithinMs, retryAfterMs, signInFile, signInNotice, signInReason, startSignIn, waitForApproval } from '../extensions/claude-code/scripts/sign-in.mjs';
+import { idpToken, mayCarryIdpToken, mayStart, readSignIn, renewSilently, renewWithinMs, retryAfterMs, rotateWithinMs, rotationDue, signInFile, signInNotice, signInReason, silentRetryMs, startSignIn, waitForApproval } from '../extensions/claude-code/scripts/sign-in.mjs';
 
 const hook = fileURLToPath(new URL('../extensions/claude-code/scripts/unfold-hook.mjs', import.meta.url));
 const tokenA = `vle_${'a'.repeat(43)}`;
 const tokenB = `vle_${'b'.repeat(43)}`;
 const day = 24 * 3600_000;
+const jwt = 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJhZGEifQ.c2lnbmF0dXJl';
 
 async function scratch(t: { after: (fn: () => Promise<void>) => void }) {
   const dir = await mkdtemp(join(tmpdir(), 'unfold-sign-in-'));
@@ -197,6 +198,11 @@ async function fakeUnfold(options: { hangStart?: boolean } = {}): Promise<Ticket
         res.end(JSON.stringify({ code: 'hook-ticket-1', secret: 'hook-secret', userCode: 'BCDF-GHJK', expiresIn: 60, interval: 1, url: `http://${req.headers.host}/api/auth/oidc?editor=hook-ticket-1` }));
         return;
       }
+      if (req.url === '/api/auth/editor/exchange') {
+        res.writeHead(body.subject_token === jwt ? 200 : 400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body.subject_token === jwt ? { access_token: tokenB, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token', token_type: 'Bearer', expires_in: 2_592_000, expiresAt: '2099-01-01T00:00:00Z', familyExpiresAt: '2099-03-01T00:00:00Z', user: { name: 'ada' } } : { error: { code: 'invalid_grant' } }));
+        return;
+      }
       if (req.url === '/api/auth/editor/hook-ticket-1') {
         polls += 1;
         res.writeHead(polls < 2 ? 202 : 200, { 'content-type': 'application/json' });
@@ -294,4 +300,97 @@ test('a hook never waits on a sign-in Unfold does not answer, and UNFOLD_TOKEN r
   assert.equal(reported.code, 0);
   assert.doesNotMatch(reported.stdout, /systemMessage/);
   assert.equal(unfold.received.at(-1)?.auth, `Bearer ${tokenB}`);
+});
+
+
+test('a stored credential rotates once it is a week old, until its family deadline, and UNFOLD_TOKEN never does', () => {
+  const now = Date.parse('2026-11-17T12:00:00Z');
+  const stored = (left: number, family?: number) => ({ token: tokenA, source: 'stored', expiresAt: new Date(now + left).toISOString(), user: '', ...(family === undefined ? {} : { familyExpiresAt: new Date(now + family).toISOString() }) });
+  assert.equal(rotationDue(stored(rotateWithinMs + 60_000), now), false, 'a fresh credential is left alone');
+  assert.equal(rotationDue(stored(rotateWithinMs), now), true);
+  assert.equal(rotationDue(stored(rotateWithinMs, 60 * day), now), true);
+  assert.equal(rotationDue(stored(5 * day, 5 * day), now), false, 'a credential that already ends with its family cannot be extended');
+  assert.equal(rotationDue({ ...stored(day), source: 'env' }, now), false);
+  assert.equal(rotationDue({ token: '', source: 'none', expiresAt: '', user: '' }, now), false);
+  assert.equal(signInReason(stored(5 * day, 5 * day), now), 'renew', 'at the family deadline the browser or the identity provider takes over');
+});
+
+test('the token command prints a JWT within its time, and an identity-provider token only travels over HTTPS or to this machine', () => {
+  assert.equal(idpToken({}), '');
+  assert.equal(idpToken({ UNFOLD_IDP_TOKEN_COMMAND: 'helper' }, (() => `\n ${jwt} \nmore\n`) as never), jwt);
+  assert.equal(idpToken({ UNFOLD_IDP_TOKEN_COMMAND: 'helper' }, (() => 'not a token') as never), '');
+  assert.equal(idpToken({ UNFOLD_IDP_TOKEN_COMMAND: 'helper' }, (() => { throw new Error('timed out'); }) as never), '');
+  assert.equal(idpToken({ UNFOLD_IDP_TOKEN_COMMAND: `printf '%s' ${jwt}` }), jwt, 'runs through the shell');
+  assert.equal(mayCarryIdpToken('https://unfold.example.org'), true);
+  assert.equal(mayCarryIdpToken('http://127.0.0.1:8080'), true);
+  assert.equal(mayCarryIdpToken('http://localhost:8080'), true);
+  assert.equal(mayCarryIdpToken('http://unfold.example.org'), false);
+});
+
+test('a week-old credential is rotated silently, once per hook burst, and the new one is kept with its family deadline', async t => {
+  const dir = await scratch(t);
+  const env = { CLAUDE_PLUGIN_DATA: dir };
+  const url = 'https://unfold.example.org';
+  const store = fileStore(dir);
+  const now = Date.parse('2026-11-17T12:00:00Z');
+  const old = { token: tokenA, expiresAt: new Date(now + 20 * day).toISOString(), user: 'ada' };
+  store.write(credentialKey(url), old);
+  const calls: { url: string; auth: string }[] = [];
+  const fetcher = async (target: string, init: RequestInit) => {
+    calls.push({ url: target, auth: String((init.headers as Record<string, string>).authorization ?? '') });
+    return answer(200, { token: tokenB, expiresAt: '2026-12-17T12:00:00Z', familyExpiresAt: '2027-02-01T12:00:00Z', user: { name: 'ada' } });
+  };
+  const fresh = await renewSilently({ url, credential: { ...old, source: 'stored' }, env, fetcher: fetcher as never, now, store });
+  assert.deepEqual(fresh, { token: tokenB, expiresAt: '2026-12-17T12:00:00Z', user: 'ada', familyExpiresAt: '2027-02-01T12:00:00Z', source: 'stored' });
+  assert.deepEqual(calls, [{ url: `${url}/api/auth/editor/rotate`, auth: `Bearer ${tokenA}` }]);
+  assert.deepEqual(store.read(credentialKey(url)), { token: tokenB, expiresAt: '2026-12-17T12:00:00Z', user: 'ada', familyExpiresAt: '2027-02-01T12:00:00Z' });
+  const raced = await renewSilently({ url, credential: { ...old, source: 'stored' }, env, fetcher: (async () => assert.fail('a second hook rotates again')) as never, now: now + 1000, store });
+  assert.equal(raced.token, tokenA, 'within the retry pause a hook that still holds the old token uses it');
+  const later = await renewSilently({ url, credential: { ...old, source: 'stored' }, env, fetcher: (async () => assert.fail('the store already holds the rotated credential')) as never, now: now + silentRetryMs, store });
+  assert.equal(later.token, tokenB, 'a hook that read the old token takes the rotated one from the store instead of rotating it again');
+});
+
+test('a credential Unfold refuses to rotate is forgotten, and the identity-provider token signs the machine in again without the browser', async t => {
+  const dir = await scratch(t);
+  const env = { CLAUDE_PLUGIN_DATA: dir, UNFOLD_IDP_TOKEN_COMMAND: 'helper' };
+  const url = 'https://unfold.example.org';
+  const store = fileStore(dir);
+  const now = Date.parse('2026-11-17T12:00:00Z');
+  const old = { token: tokenA, expiresAt: new Date(now + 20 * day).toISOString(), user: 'ada' };
+  store.write(credentialKey(url), old);
+  const requests: { url: string; body: any }[] = [];
+  const fetcher = async (target: string, init: RequestInit) => {
+    requests.push({ url: target, body: JSON.parse(String(init.body ?? '{}')) });
+    if (target.endsWith('/rotate')) return answer(401, { error: { code: 'editor_credential_reused' } });
+    return answer(200, { access_token: tokenB, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token', token_type: 'Bearer', expires_in: 2_592_000, expiresAt: '2026-12-17T12:00:00Z', familyExpiresAt: '2027-02-15T12:00:00Z', user: { name: 'ada' } });
+  };
+  const fresh = await renewSilently({ url, credential: { ...old, source: 'stored' }, env, fetcher: fetcher as never, now, store, run: (() => `${jwt}\n`) as never, host: 'ada-laptop' });
+  assert.equal(fresh.token, tokenB);
+  assert.deepEqual(requests.map(request => request.url), [`${url}/api/auth/editor/rotate`, `${url}/api/auth/editor/exchange`]);
+  assert.deepEqual(requests[1].body, { grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', subject_token: jwt, subject_token_type: 'urn:ietf:params:oauth:token-type:jwt', client: 'claude-code', host: 'ada-laptop' });
+  assert.equal(store.read(credentialKey(url))?.familyExpiresAt, '2027-02-15T12:00:00Z');
+
+  const plain = 'http://unfold.example.org';
+  const untouched = await renewSilently({ url: plain, credential: { token: '', source: 'none', expiresAt: '', user: '' }, env, fetcher: (async () => assert.fail('an identity-provider token is never sent over plain HTTP')) as never, now, store, run: (() => jwt) as never });
+  assert.equal(untouched.token, '');
+  const failing = 'https://failing.example.org';
+  let exchanges = 0;
+  const refusing = (async () => { exchanges += 1; return answer(403, { error: { code: 'exchange_unknown_person' } }); }) as never;
+  assert.equal((await renewSilently({ url: failing, credential: { token: '', source: 'none', expiresAt: '', user: '' }, env, fetcher: refusing, now, store, run: (() => jwt) as never })).token, '');
+  assert.equal((await renewSilently({ url: failing, credential: { token: '', source: 'none', expiresAt: '', user: '' }, env, fetcher: refusing, now: now + 60_000, store, run: (() => jwt) as never })).token, '');
+  assert.equal(exchanges, 1, 'a refused exchange is not retried by every hook');
+});
+
+test('with a token command, the first session signs in through the identity provider: no browser, no notice, and it reports at once', async t => {
+  const unfold = await fakeUnfold();
+  const dir = await scratch(t);
+  t.after(() => unfold.close());
+  const env = { HOME: dir, UNFOLD_URL: unfold.url, UNFOLD_CREDENTIAL_STORE: 'file', CLAUDE_PLUGIN_DATA: join(dir, 'data'), BROWSER: '/bin/false', UNFOLD_IDP_TOKEN_COMMAND: `printf '%s\\n' ${jwt}`, UNFOLD_HOOK_TIMEOUT_MS: '5000' };
+  const started = await runHook({ session_id: 'sign-in-session-4', cwd: dir, hook_event_name: 'SessionStart', source: 'startup' }, env);
+  assert.equal(started.code, 0);
+  assert.doesNotMatch(started.stdout, /systemMessage/);
+  assert.ok(!unfold.received.some(request => request.path === '/api/auth/editor'), 'no browser sign-in was started');
+  assert.deepEqual(unfold.received.map(request => [request.path, request.auth]).filter(([path]) => path !== '/api/auth/editor/exchange'), [['/api/linked-sessions/events', `Bearer ${tokenB}`]]);
+  const stored = JSON.parse(await readFile(join(dir, 'data', 'credentials.json'), 'utf8'))[unfold.url];
+  assert.deepEqual(stored, { token: tokenB, expiresAt: '2099-01-01T00:00:00Z', user: 'ada', familyExpiresAt: '2099-03-01T00:00:00Z' });
 });

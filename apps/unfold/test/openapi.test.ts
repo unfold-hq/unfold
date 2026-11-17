@@ -4,6 +4,7 @@ import test from 'node:test';
 import { Validator } from '@seriousme/openapi-schema-validator';
 import { parse } from 'yaml';
 import { delegatedRoutes } from '../src/auth.ts';
+import { readerRoute } from '../src/cost-export-readers.ts';
 import { isSignIn, personLimits } from '../src/rate-limits.ts';
 import { openApiDocument } from '../src/http.ts';
 import { defaultRateLimits, rateLimitSettings } from '../src/rate-limits.ts';
@@ -237,7 +238,7 @@ test('http.ts hands requests only to the route modules this test reads', () => {
 test('each operation names its role, its credentials and the mutation header the code requires', () => {
   const ids = new Set<string>();
   const problems: string[] = [];
-  const exempt = new Set(['/api/auth/editor', '/api/auth/editor/{code}', '/api/ofrep/v1/evaluate/flags', '/api/ofrep/v1/evaluate/flags/{ofrepKey}', '/api/intake/{intakeSourceId}', '/api/notifications/channels/slack/interactions']);
+  const exempt = new Set(['/api/auth/editor', '/api/auth/editor/exchange', '/api/auth/editor/{code}', '/api/ofrep/v1/evaluate/flags', '/api/ofrep/v1/evaluate/flags/{ofrepKey}', '/api/intake/{intakeSourceId}', '/api/notifications/channels/slack/interactions']);
   for (const { path, method, operation } of operations()) {
     const name = `${method.toUpperCase()} ${path}`;
     if (!operation.operationId || ids.has(operation.operationId)) problems.push(`${name}: operationId missing or repeated`);
@@ -254,6 +255,9 @@ test('each operation names its role, its credentials and the mutation header the
     const delegated = security.some(entry => 'mcpDelegated' in entry);
     const reached = samples(path).every(sample => delegatedRoutes.some(([allowed, pattern]) => allowed === method.toUpperCase() && pattern.test(sample)));
     if (delegated !== reached) problems.push(`${name}: ${reached ? 'auth.ts lets the delegated unfold-mcp credential reach it' : 'auth.ts does not let the delegated unfold-mcp credential reach it'}`);
+    const readable = security.some(entry => 'costExportReader' in entry);
+    const read = samples(path).every(sample => readerRoute(method.toUpperCase(), sample));
+    if (readable !== read) problems.push(`${name}: ${read ? 'cost-export-readers.ts lets a reader reach it' : 'cost-export-readers.ts does not let a reader reach it'}`);
   }
   assert.deepEqual(problems, []);
 });

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "pair": {
+    "forge": "github",
+    "forgeName": "GitHub",
+    "tracker": "clickup",
+    "trackerName": "ClickUp"
+  },
+  "steps": [
+    {
+      "id": "connect-github",
+      "stage": 2,
+      "record": "Ploeg's connection contract (ADR-0184 amendment)",
+      "read": null,
+      "release": null
+    },
+    {
+      "id": "register-repositories",
+      "stage": 3,
+      "record": "Ploeg ADR-0193",
+      "read": "targets",
+      "release": null
+    },
+    {
+      "id": "connect-clickup",
+      "stage": 4,
+      "record": "Ploeg's connection contract (ADR-0184 amendment)",
+      "read": null,
+      "release": null
+    },
+    {
+      "id": "prepare-repository",
+      "stage": 7,
+      "record": "Ploeg ADR-0194",
+      "read": null,
+      "release": null
+    },
+    {
+      "id": "bind-lists",
+      "stage": 9,
+      "record": "Ploeg ADR-0186",
+      "read": "tracker-bindings",
+      "release": null
+    }
+  ],
+  "secondForge": {
+    "record": "Ploeg ADR-0192",
+    "release": null
+  }
+}

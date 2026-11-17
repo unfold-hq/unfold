@@ -1668,6 +1668,24 @@ export class PloegClient {
     }]);
   }
 
+  /**
+   * Whether this Ploeg serves an onboarding step, learned from the step's operator read route (ADR-0044): true when
+   * the GET answers, false on 404, null when Ploeg could not be asked. It only ever sends a GET, so a step is never
+   * probed with a write. The demo serves none of them.
+   */
+  async serves(user: User, route: string, fresh = false): Promise<boolean | null> {
+    this.connected(user);
+    if (this.demo) return false;
+    if (!/^[a-z][a-z-]{0,63}$/.test(route)) throw new Error(`${route} is not an operator read route`);
+    const answer = { status: 0 };
+    try { await this.request(route, fresh, { added: true, answer }); return true; }
+    catch (error) {
+      if (answer.status >= 200 && answer.status < 300) return true;
+      if (error instanceof PloegError && error.code === 'ploeg_unsupported') return false;
+      return null;
+    }
+  }
+
   private async refusals(user: User, fresh: boolean): Promise<PloegRefusal[]> {
     if (this.demo) return structuredClone(ploegDemo.refusals.filter(entry => this.allowed(user, entry.team)));
     let data: Record<string, unknown>;

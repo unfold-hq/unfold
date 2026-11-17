@@ -6,9 +6,9 @@ import { request, TaskError } from './task-providers/shared.ts';
 import type { PloegRoute } from './ploeg.ts';
 import { canHandOff, validateTaskSources, type TaskSourceConfig, type TaskTarget } from './tasks.ts';
 import { setupTarget } from './task-setup.ts';
-import { defaultTenant, validTenancyId } from './tenancy.ts';
+import { defaultTenant, ownership, validTenancyId } from './tenancy.ts';
 import { reaches } from './tenant-scope.ts';
-import { ClientProjects, ensureIntegrationSchema } from './integration-store.ts';
+import { ClientProjects, ensureIntegrationSchema, mirrorTrackerConnection, unmirrorTrackerConnection } from './integration-store.ts';
 import { StoredRepositories } from './stored-repositories.ts';
 
 /** A tracker account Unfold acts as on one tracker origin for one Tenant: an ADR-0048 Integration Account with role `tracker`. Its token is kept apart, encrypted. */
@@ -52,6 +52,7 @@ export class TrackerConnections {
   private readonly config: AppConfig;
   private readonly options: Options;
   private readonly listeners: ((secret: string) => void)[] = [];
+  private readonly synced: (() => void)[] = [];
   private routes: PloegRoute[] = [];
   private readRoutes: (() => Promise<PloegRoute[]>) | undefined;
   /** Each Tenant's Client Projects, Own work among them. */
@@ -63,7 +64,8 @@ export class TrackerConnections {
     this.store = store;
     this.config = config;
     this.options = options;
-    ensureIntegrationSchema(store.db, this.now());
+    const reconciled = ensureIntegrationSchema(store.db, this.now());
+    if (reconciled.toIntegrationAccounts || reconciled.toTrackerConnections || reconciled.refreshed || reconciled.renamedRepositories) this.log('tracker_connections.reconciled', reconciled);
     this.projects = new ClientProjects(store.db, config);
     this.repositories = new StoredRepositories(store.db, config, this.projects, { enforced: options.enforced, manages: (user, tenant) => this.manages(user, tenant), sees: (user, tenant) => this.sees(user, tenant), now: () => this.now(), log: (event, fields) => this.log(event, fields) });
   }
@@ -122,10 +124,25 @@ export class TrackerConnections {
   private shadowing(source: ConnectionSource, connection: TrackerConnection): TaskSourceConfig | undefined {
     return (this.config.taskSources ?? []).find(entry => !entry.connection && (entry.id === source.id || (entry.provider === connection.provider && entry.baseUrl === connection.baseUrl && entry.project === source.project)));
   }
+  /**
+   * Whether a saved source is used. Its repository is missing when none has its id, when that repository belongs to
+   * another Tenant or Client than the source, or when the stored repository it was saved against is not in use, even
+   * if a configured repository now has the same id.
+   */
   private state(source: ConnectionSource, connection: TrackerConnection): SourceState {
     if (this.shadowing(source, connection)) return 'shadowed';
-    return this.config.repositories.some(repository => repository.id === source.repositoryId) ? 'active' : 'repository_missing';
+    const saved = this.repositories.repository(source.repositoryId);
+    const repository = this.config.repositories.find(entry => entry.id === source.repositoryId);
+    if (!repository || (saved && (!repository.stored || saved.tenant !== source.tenant || this.repositories.state(saved) !== 'active'))) return 'repository_missing';
+    const owner = ownership(repository);
+    return owner.tenant === source.tenant && (owner.client === undefined || owner.client === source.client) ? 'active' : 'repository_missing';
   }
+
+  /** Calls `listener` after each sync, so what reads `config.repositories` and `config.taskSources` can rebuild its indexes. */
+  onSync(listener: () => void): void { this.synced.push(listener); }
+
+  /** Lets stored repositories join `config.repositories`, or takes them out, and syncs when that changes. */
+  joinStoredRepositories(on: boolean): void { if (this.repositories.join(on)) this.sync(); }
 
   /** Reads Ploeg's static routes with `read` from now on, so {@link TrackerConnections.refreshRoutes} can give saved sources their Ploeg target. */
   useRoutes(read: () => Promise<PloegRoute[]>): void { this.readRoutes = read; }
@@ -167,6 +184,7 @@ export class TrackerConnections {
         ...(target ? { ploeg: { target } } : {}), tenant: source.tenant, ...(source.client ? { client: source.client } : {}), connection: connection.id,
       });
     }
+    for (const listener of this.synced) listener();
   }
 
   private guide(provider: string): { adapter: TaskProviderAdapter; guide: ServiceAccountGuide; root: string } {
@@ -228,6 +246,7 @@ export class TrackerConnections {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) VALUES(?,?,'tracker',?,?,'',?,?)").run(connection.id, tenant, connection.provider, root, at, JSON.stringify(connection));
+      mirrorTrackerConnection(this.db, connection, JSON.stringify(connection));
       this.store.setSecret(secretId(connection.id), credential);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -241,7 +260,12 @@ export class TrackerConnections {
     const { credential, account } = await this.verify(connection.provider, connection.baseUrl, input.token);
     const at = this.now();
     const updated: TrackerConnection = { ...connection, ...(account ? { account } : {}), tokenSetAt: at, updatedAt: at, updatedBy: user.name };
-    this.db.prepare('UPDATE integration_accounts SET body=? WHERE id=?').run(JSON.stringify(updated), id);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('UPDATE integration_accounts SET body=? WHERE id=?').run(JSON.stringify(updated), id);
+      mirrorTrackerConnection(this.db, updated, JSON.stringify(updated));
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     this.store.setSecret(secretId(id), credential);
     for (const listener of this.listeners) listener(credential.token);
     this.sync();
@@ -255,6 +279,7 @@ export class TrackerConnections {
     if (using.length) throw new TaskError(409, 'connection_in_use', `Remove ${using.map(source => source.name).join(', ')} first; ${using.length === 1 ? 'it reads' : 'they read'} with this connection.`);
     this.store.deleteSecret(secretId(id));
     this.db.prepare('DELETE FROM integration_accounts WHERE id=?').run(id);
+    unmirrorTrackerConnection(this.db, id);
   }
 
   /** Checks the connection's own token with one cheap read and changes nothing. A refusal is a `problem`, not an error. */

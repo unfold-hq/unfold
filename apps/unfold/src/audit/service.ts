@@ -48,6 +48,8 @@ export type AuditTrailOptions = {
 };
 
 const person = (user: User | StoredUser): AuditPerson => ({ id: user.id, name: user.name, role: user.role, ...(user.memberships ? { memberships: user.memberships } : {}) });
+/** The actor as one Tenant's chain records it: only the memberships the person holds in that Tenant. */
+const actorIn = (actor: AuditActor, tenant: string): AuditActor => actor.user?.memberships ? { ...actor, user: { ...actor.user, memberships: actor.user.memberships.filter(held => held.tenant === tenant) } } : actor;
 const effectiveMemberships = (user: StoredUser): Membership[] => user.passwordHash === '' ? user.memberships ?? [] : defaultMemberships(user.role);
 const tokenUid = (token: string): string => createHash('sha256').update(token).digest('hex').slice(0, 32);
 const personal = new Set<AuditFact['kind']>(['sign_in', 'sign_out', 'credential', 'account', 'role']);
@@ -115,8 +117,7 @@ export class AuditTrail {
   record(input: AuditInput): StoredAuditRecord[] {
     try {
       const entry: AuditEntry = { fact: input.fact, actor: input.actor ?? {}, ...(input.origin ? { origin: input.origin } : {}), at: input.at ?? this.now() };
-      const event = ocsfEvent(entry);
-      const stored = this.tenantsFor(input).map(tenant => this.chain.append(tenant, event));
+      const stored = this.tenantsFor(input).map(tenant => this.chain.append(tenant, ocsfEvent({ ...entry, actor: actorIn(entry.actor, tenant) })));
       this.queueExport(1000);
       return stored;
     } catch (error) {

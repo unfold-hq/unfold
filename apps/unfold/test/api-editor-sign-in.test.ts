@@ -100,7 +100,7 @@ test('an approved editor collects its own credential once, uses it as a bearer t
   assert.equal(listed.status, 200);
   assert.equal(listed.body.editors.length, 1);
   const [editor] = listed.body.editors;
-  assert.deepEqual(Object.keys(editor).sort(), ['createdAt', 'expiresAt', 'id', 'idleExpiresAt', 'label', 'lastUsedAt', 'scope']);
+  assert.deepEqual(Object.keys(editor).sort(), ['createdAt', 'expiresAt', 'familyExpiresAt', 'id', 'idleExpiresAt', 'label', 'lastUsedAt', 'scope']);
   assert.equal(editor.scope, 'editor');
   assert.equal(JSON.stringify(listed.body).includes(token), false);
   const forged = await request(server.url, `/api/editor-credentials/${editor.id}`, { method: 'DELETE', cookie: browser.cookie, csrf: false });
