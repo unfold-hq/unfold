@@ -407,7 +407,9 @@ terms:
       repositories use it. It grants nothing on its own, and it is not part of
       a source's or repository's identity. Not the Settings → Connections page,
       which checks each board's and repository's wiring. Decided in system
-      ADR-0048; not implemented yet.
+      ADR-0048. Unfold keeps them keyed by Tenant, provider, instance and the
+      installation or account id, each with a role, tracker or forge; tracker
+      connections added from the screen are the first ones.
     see_also: [Tenant, Client Project, Repository Grant]
   - name: Client Project
     context: Offering
@@ -417,12 +419,23 @@ terms:
       bundles its tracker sources, its Repository Grants, its Routing Rules, its
       default Team and its budget: a share of the Client Budget, or of the
       Agency Budget for the Agency's own work. A Work Item takes its Client and
-      Client Project from its origin. Decided in system ADR-0048; not
-      implemented yet.
+      Client Project from its origin. Decided in system ADR-0048. Unfold keeps
+      them per Tenant; Own work is the only one it makes so far.
     not_to_be_confused_with:
       - term: Scope
         note: A tracker's own container, such as a Vikunja or Jira project.
-    see_also: [Client, Integration Account, Repository Grant, Work Item]
+    see_also: [Client, Integration Account, Repository Grant, Work Item, Own work]
+  - name: Own work
+    context: Offering
+    owner: unfold
+    definition: >
+      The Client Project without a Client that each Tenant has for the
+      Agency's own work. Unfold makes it the first time a repository or a
+      source without a Client is added from the screen, grants every such
+      repository to it and puts every such source in it. The screens show
+      Client Projects only once the Tenant has a Client.
+    synonyms: [default Client Project]
+    see_also: [Client Project, Repository Grant, Tenant]
   - name: Repository Grant
     context: Offering
     owner: unfold
@@ -430,7 +443,8 @@ terms:
       Permission for a Client Project to route work to a repository its Tenant
       owns. Several Client Projects may hold a grant on one repository, such as
       a shared library; each Client still sees only its own Work Items on it.
-      Decided in system ADR-0048; not implemented yet.
+      Decided in system ADR-0048. Unfold records a grant to Own work for each
+      repository added from the screen; enforcement does not check grants yet.
     see_also: [Client Project, Client, Work Target]
   - name: Work Item Link
     context: Work

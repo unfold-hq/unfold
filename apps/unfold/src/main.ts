@@ -79,7 +79,7 @@ export async function createApplication(config: AppConfig, options: { runtimes?:
     store.close();
     await errors.flush();
   }
-  return { server, store, engine, agentHost, reports, errors, tripwire, ploegCompatibility, close, startCardSweeps, startVolumeRetention, recoveredSessions };
+  return { server, store, engine, connections, agentHost, reports, errors, tripwire, ploegCompatibility, close, startCardSweeps, startVolumeRetention, recoveredSessions };
 }
 
 export const shutdownDeadlineMs = 10_000;

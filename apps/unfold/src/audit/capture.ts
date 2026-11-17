@@ -78,6 +78,9 @@ const entityRules: readonly EntityRule[] = [
   { method: 'POST', pattern: /^\/api\/tracker-connections\/([^/]+)\/sources$/, entity: 'Task source', action: 'create', change: 'added_from_screen', tenant: 'owner', uid: 0 },
   { method: 'PATCH', pattern: /^\/api\/tracker-connections\/([^/]+)\/sources\/([^/]+)$/, entity: 'Task source', action: 'update', tenant: 'owner', uid: 2 },
   { method: 'DELETE', pattern: /^\/api\/tracker-connections\/([^/]+)\/sources\/([^/]+)$/, entity: 'Task source', action: 'delete', tenant: 'owner', uid: 2 },
+  { method: 'POST', pattern: /^\/api\/repositories$/, entity: 'Repository', action: 'create', change: 'added_from_screen', tenant: 'body' },
+  { method: 'PATCH', pattern: /^\/api\/repositories\/([^/]+)$/, entity: 'Repository', action: 'update', tenant: 'owner' },
+  { method: 'DELETE', pattern: /^\/api\/repositories\/([^/]+)$/, entity: 'Repository', action: 'delete', tenant: 'owner' },
 ];
 
 function namedTenant(request: TapRequest, from: 'body' | 'query'): string[] | undefined {

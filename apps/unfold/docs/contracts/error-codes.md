@@ -312,6 +312,11 @@ Codes Ploeg sends that Unfold does not name here pass through with Ploeg's own m
 | `connection_in_use` | 409 | Task sources still read with this tracker connection, so it cannot be removed. | Remove the task sources the message names first, then remove the connection. |
 | `source_exists` | 409 | Another task source already reads this project. | Use the task source the message names, or remove it first. |
 | `source_read_only` | 409 | This task source is in the server configuration, so it cannot be changed or removed from the screen. | Ask an administrator to change the server configuration. |
+| `repository_invalid` | 400, 409 | A field of the repository is missing, holds a value Unfold does not accept, or goes over a limit. | Correct the value the message names and send it again. |
+| `repository_exists` | 409 | Unfold already has a repository with this forge host and owner/name. | Use the repository that is there, or remove it first. |
+| `repository_not_found` | 404 | There is no such repository, or it is outside what your account may see. | Reload the page to see the repositories there are. |
+| `repository_read_only` | 409 | This repository is in the server configuration, so it cannot be changed or removed from the screen. | Ask an administrator to change the server configuration. |
+| `repository_in_use` | 409 | Task sources added from the screen still use this repository, so it cannot be removed. | Point the task sources the message names at another repository or remove them first, then remove the repository. |
 | `task_timeout` | 504 | The tracker did not answer in time. | Try again in a minute. |
 | `task_unreachable` | 502 | The tracker could not be reached. | Try again in a minute. If it keeps failing, an administrator must check its address. |
 | `task_redirect_refused` | 502 | The tracker redirected Unfold elsewhere, which Unfold refuses. | An administrator must update the tracker's API address. |

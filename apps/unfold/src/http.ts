@@ -310,6 +310,9 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });
   const secrets = knownSecrets(config);
   trackerConnections.onSecret(secret => { if (!secrets.includes(secret)) secrets.push(secret); engine.redact(secret); });
+  const auditActor = (user: User) => ({ user: { id: user.id, name: user.name, role: user.role, ...(user.memberships ? { memberships: user.memberships } : {}) } });
+  trackerConnections.projects.onCreate((project, user) => audit.record({ actor: auditActor(user), tenants: [project.tenant], fact: { kind: 'entity', action: 'create', entity: { type: 'Client Project', uid: project.id, name: project.name, data: { change: 'created_on_first_use' } }, outcome: 'success' } }));
+  trackerConnections.repositories.onGrant(change => audit.record({ actor: auditActor(change.user), tenants: [change.repository.tenant], fact: { kind: 'entity', action: change.action, entity: { type: 'Repository Grant', uid: `${change.project.id}/${change.repository.id}`, name: `${change.repository.key} granted to ${change.project.name}` }, outcome: 'success' } }));
   const askDemo = config.mode === 'demo' && (!config.ploeg || config.ploeg.demo === true);
   const askAuthority: AskAuthority | undefined = config.ploeg && !askDemo ? {
     admit: (user, id, askId, question) => ploeg.admitAsk(user, id, askId, question),
@@ -814,6 +817,22 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           if (method === 'PATCH') { const source = trackerConnections.updateSource(user, connectionId, sourceId, await body(req)); await trackerConnections.refreshRoutes(); return json(res, 200, sanitize({ source })); }
           if (method === 'DELETE') { trackerConnections.removeSource(user, connectionId, sourceId); return json(res, 200, { removed: sourceId }); }
           fault(405, 'method', 'Change a task source with PATCH or remove it with DELETE.');
+        }
+        if (path === '/api/repositories') {
+          if (method === 'GET') return json(res, 200, sanitize({ repositories: trackerConnections.repositories.list(user), manageTenants: trackerConnections.managedTenants(user) }));
+          if (method === 'POST') { const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); return json(res, 201, sanitize({ repository })); }
+          fault(405, 'method', 'List stored repositories with GET and add one with POST.');
+        }
+        const repositoryRoute = path.match(/^\/api\/repositories\/([a-z0-9][a-z0-9-]{0,63})$/);
+        if (repositoryRoute) {
+          const repositoryId = repositoryRoute[1];
+          if (method === 'PATCH') { const repository = trackerConnections.repositories.update(user, repositoryId, await body(req)); trackerConnections.sync(); return json(res, 200, sanitize({ repository })); }
+          if (method === 'DELETE') { trackerConnections.repositories.remove(user, repositoryId, id => trackerConnections.sources().filter(source => source.repositoryId === id).map(source => source.name)); trackerConnections.sync(); return json(res, 200, { removed: repositoryId }); }
+          fault(405, 'method', 'Change a stored repository with PATCH or remove it with DELETE.');
+        }
+        if (method === 'GET' && path === '/api/client-projects') {
+          const tenants = trackerConnections.reachedTenants(user);
+          return json(res, 200, sanitize({ tenants: tenants.map(tenant => ({ tenant, visible: trackerConnections.projects.visible(tenant), projects: trackerConnections.projects.list(tenant) })) }));
         }
         const checkRoute = path.match(/^\/api\/task-sources\/([a-z0-9-]+)\/check$/);
         if (method === 'GET' && checkRoute) {

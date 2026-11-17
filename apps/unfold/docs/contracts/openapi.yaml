@@ -1500,6 +1500,143 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
         '502': { $ref: '#/components/responses/BadGateway' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/repositories:
+    get:
+      tags: [Tasks]
+      operationId: listStoredRepositories
+      summary: 'Repositories people added from the screen'
+      description: 'The stored repositories of the Tenants the person reaches, each with its `state`, its Repository Grants and whether the person may change it. `shadowed` means a repository in the server configuration has the same key (forge host and `owner/name`) or id: the configured one is used and the stored one is kept. `manageTenants` lists the Tenants whose repositories the person may add. Repositories in the server configuration are not listed here.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: '`{repositories, manageTenants}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [repositories, manageTenants]
+                properties:
+                  repositories: { type: array, items: { $ref: '#/components/schemas/StoredRepository' } }
+                  manageTenants: { type: array, items: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Tasks]
+      operationId: createStoredRepository
+      summary: 'Add a repository and grant it to Own work'
+      description: 'Stores the repository for `tenant` and grants it to the Tenant''s Own work, which is created on first use. It then joins the repositories the workbench uses, after the configured ones. `url` is an HTTPS forge address without credentials, query or fragment (400 `repository_invalid`); its key is the forge host and `owner/name`, lower-cased and without `.git`. 409 `repository_exists` when Unfold already has a repository with that key. Nothing is sent to Ploeg or the forge. 403 for anyone but an administrator, and while tenancy is enforced for an administrator who is not an Admin of `tenant`.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, example: 'https://github.com/acme/shop' }
+                name: { type: string, maxLength: 100, description: 'Defaults to `owner/name`.' }
+                description: { type: string, maxLength: 500 }
+                baseBranch: { type: string, default: main }
+                tenant: { type: string, description: 'The owning Tenant; `default` when left out.' }
+                integrationAccount: { type: string, description: 'A forge Integration Account of the same Tenant the repository is reached through.' }
+      responses:
+        '201':
+          description: '`{repository}`'
+          content:
+            application/json:
+              schema: { type: object, required: [repository], properties: { repository: { $ref: '#/components/schemas/StoredRepository' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/repositories/{storedRepositoryId}:
+    parameters:
+      - { name: storedRepositoryId, in: path, required: true, example: shop, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' } }
+    patch:
+      tags: [Tasks]
+      operationId: updateStoredRepository
+      summary: 'Change a stored repository'
+      description: 'Changes `name`, `description` or `baseBranch`; the URL and key stay. 409 `repository_read_only` for a repository in the server configuration; 404 `repository_not_found`, also for one of a Tenant the person does not reach.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 100 }
+                description: { type: string, maxLength: 500 }
+                baseBranch: { type: string }
+      responses:
+        '200':
+          description: '`{repository}`'
+          content:
+            application/json:
+              schema: { type: object, required: [repository], properties: { repository: { $ref: '#/components/schemas/StoredRepository' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Tasks]
+      operationId: removeStoredRepository
+      summary: 'Remove a stored repository and its Repository Grants'
+      description: '409 `repository_in_use` while saved task sources still use it; 409 `repository_read_only` for one in the server configuration; 404 `repository_not_found`.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{removed}`'
+          content:
+            application/json:
+              schema: { type: object, required: [removed], properties: { removed: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/client-projects:
+    get:
+      tags: [Tasks]
+      operationId: listClientProjects
+      summary: 'The Client Projects of the Tenants the person reaches'
+      description: 'Per Tenant, its Client Projects with Own work first, and `visible`: whether the screens show Client Projects, which they do only once the Tenant has a Client.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: '`{tenants}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [tenants]
+                properties:
+                  tenants:
+                    type: array
+                    items:
+                      type: object
+                      required: [tenant, visible, projects]
+                      properties:
+                        tenant: { type: string }
+                        visible: { type: boolean }
+                        projects: { type: array, items: { $ref: '#/components/schemas/ClientProject' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/tracker-connections:
     get:
       tags: [Tasks]
@@ -7715,6 +7852,48 @@ components:
         updatedAt: { type: string, format: date-time }
         updatedBy: { type: string }
         sources: { type: array, items: { allOf: [{ $ref: '#/components/schemas/ConnectionSource' }, { type: object, required: [state], properties: { state: { type: string, enum: [active, shadowed, repository_missing] } } }] } }
+    StoredRepository:
+      type: object
+      description: 'A repository people added from the screen. It belongs to its Tenant and reaches work through Repository Grants. Never carries a credential.'
+      required: [id, key, url, name, description, baseBranch, tenant, state, manage, grants, createdAt, createdBy, updatedAt, updatedBy]
+      properties:
+        id: { type: string }
+        key: { type: string, description: 'Forge host and `owner/name`, lower-cased and without `.git`.', example: github.com/acme/shop }
+        url: { type: string }
+        name: { type: string }
+        description: { type: string }
+        baseBranch: { type: string }
+        tenant: { type: string }
+        integrationAccount: { type: string }
+        state: { type: string, enum: [active, shadowed] }
+        manage: { type: boolean, description: 'Whether the caller may change or remove it.' }
+        grants:
+          type: array
+          items:
+            type: object
+            required: [clientProject, name, grantedAt, grantedBy]
+            properties:
+              clientProject: { type: string }
+              name: { type: string }
+              grantedAt: { type: string, format: date-time }
+              grantedBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
+    ClientProject:
+      type: object
+      description: 'A grouping inside one Client, or the Tenant''s Own work when it has no Client (system ADR-0048).'
+      required: [id, tenant, slug, name, isDefault, createdAt, createdBy]
+      properties:
+        id: { type: string }
+        tenant: { type: string }
+        client: { type: string }
+        slug: { type: string }
+        name: { type: string, example: Own work }
+        isDefault: { type: boolean, description: 'True for Own work.' }
+        createdAt: { type: string, format: date-time }
+        createdBy: { type: string }
     ConnectionSource:
       type: object
       description: 'A task source saved under a tracker connection.'
@@ -7728,6 +7907,7 @@ components:
         executionOwner: { type: string, enum: [ploeg, interactive] }
         tenant: { type: string }
         client: { type: string }
+        clientProject: { type: string, description: 'The Client Project a source without a Client belongs to: its Tenant''s Own work until it is moved.' }
         createdAt: { type: string, format: date-time }
         createdBy: { type: string }
         updatedAt: { type: string, format: date-time }

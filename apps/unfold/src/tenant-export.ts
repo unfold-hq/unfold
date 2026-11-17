@@ -118,8 +118,11 @@ export const tableEntities: readonly TableEntity[] = [
   { entity: 'outbound-events', table: 'outbound_events', scope: byTenant('tenant'), json: ['body'], description: 'Webhook events still in the outbox, as the CloudEvents they are sent as. They are signed when sent, so no secret is stored with them.' },
   { entity: 'outbound-deliveries', table: 'outbound_deliveries', scope: { by: 'parent', parent: 'outbound-subscriptions', column: 'subscription_id' }, description: 'Each webhook delivery to a subscription still in the delivery log: its status, attempts and the receiver\'s last answer.' },
   { entity: 'notify-slack-links', table: 'notify_slack_links', scope: person('user_id'), description: 'The Slack account each person linked for notifications: workspace and member id. No token.' },
-  { entity: 'tracker-connections', table: 'tracker_connections', scope: byTenant('tenant'), json: ['body'], description: 'Tracker connections people added from the screen: the tracker, its API root, the account Unfold acts as there, and who added it and when. No token: an administrator pastes one again at the destination.' },
-  { entity: 'tracker-connection-sources', table: 'tracker_connection_sources', scope: byTenant('tenant'), json: ['body'], description: 'Task sources people added from the screen under a tracker connection: the project, repository, execution owner, Tenant and Client. Sources from the server configuration are in task-sources.' },
+  { entity: 'client-projects', table: 'client_projects', scope: byTenant('tenant'), json: ['body'], description: 'The Client Projects of the Tenant (system ADR-0048): Own work, the one without a Client, and any made for a Client, with who made each and when.' },
+  { entity: 'integration-accounts', table: 'integration_accounts', scope: byTenant('tenant'), json: ['body'], description: 'Integration Accounts people added from the screen (system ADR-0048), such as tracker connections: the role (tracker or forge), the provider, its API root, the account Unfold acts as there, and who added it and when. No token: an administrator pastes one again at the destination.' },
+  { entity: 'tracker-connection-sources', table: 'tracker_connection_sources', scope: byTenant('tenant'), json: ['body'], description: 'Task sources people added from the screen under a tracker connection: the project, repository, execution owner, Tenant, Client and the Client Project a source without a Client belongs to. Sources from the server configuration are in task-sources.' },
+  { entity: 'stored-repositories', table: 'repositories', scope: byTenant('tenant'), json: ['body'], collect: 'id', description: 'Repositories people added from the screen: the forge URL and its key (forge host and owner/name), name, base branch and the Integration Account it was added through. No credential. Repositories from the server configuration are in repositories.' },
+  { entity: 'repository-grants', table: 'repository_grants', scope: { by: 'parent', parent: 'stored-repositories', column: 'repository_id' }, description: 'Which Client Project may route work to which stored repository, and who granted it when.' },
 ];
 
 /** Every table Unfold keeps that the bundle leaves out. Secrets are never exported. */
@@ -447,7 +450,7 @@ export async function buildTenantExport(sources: ExportSources, tenant: string, 
   await finish(users, { name: 'users', schemaVersion: 1, sources: [...curatedSources.users], scope: scope.enforced ? 'people with a membership of the Tenant' : 'every person', description: String(curatedSchemas.users.description) }, curatedSchema('users'));
 
   const repositories = open('repositories');
-  for (const entry of sources.config.repositories ?? []) if (!scope.enforced || ownership(entry).tenant === tenant) await repositories.write(exportedRepository(entry));
+  for (const entry of sources.config.repositories ?? []) if (!entry.stored && (!scope.enforced || ownership(entry).tenant === tenant)) await repositories.write(exportedRepository(entry));
   await finish(repositories, { name: 'repositories', schemaVersion: 1, sources: ['configuration: repositories'], scope: scopeLabel('config'), description: String(curatedSchemas.repositories.description) }, curatedSchema('repositories'));
 
   const taskSources = open('task-sources');

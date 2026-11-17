@@ -114,7 +114,17 @@ For a tracker whose adapter offers it, ClickUp today, an administrator adds sour
 
 **Its Ploeg target.** A saved source that Ploeg executes takes its [import target](#import-the-existing-ploeg-work-item) from Ploeg's static route for its project: the routed repository whose owner, name and base branch match the source's repository. Unfold reads the routes from Ploeg's connections read at start-up and each time a source is saved or changed. When no route covers the project, the source has no target and an import is refused with `task_binding_unconfigured`, saying so; route the project in Ploeg's configuration, then save the source again.
 
-**Tenant export.** The connections and their sources are exported with their Tenant as `tracker-connections` and `tracker-connection-sources`; their tokens are not. After an import an administrator pastes each token again; until then the connection says its token is missing.
+**Where they are kept.** A connection is an Integration Account (system [ADR-0048](../../../../docs/adr/adr-0048-projects-share-accounts-and-repositories-within-a-tenant-and-a-work-item-has-one-origin.md)) in the `integration_accounts` table, with the role `tracker`, keyed by Tenant, provider, API root and account id. A store from before this table is migrated on the first start: each connection keeps its id and the token stays sealed under the same id. A saved source without a Client belongs to its Tenant's **Own work**, the Client Project without a Client, which Unfold makes on first use.
+
+**Tenant export.** The connections and their sources are exported with their Tenant as `integration-accounts` and `tracker-connection-sources`; their tokens are not. After an import an administrator pastes each token again; until then the connection says its token is missing.
+
+### Repositories added from the screen
+
+An administrator, and while `tenancy.enforce` is on an Admin of the Tenant, can store a repository with `POST /api/repositories` and an HTTPS forge URL such as `https://github.com/acme/shop`. Its key is the forge host and `owner/name`, lower-cased and without `.git`, the same key [who owns a source and a repository](#who-owns-a-source-and-a-repository) uses; Unfold refuses a second repository with the same key (`repository_exists`). The repository belongs to the Tenant and is granted to the Tenant's Own work, which is made on first use. It joins the configured repositories after them, so saved sources, hand-off and sessions can use it, and `PATCH` and `DELETE /api/repositories/{id}` change or remove it; removing is refused while a saved source uses it (`repository_in_use`). Storing a repository sends nothing to Ploeg or the forge: Ploeg still works only on the targets it knows.
+
+A repository in the configuration wins. When one with the same key or id is added there later, the stored one is marked `shadowed`, kept and not used; a configured repository cannot be changed from the screen (`repository_read_only`). Another Tenant's repository answers 404. `GET /api/client-projects` lists each Tenant's Client Projects with `visible`, which is false until the Tenant has a Client, so the screens show no project choice before then.
+
+Each change is an Entity Management record in the Tenant's audit trail: `Repository` created, updated or deleted, `Repository Grant` added or removed, and `Client Project` created when Own work is made. The Tenant export carries them as `stored-repositories`, `repository-grants` and `client-projects`; repositories from the configuration stay in `repositories`.
 
 ## Provider recipes
 
