@@ -261,7 +261,7 @@ test('the manifest lists every file with its row count and SHA-256, and every ro
   const bundle = await exported(dir, { ...base(store), flagDocument: () => ({ flags: {} }) });
 
   assert.equal(bundle.manifest.format, 'unfold-tenant-export');
-  assert.equal(bundle.manifest.formatVersion, 1);
+  assert.equal(bundle.manifest.formatVersion, 2);
   assert.equal(bundle.sha256, createHash('sha256').update(await readFile(join(dir, 'bundle.tar.gz'))).digest('hex'));
   const listed = new Set(bundle.manifest.files.map(file => file.path));
   assert.deepEqual([...bundle.members.keys()].filter(name => name !== 'manifest.json').sort(), [...listed].sort(), 'the manifest lists every other member');

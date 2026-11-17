@@ -1183,7 +1183,7 @@ export class Engine {
       }
       const configured = this.config.repositories.find(item => item.id === first.repositoryId)!;
       stage = 'workspace';
-      const access = this.links ? await this.links.access(first.ownerId, configured.url) : undefined;
+      const access = this.links && !configured.stored ? await this.links.access(first.ownerId, configured.url) : undefined;
       const repository = access ? { ...configured, access } : configured;
       const workspace = continuing ? first.workspace! : await this.prepareWorkspace(first, runtime, repository, credential, signal);
       signal.throwIfAborted();

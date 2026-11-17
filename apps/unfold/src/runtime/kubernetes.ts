@@ -186,7 +186,7 @@ export function workspaceManifests(config: AppConfig, session: Session, reposito
           { name: 'GIT_ASKPASS', value: '/clone-auth/askpass' },
           { name: 'GIT_USERNAME', valueFrom: valueFrom('git-username') },
           { name: 'GIT_PASSWORD', valueFrom: valueFrom('git-password') },
-        ] : k.gitSecretName ? [
+        ] : k.gitSecretName && !repository.stored ? [
           { name: 'GIT_ASKPASS', value: '/clone-auth/askpass' },
           { name: 'GIT_USERNAME', valueFrom: { secretKeyRef: { name: k.gitSecretName, key: 'username' } } },
           { name: 'GIT_PASSWORD', valueFrom: { secretKeyRef: { name: k.gitSecretName, key: 'password' } } },
