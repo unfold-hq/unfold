@@ -382,6 +382,19 @@ export class Store {
     return (this.db.prepare('SELECT body FROM asks WHERE asker_id=? ORDER BY created_at DESC, id DESC LIMIT ?').all(askerId, limit) as { body: string }[]).map(row => restoreAsk(row.body));
   }
 
+  /** At most `limit` Asks one person asked from `since` until `until`, newest first. */
+  asksBetween(askerId: string, since: string, until: string, limit: number): Ask[] {
+    return (this.db.prepare('SELECT body FROM asks WHERE asker_id=? AND created_at>=? AND created_at<? ORDER BY created_at DESC, id DESC LIMIT ?').all(askerId, since, until, limit) as { body: string }[]).map(row => restoreAsk(row.body));
+  }
+
+  /** The spend facts of at most `limit` sessions one person owns that changed from `since`, newest change first, without their workspace. */
+  sessionSpendSince(ownerId: string, since: string, limit: number): Pick<Session, 'id' | 'budgetUsd' | 'spentUsd' | 'observedUsd' | 'costStatus' | 'createdAt' | 'updatedAt'>[] {
+    return (this.db.prepare('SELECT body FROM sessions WHERE owner_id=? AND updated_at>=? ORDER BY updated_at DESC, id LIMIT ?').all(ownerId, since, limit) as { body: string }[]).map(row => {
+      const { id, budgetUsd, spentUsd, observedUsd, costStatus, createdAt, updatedAt } = JSON.parse(row.body) as Session;
+      return { id, budgetUsd, spentUsd, observedUsd, costStatus: (costStatus as string) === retiredCostStatus ? 'observed' : costStatus, createdAt, updatedAt };
+    });
+  }
+
   /** Runs one trivial query, proving the database answers without reading or decrypting any stored record. */
   ping(): void { this.db.prepare('SELECT 1').get(); }
 

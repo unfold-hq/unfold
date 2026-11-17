@@ -141,8 +141,39 @@ export const digestSessionLimit = 100;
  * id can widen the matcher.
  */
 export function digestCostQuery(sessionIds: string[], range: string): string {
+  return `sum(max_over_time(claude_code_cost_usage_USD_total{${sessionMatcher(sessionIds)}}[${range}]))`;
+}
+
+/** The PromQL query for the summed tokens of several sessions over `range`, by token type, through the same matcher as {@link digestCostQuery}. */
+export function digestTokensQuery(sessionIds: string[], range: string): string {
+  return `sum by (type) (max_over_time(claude_code_token_usage_tokens_total{${sessionMatcher(sessionIds)}}[${range}]))`;
+}
+
+function sessionMatcher(sessionIds: string[]): string {
   const ids = [...new Set(sessionIds.filter(id => /^[A-Za-z0-9_-]{8,128}$/.test(id)))].slice(0, digestSessionLimit);
-  return `sum(max_over_time(claude_code_cost_usage_USD_total{session_id=~${quoted(ids.join('|'))}}[${range}]))`;
+  return `session_id=~${quoted(ids.join('|'))}`;
+}
+
+/** Tokens by type, as Claude Code counts them. */
+export type TokenCounts = { input: number; output: number; cacheRead: number; cacheCreation: number };
+
+const unreadable = (error: Error, store: string) => `The ${store} ${error.name === 'TimeoutError' ? 'did not answer in time' : error.message.startsWith('answered') ? error.message : 'could not be read'}.`;
+
+/**
+ * Reads the summed API-price estimate and tokens of several sessions from `observability.metricsUrl`, one query each.
+ * Both are null with a reason when no metrics store is configured or it could not be read; no sessions read as zero.
+ */
+export async function readSessionsUsage(observability: Observability, sessionIds: string[], range: string, options: { fetch?: typeof fetch } = {}): Promise<{ costUsd: number | null; tokens: TokenCounts | null; reason: string | null }> {
+  if (!sessionIds.length) return { costUsd: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }, reason: null };
+  if (!observability?.metricsUrl) return { costUsd: null, tokens: null, reason: 'No metrics store is configured, so the cost and tokens are unknown.' };
+  const fetcher = options.fetch ?? fetch;
+  try {
+    const [cost, tokens] = await Promise.all([promQuery(observability.metricsUrl, digestCostQuery(sessionIds, range), fetcher), promQuery(observability.metricsUrl, digestTokensQuery(sessionIds, range), fetcher)]);
+    const byType = (type: string) => whole(tokens.find(entry => entry.labels.type === type)?.value ?? 0);
+    return { costUsd: cost.length ? Math.round(cost[0].value * 10_000) / 10_000 : 0, tokens: { input: byType('input'), output: byType('output'), cacheRead: byType('cacheRead'), cacheCreation: byType('cacheCreation') }, reason: null };
+  } catch (error) {
+    return { costUsd: null, tokens: null, reason: unreadable(error as Error, 'metrics store') };
+  }
 }
 
 /**
@@ -156,7 +187,6 @@ export async function readSessionsCost(observability: Observability, sessionIds:
     const result = await promQuery(observability.metricsUrl, digestCostQuery(sessionIds, range), options.fetch ?? fetch);
     return { costUsd: result.length ? Math.round(result[0].value * 10_000) / 10_000 : 0, reason: null };
   } catch (error) {
-    const failure = error as Error;
-    return { costUsd: null, reason: `The metrics store ${failure.name === 'TimeoutError' ? 'did not answer in time' : failure.message.startsWith('answered') ? failure.message : 'could not be read'}.` };
+    return { costUsd: null, reason: unreadable(error as Error, 'metrics store') };
   }
 }

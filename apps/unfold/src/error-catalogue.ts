@@ -219,6 +219,7 @@ const rows: Record<ErrorArea, readonly Row[]> = {
     ['run_not_running', [409], 'The Run stopped, so its session cannot be recorded.', 'Start the Run again.'],
     ['start_input', [400], 'A field of the start request is missing or too long.', fixInput],
     ['digest_window', [400], 'The digest window is not 7d or 30d.', 'Use window=7d or window=30d.'],
+    ['usage_period', [400], 'The usage period is not month or 30d.', 'Use period=month for this UTC month or period=30d for the last 30 days.'],
     ['work_item_id', [400], 'The Work Item id is not a whole number.', 'Use the id as Unfold shows it, such as 42.'],
     ['handoff_not_linked', [409], 'This session is not linked to that Work Item.', 'Link it first, then hand it off.'],
     ['handoff_context', [400], 'The branch or commit ids sent with the hand-off are not in the form Git uses.', 'Send branch names and full 40-character commit ids, or leave them out.'],

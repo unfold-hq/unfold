@@ -308,6 +308,22 @@ export function createMcpServer(options: McpOptions) {
       },
     },
     {
+      name: 'unfold_my_usage', title: 'My usage',
+      description: 'What your own Asks, workbench sessions and Linked Claude Code sessions cost this UTC month or in the last 30 days, split by source. Linked Claude Code sessions carry Claude Code\'s own estimate at API prices and tokens, not a bill. Only your own usage, whatever your role. Use unfold_spend for a Team\'s spend.',
+      inputSchema: object({ period: string('month (this UTC calendar month) or 30d; default month', { enum: ['month', '30d'] }) }),
+      outputSchema: object({ summary: { type: 'string' }, usage: { type: 'object', description: 'As GET /api/me/usage answers it; a null amount is unknown, never zero' } }, ['summary', 'usage']),
+      async run(args) {
+        const period = args.period ?? 'month';
+        if (!['month', '30d'].includes(period)) throw new UnfoldAnswer(400, 'mcp_argument', 'period must be month or 30d.');
+        const { usage } = await get(`/api/me/usage?period=${period}`);
+        const money = (part: Json) => part.usd === null ? 'not known yet' : `${part.unknown ? 'at least ' : ''}${usd(cents(part.usd))}${part.final ? '' : ', not final yet'}`;
+        const linked = usage.linkedSessions as Json;
+        const estimate = linked.telemetry === 'not_configured' ? 'no telemetry is connected, so no estimate' : linked.estimateUsd === null ? `estimate unknown: ${clip(linked.reason, 300)}` : `about ${usd(cents(linked.estimateUsd))} at API prices`;
+        const summary = `Your usage ${period === 'month' ? 'this month' : 'in the last 30 days'}: ${money(usage.spent)} spent through Unfold (${usage.asks.count} Asks: ${money(usage.asks)}; ${usage.sessions.count} workbench sessions: ${money(usage.sessions)} of ${usd(cents(usage.sessions.budgetUsd))} budget). Linked agent sessions: ${linked.count}, ${estimate}. Work handed to Ploeg is not attributed to you yet.`;
+        return { summary, usage };
+      },
+    },
+    {
       name: 'unfold_digest', title: 'What changed since',
       description: 'What changed in Unfold since a moment: Work Items that started needing you (with the reason and fix), pull requests that became ready for review, new proposals, finished Runs with their outcome and cost, sessions that changed, newly refused tracker tasks, spend and stuck holds, and a separate section on your own agent sessions (sessions, Work Items, commits, AI-written lines, estimated cost). Without since it covers the time since your previous digest, or the last 24 hours the first time. Use it to start a day; use unfold_now for everything that waits regardless of when it changed.',
       inputSchema: object({ since: string('An ISO time, or a span such as 8h, 24h or 7d; default since your previous digest'), remember: { type: 'boolean', description: 'Remember this digest as your previous one; default true' } }),

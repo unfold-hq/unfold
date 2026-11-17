@@ -68,6 +68,8 @@ tags:
     description: 'Run cards, the binder, packs, seasons and card themes.'
   - name: Linked accounts
     description: 'A person''s own GitLab and ClickUp links.'
+  - name: Usage
+    description: 'What a person''s own Asks, sessions and Linked Sessions cost.'
   - name: Notifications
     description: 'A person''s own notifications over ntfy, Web Push, Slack and Microsoft Teams.'
   - name: Billing
@@ -5300,6 +5302,66 @@ paths:
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
+  /api/me/usage:
+    get:
+      tags: [Usage]
+      operationId: getMyUsage
+      summary: 'The signed-in person''s own usage in a period'
+      description: 'Always the caller''s own records, for every role: an administrator gets no one else''s usage here. A null `usd` or `estimateUsd` is unknown, never zero. `month` is the current UTC calendar month; anything but `month` or `30d` answers 400 `usage_period`.'
+      x-unfold-role: viewer
+      security:
+        - sessionCookie: []
+        - editorBearer: []
+        - mcpDelegated: []
+      parameters:
+        - { name: period, in: query, required: false, schema: { type: string, enum: [month, 30d], default: month } }
+      responses:
+        '200':
+          description: '`{usage}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [usage]
+                properties:
+                  usage:
+                    type: object
+                    required: [period, since, until, spent, asks, sessions, linkedSessions, notAttributed]
+                    properties:
+                      period: { type: string, enum: [month, 30d] }
+                      since: { type: string, format: date-time }
+                      until: { type: string, format: date-time }
+                      spent: { $ref: '#/components/schemas/UsageMoney' }
+                      asks:
+                        allOf:
+                          - { $ref: '#/components/schemas/UsageMoney' }
+                          - { type: object, required: [demo, truncated], properties: { demo: { type: integer }, truncated: { type: boolean } } }
+                      sessions:
+                        allOf:
+                          - { $ref: '#/components/schemas/UsageMoney' }
+                          - { type: object, required: [budgetUsd, demo, truncated], properties: { budgetUsd: { type: number }, demo: { type: integer }, truncated: { type: boolean } } }
+                      linkedSessions:
+                        type: object
+                        required: [count, claudeCode, uncosted, estimateUsd, costStatus, tokens, telemetry, reason, truncated]
+                        properties:
+                          count: { type: integer }
+                          claudeCode: { type: integer }
+                          uncosted: { type: integer }
+                          estimateUsd: { type: [number, 'null'] }
+                          costStatus: { type: string, enum: [estimate] }
+                          tokens:
+                            type: [object, 'null']
+                            properties: { input: { type: integer }, output: { type: integer }, cacheRead: { type: integer }, cacheCreation: { type: integer } }
+                          telemetry: { type: string, enum: [connected, not_configured, unreadable] }
+                          reason: { type: [string, 'null'] }
+                          truncated: { type: boolean }
+                      notAttributed:
+                        type: array
+                        items: { type: object, required: [source, reason], properties: { source: { type: string, enum: [ploeg_runs, chats] }, reason: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/me/card-identity:
     get:
       tags: [Cards]
@@ -7567,6 +7629,15 @@ components:
               receiptId: { type: string }
               policySha256: { type: string }
   schemas:
+    UsageMoney:
+      type: object
+      description: 'Money from one source in a period. `usd` sums the known amounts and is null when there are items and none has a known amount; `unknown` counts items without one, so a partial sum is a lower bound. `final` is true only when every amount is known and settled.'
+      required: [count, usd, final, unknown]
+      properties:
+        count: { type: integer }
+        usd: { type: [number, 'null'] }
+        final: { type: boolean }
+        unknown: { type: integer }
     TrackerConnection:
       type: object
       description: 'A tracker account Unfold acts as on one tracker API root for one Tenant. Never carries its token.'
