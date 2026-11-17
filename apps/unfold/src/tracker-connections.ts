@@ -8,11 +8,13 @@ import { canHandOff, validateTaskSources, type TaskSourceConfig, type TaskTarget
 import { setupTarget } from './task-setup.ts';
 import { defaultTenant, validTenancyId } from './tenancy.ts';
 import { reaches } from './tenant-scope.ts';
+import { ClientProjects, ensureIntegrationSchema } from './integration-store.ts';
+import { StoredRepositories } from './stored-repositories.ts';
 
-/** A tracker account Unfold acts as on one tracker origin for one Tenant: the first slice of ADR-0048's Integration Account. Its token is kept apart, encrypted. */
+/** A tracker account Unfold acts as on one tracker origin for one Tenant: an ADR-0048 Integration Account with role `tracker`. Its token is kept apart, encrypted. */
 export type TrackerConnection = { id: string; provider: string; baseUrl: string; tenant: string; account?: string; tokenSetAt?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
-/** A task source a person added from the screen. It reads and hands off with its connection's token. */
-export type ConnectionSource = { id: string; connection: string; name: string; project: string; repositoryId: string; executionOwner: 'interactive' | 'ploeg'; tenant: string; client?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
+/** A task source a person added from the screen. It reads and hands off with its connection's token. Without a Client it belongs to its Tenant's Own work. */
+export type ConnectionSource = { id: string; connection: string; name: string; project: string; repositoryId: string; executionOwner: 'interactive' | 'ploeg'; tenant: string; client?: string; clientProject?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
 /** Why a saved source is not in use: the server configuration already reads its project or uses its id, or its repository is no longer registered. */
 export type SourceState = 'active' | 'shadowed' | 'repository_missing';
 /** A connection as people see it: never its token, only whether one is stored. */
@@ -52,16 +54,18 @@ export class TrackerConnections {
   private readonly listeners: ((secret: string) => void)[] = [];
   private routes: PloegRoute[] = [];
   private readRoutes: (() => Promise<PloegRoute[]>) | undefined;
+  /** Each Tenant's Client Projects, Own work among them. */
+  readonly projects: ClientProjects;
+  /** The repositories Admins added from the screen. */
+  readonly repositories: StoredRepositories;
 
   constructor(store: SecretStore, config: AppConfig, options: Options) {
     this.store = store;
     this.config = config;
     this.options = options;
-    store.db.exec(`
-      CREATE TABLE IF NOT EXISTS tracker_connections (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, provider TEXT NOT NULL, base_url TEXT NOT NULL, created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, provider, base_url));
-      CREATE TABLE IF NOT EXISTS tracker_connection_sources (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL REFERENCES tracker_connections(id), tenant TEXT NOT NULL, client TEXT, created_at TEXT NOT NULL, body TEXT NOT NULL);
-      CREATE INDEX IF NOT EXISTS tracker_connection_sources_connection ON tracker_connection_sources(connection_id);
-    `);
+    ensureIntegrationSchema(store.db, this.now());
+    this.projects = new ClientProjects(store.db, config);
+    this.repositories = new StoredRepositories(store.db, config, this.projects, { enforced: options.enforced, manages: (user, tenant) => this.manages(user, tenant), sees: (user, tenant) => this.sees(user, tenant), now: () => this.now(), log: (event, fields) => this.log(event, fields) });
   }
 
   private get db() { return this.store.db; }
@@ -75,20 +79,24 @@ export class TrackerConnections {
   }
 
   /** Every stored connection, oldest first. */
-  connections(): TrackerConnection[] { return (this.db.prepare('SELECT body FROM tracker_connections ORDER BY created_at, id').all() as { body: string }[]).map(row => JSON.parse(row.body)); }
+  connections(): TrackerConnection[] { return (this.db.prepare("SELECT body FROM integration_accounts WHERE role='tracker' ORDER BY created_at, id").all() as { body: string }[]).map(row => JSON.parse(row.body)); }
   /** One stored connection, or undefined. */
   connection(id: string): TrackerConnection | undefined {
-    const row = this.db.prepare('SELECT body FROM tracker_connections WHERE id=?').get(id) as { body: string } | undefined;
+    const row = this.db.prepare("SELECT body FROM integration_accounts WHERE id=? AND role='tracker'").get(id) as { body: string } | undefined;
     return row ? JSON.parse(row.body) : undefined;
   }
   /** Every saved source, oldest first. */
-  sources(): ConnectionSource[] { return (this.db.prepare('SELECT body FROM tracker_connection_sources ORDER BY created_at, id').all() as { body: string }[]).map(row => JSON.parse(row.body)); }
+  sources(): ConnectionSource[] {
+    return (this.db.prepare('SELECT body, client_project_id FROM tracker_connection_sources ORDER BY created_at, id').all() as { body: string; client_project_id: string | null }[]).map(row => ({ ...JSON.parse(row.body), ...(row.client_project_id ? { clientProject: row.client_project_id } : {}) }));
+  }
   private credential(id: string): Credential | undefined { return this.store.getSecret<Credential>(secretId(id)); }
 
-  /** The Tenant of the connection a `/api/tracker-connections/{id}…` path names, read before a request changes it, for the audit chain. */
+  /** The Tenant of the connection or stored repository a `/api/tracker-connections/{id}…` or `/api/repositories/{id}` path names, read before a request changes it, for the audit chain. */
   ownerOf(path: string): string | undefined {
-    const match = /^\/api\/tracker-connections\/([^/]+)/.exec(path);
-    return match ? this.connection(match[1])?.tenant : undefined;
+    const connection = /^\/api\/tracker-connections\/([^/]+)/.exec(path);
+    if (connection) return this.connection(connection[1])?.tenant;
+    const repository = /^\/api\/repositories\/([^/]+)$/.exec(path);
+    return repository ? this.repositories.repository(repository[1])?.tenant : undefined;
   }
 
   /** Whether `user` adds, changes and removes connections of `tenant`: an administrator, and while tenancy is enforced an Admin of that Tenant. */
@@ -102,7 +110,14 @@ export class TrackerConnections {
     if (!this.options.enforced) return [defaultTenant];
     return [...new Set((user.memberships ?? []).flatMap(held => held.kind === 'tenant' && held.role === 'admin' ? [held.tenant] : []))];
   }
-  private sees(user: User, tenant: string): boolean { return !this.options.enforced || reaches(user, { tenant }); }
+  /** The Tenants whose connections, repositories and Client Projects `user` reaches: every Tenant Unfold holds something for while tenancy is not enforced. */
+  reachedTenants(user: User): string[] {
+    if (this.options.enforced) return [...new Set((user.memberships ?? []).flatMap(held => held.kind === 'tenant' ? [held.tenant] : []))].sort();
+    const held = this.db.prepare('SELECT tenant FROM integration_accounts UNION SELECT tenant FROM repositories UNION SELECT tenant FROM client_projects').all() as { tenant: string }[];
+    return [...new Set([defaultTenant, ...held.map(row => row.tenant)])].sort();
+  }
+  /** Whether `user` reaches what `tenant` owns. */
+  sees(user: User, tenant: string): boolean { return !this.options.enforced || reaches(user, { tenant }); }
 
   private shadowing(source: ConnectionSource, connection: TrackerConnection): TaskSourceConfig | undefined {
     return (this.config.taskSources ?? []).find(entry => !entry.connection && (entry.id === source.id || (entry.provider === connection.provider && entry.baseUrl === connection.baseUrl && entry.project === source.project)));
@@ -133,8 +148,9 @@ export class TrackerConnections {
     return target ? { forge: target.forge, owner: target.owner, repo: target.repo, baseBranch: target.baseBranch } : undefined;
   }
 
-  /** Puts the saved sources into `config.taskSources` after the configured ones, replacing what an earlier sync put there. */
+  /** Puts the stored repositories into `config.repositories` and the saved sources into `config.taskSources`, each after the configured ones, replacing what an earlier sync put there. */
   sync(): void {
+    this.repositories.sync();
     const list = this.config.taskSources ??= [];
     for (let index = list.length - 1; index >= 0; index--) if (list[index].connection) list.splice(index, 1);
     const connections = new Map(this.connections().map(connection => [connection.id, connection]));
@@ -211,7 +227,7 @@ export class TrackerConnections {
     const connection: TrackerConnection = { id: `tc-${randomBytes(6).toString('hex')}`, provider: adapter.name, baseUrl: root, tenant, ...(account ? { account } : {}), tokenSetAt: at, createdAt: at, createdBy: user.name, updatedAt: at, updatedBy: user.name };
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.prepare('INSERT INTO tracker_connections(id,tenant,provider,base_url,created_at,body) VALUES(?,?,?,?,?,?)').run(connection.id, tenant, connection.provider, root, at, JSON.stringify(connection));
+      this.db.prepare("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) VALUES(?,?,'tracker',?,?,'',?,?)").run(connection.id, tenant, connection.provider, root, at, JSON.stringify(connection));
       this.store.setSecret(secretId(connection.id), credential);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -225,7 +241,7 @@ export class TrackerConnections {
     const { credential, account } = await this.verify(connection.provider, connection.baseUrl, input.token);
     const at = this.now();
     const updated: TrackerConnection = { ...connection, ...(account ? { account } : {}), tokenSetAt: at, updatedAt: at, updatedBy: user.name };
-    this.db.prepare('UPDATE tracker_connections SET body=? WHERE id=?').run(JSON.stringify(updated), id);
+    this.db.prepare('UPDATE integration_accounts SET body=? WHERE id=?').run(JSON.stringify(updated), id);
     this.store.setSecret(secretId(id), credential);
     for (const listener of this.listeners) listener(credential.token);
     this.sync();
@@ -238,7 +254,7 @@ export class TrackerConnections {
     const using = this.sources().filter(source => source.connection === connection.id);
     if (using.length) throw new TaskError(409, 'connection_in_use', `Remove ${using.map(source => source.name).join(', ')} first; ${using.length === 1 ? 'it reads' : 'they read'} with this connection.`);
     this.store.deleteSecret(secretId(id));
-    this.db.prepare('DELETE FROM tracker_connections WHERE id=?').run(id);
+    this.db.prepare('DELETE FROM integration_accounts WHERE id=?').run(id);
   }
 
   /** Checks the connection's own token with one cheap read and changes nothing. A refusal is a `problem`, not an error. */
@@ -286,9 +302,10 @@ export class TrackerConnections {
     if (same) throw new TaskError(409, 'source_exists', `${same.name} already reads it. Use that one, or remove it first.`);
     const source = { ...draft, id: slug(draft.name, new Set([...all.map(entry => entry.id), ...saved.map(entry => entry.id)])) };
     if (!sourceSlug.test(source.id)) throw new TaskError(400, 'connection_invalid', 'Give the source a name with letters or digits in it.');
-    this.db.prepare('INSERT INTO tracker_connection_sources(id,connection_id,tenant,client,created_at,body) VALUES(?,?,?,?,?,?)').run(source.id, connection.id, source.tenant, source.client ?? null, source.createdAt, JSON.stringify(source));
+    const clientProject = source.client ? undefined : this.projects.ownWork(source.tenant, user, source.createdAt).id;
+    this.db.prepare('INSERT INTO tracker_connection_sources(id,connection_id,tenant,client,client_project_id,created_at,body) VALUES(?,?,?,?,?,?,?)').run(source.id, connection.id, source.tenant, source.client ?? null, clientProject ?? null, source.createdAt, JSON.stringify(source));
     this.sync();
-    return source;
+    return { ...source, ...(clientProject ? { clientProject } : {}) };
   }
 
   private savedSource(connection: TrackerConnection, sourceId: string): ConnectionSource {
@@ -303,9 +320,10 @@ export class TrackerConnections {
     const connection = this.owned(user, id);
     const previous = this.savedSource(connection, sourceId);
     const source = this.sourceInput(user, connection, input, previous.id, previous);
-    this.db.prepare('UPDATE tracker_connection_sources SET client=?, body=? WHERE id=?').run(source.client ?? null, JSON.stringify(source), source.id);
+    const clientProject = source.client ? undefined : previous.client || !previous.clientProject ? this.projects.ownWork(source.tenant, user, source.updatedAt).id : previous.clientProject;
+    this.db.prepare('UPDATE tracker_connection_sources SET client=?, client_project_id=?, body=? WHERE id=?').run(source.client ?? null, clientProject ?? null, JSON.stringify(source), source.id);
     this.sync();
-    return source;
+    return { ...source, ...(clientProject ? { clientProject } : {}) };
   }
 
   /** Removes a saved source. Work Items it started stay in Ploeg; its tasks stop showing here. */
