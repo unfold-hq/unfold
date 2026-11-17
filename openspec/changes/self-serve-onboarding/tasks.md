@@ -57,7 +57,7 @@ output pasted in the pull request.
 
 ## 6. S6 Spend-cap gate
 
-- [ ] 6.1 Read the Team's `spendCap` from the Teams read; Admin confirms it; `budget_missing` refusal when it is null, for readiness work and for Teams bound during onboarding only; test that hand-off from a configured source is not refused
+- [x] 6.1 Read the Team's `spendCap` from the Teams read; Admin confirms it; `budget_missing` refusal when it is null, for readiness work and for Teams bound during onboarding only; test that hand-off from a configured source is not refused. Built: the gate in `Onboarding.admit`, which the binding (S5) and readiness (S7) routes call once they exist, and readiness work also waits for a confirmation that matches the cap Ploeg reports now (`spend_cap_unconfirmed`)
 - [ ] 6.2 **[owner]** Confirm Ploeg's chart default spend cap (`{usd: 20, period: day}`, Ploeg ADR-0162) for self-hosted installs
 
 ## 7. S7 Readiness pull request

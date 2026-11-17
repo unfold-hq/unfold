@@ -54,7 +54,7 @@ Every stage leaves Unfold. Stages 3 and 4 are the same fact written twice in two
 | 3 | Register repositories | each repository is registered | shown as configured or not available yet; waits for Ploeg ADR-0193 |
 | 4 | Connect ClickUp | Ploeg reports a ClickUp connection as the Unfold member | shown as configured or not available yet; waits for the connection contract |
 | 5 | Pick Lists | each List is saved | yes, through **Connect a tracker** |
-| 6 | Budget | an Admin confirmed a Team whose spend cap is not null | the cap is shown and a missing one is red; confirming it is a later slice |
+| 6 | Budget | an Admin confirmed a Team whose spend cap is not null | yes (slice S6): each Team's cap in USD per period as Ploeg reports it, **Confirm** records who and when; a Team without a cap is refused for readiness work and onboarding bindings with `409 budget_missing`, hand-off from configured sources never is |
 | 7 | Prepare | the readiness pull request is open | not available yet; waits for Ploeg ADR-0194 |
 | 8 | Review and merge | the repository is ready | shown from the connections read |
 | 9 | Bind Lists | the binding is `active` | shown as configured or not available yet; waits for Ploeg ADR-0186 |
