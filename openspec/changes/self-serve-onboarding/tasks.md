@@ -31,11 +31,11 @@ output pasted in the pull request.
 
 ## 3. S3 Repositories and Own work in Unfold's store
 
-- [ ] 3.1 Migration: `tracker_connections` to `integration_accounts` with `role`, keyed with the installation or account id; `repositories`, `client_projects`, `repository_grants`; `client_project_id` on saved sources
-- [ ] 3.2 Own work created on first use; projects hidden until a Client exists
-- [ ] 3.3 Stored repositories join `config.repositories` after the configured ones; `shadowed` on a key clash
-- [ ] 3.4 Tenant export classifies the new tables; OCSF records for each entity
-- [ ] 3.5 Add Own work, Readiness Pull Request or any other new term to `docs/domain/model.yaml` and run `mise run domain`
+- [x] 3.1 Migration: `tracker_connections` to `integration_accounts` with `role`, keyed with the installation or account id; `repositories`, `client_projects`, `repository_grants`; `client_project_id` on saved sources
+- [x] 3.2 Own work created on first use; projects hidden until a Client exists
+- [x] 3.3 Stored repositories join `config.repositories` after the configured ones; `shadowed` on a key clash
+- [x] 3.4 Tenant export classifies the new tables; OCSF records for each entity
+- [x] 3.5 Add Own work, Readiness Pull Request or any other new term to `docs/domain/model.yaml` and run `mise run domain` (Own work added; Readiness Pull Request is first used in S7 and is added there)
 
 ## 4. S4 Connect GitHub and register repositories
 

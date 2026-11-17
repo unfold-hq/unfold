@@ -40,7 +40,7 @@ Chosen option: **connections in Unfold's database next to the configured sources
 
 ### What is stored
 
-A **tracker connection** is the account Unfold acts as on one tracker API root for one Tenant: tracker, API root, Tenant, the name of the account its token belongs to, who added it and when the token was set. There is at most one per Tenant, tracker and API root (409 `connection_exists`; replace its token instead). A **saved source** names its connection, the project, a name, the repository, the execution owner (`ploeg` by default) and an optional Client inside the connection's Tenant. They live in `tracker_connections` and `tracker_connection_sources`.
+A **tracker connection** is the account Unfold acts as on one tracker API root for one Tenant: tracker, API root, Tenant, the name of the account its token belongs to, who added it and when the token was set. There is at most one per Tenant, tracker and API root (409 `connection_exists`; replace its token instead). A **saved source** names its connection, the project, a name, the repository, the execution owner (`ploeg` by default) and an optional Client inside the connection's Tenant. They live in `tracker_connections` and `tracker_connection_sources` (since 2026-11-17 `integration_accounts` and `tracker_connection_sources`; see More Information).
 
 This is ADR-0048's Integration Account for the tracker role only. The connection is keyed by origin, the source by connection plus project, and the token is an attribute of the connection, so rotating it changes no identity. Step T5 of 0063 adds the account-link and publisher roles to the same record.
 
@@ -117,5 +117,7 @@ Open questions for the owner, each with a recommendation. The implementation fol
 3. **Should a saved source read with each person's link when they have one, and use the service account only to hand off?** Recommended: not yet. One account keeps the task revision a hand-off checks the same for everyone; revisit when Client users start using Unfold.
 4. **A switch that turns adding from the screen off for GitOps-only installations.** Recommended: add a configuration flag when an installation asks for it; until then the configuration wins on every clash.
 5. **Telling Ploeg about a saved source.** Recommended: a general Ploeg contract for registering a tracker project with a Team, which Unfold then adopts; Ploeg names no consumer.
+
+**2026-11-17.** The `self-serve-onboarding` change (S3) moved the store to system ADR-0048's model: `tracker_connections` is now `integration_accounts` with the role `tracker`, keyed by Tenant, provider, API root and account id, and a saved source without a Client belongs to its Tenant's Own work. Ids, bodies and sealed tokens migrate unchanged, and the API above is unchanged. The Tenant export names the entity `integration-accounts`.
 
 Related: [Connect a task system](../operations/task-connections.md#clickup), [Working with Unfold from ClickUp](../operations/working-from-clickup.md), [0008](0008-task-connections-and-candidate-handoff.md) task connections, [0016](0016-sign-in-and-link-your-own-accounts.md) linked accounts.
