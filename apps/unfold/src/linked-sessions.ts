@@ -481,7 +481,7 @@ export class LinkedSessions {
     const scope = user.role === 'admin' ? 'all' : 'own';
     const sessions = this.store.forWorkItem(workItemId, linkedLimits.listed).filter(session => session.harness === 'claude-code' && (scope === 'all' || session.ownerId === user.id));
     const markups = this.usage?.markups;
-    const markupOf = (_id: string, dayStart: number) => owner && markups ? markups.at(owner, dayStart) : 0;
+    const markupOf = (_id: string, dayStart: number) => owner && markups ? markups.at(owner, 'linked-session', dayStart) : 0;
     const charges = this.usage ? linkedCharges(this.usage.store, sessions, 0, Number.MAX_SAFE_INTEGER, markupOf).filter(charge => charge.workItemId === workItemId) : [];
     const recorded = sessions.map(session => this.usage?.store.latest(session.id)).filter(entry => entry !== undefined);
     const observedAt = recorded.map(entry => entry.observedAt).sort().at(-1) ?? null;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { LinkedSessions, parseLinkedEvent, type LinkedPloeg } from '../src/linked-sessions.ts';
-import { LinkedUsage, LinkedUsageStore, UsageMarkupStore, MarkupError, billableMicros, linkedCharges, linkedUsageJob, linkedWorkCharges, markupBasisPoints, splitWhole, toMicros } from '../src/linked-usage.ts';
+import { LinkedUsage, LinkedUsageStore, UsageMarkupStore, MarkupError, billableMicros, linkedCharges, linkedUsageJob, linkedWorkCharges, markedUp, markupBasisPoints, ploegRunUsage, splitWhole, toMicros } from '../src/linked-usage.ts';
 import { focusCsv, focusExport, focusExportQuery, type LinkedFocusCharge } from '../src/focus-export.ts';
 import { linkedEstimate } from '../src/my-usage.ts';
 import { BillingService, BillingStore, billingRoute, BillingError } from '../src/billing.ts';
@@ -101,8 +101,10 @@ test('another person sees only their own share of a Work Item; an administrator 
   usage.store.record(sessionId, 2, tokens(100), clock.toISOString());
   const theirs = await linked.workItemUsage(teammate, '184', { tenant: 'default' });
   assert.deepEqual([theirs.costUsd, theirs.sessions, theirs.scope], [null, 0, 'own']);
+  usage.markups.set({ tenant: 'default' }, 'ploeg-run', 5000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  usage.markups.set({ tenant: 'default' }, 'linked-session', 1000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
   const all = await linked.workItemUsage(admin, '184', { tenant: 'default' });
-  assert.deepEqual([all.costUsd, all.sessions, all.scope], [2, 1, 'all']);
+  assert.deepEqual([all.costUsd, all.billableUsd, all.markupPercent, all.sessions, all.scope], [2, 2.2, '10', 1, 'all'], 'the linked-session markup, never the Ploeg-run one');
 });
 
 test('a session linked to two Work Items splits each day exactly, never counting its cost twice', () => {
@@ -121,22 +123,49 @@ test('a markup of 0 is the estimate, a markup changes only the billable amount, 
   store.record('s-1', 10, tokens(1), '2026-10-05T10:00:00.000Z');
   store.record('s-1', 30, tokens(2), '2026-10-20T10:00:00.000Z');
   const sessions = [{ id: 's-1', workItems: [{ id: '184' }] }];
+  const linkedAt = (owner: { tenant: string; client?: string }) => (dayStart: number) => markups.at(owner, 'linked-session', dayStart);
   const charge = (at: (dayStart: number) => number) => linkedCharges(store, sessions, 0, Number.MAX_SAFE_INTEGER, (_id, dayStart) => at(dayStart)).map(entry => [entry.costMicros, entry.billableMicros]);
-  assert.deepEqual(charge(dayStart => markups.at(acme, dayStart)), [[10_000_000, 10_000_000], [20_000_000, 20_000_000]], 'no markup bills the estimate');
-  markups.set(acme, markupBasisPoints('15'), '2026-10-01', '2026-10-10', 'u-boss', '2026-10-10T08:00:00.000Z');
-  assert.deepEqual(charge(dayStart => markups.at(acme, dayStart)), [[10_000_000, 11_500_000], [20_000_000, 23_000_000]]);
-  assert.throws(() => markups.set(acme, 2500, '2026-10-01', '2026-10-15', 'u-boss', '2026-10-15T08:00:00.000Z'), MarkupError, 'a change may not reach back');
-  assert.throws(() => markups.set(acme, 2500, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z'), MarkupError, 'a markup already in effect is not replaced');
-  markups.set(acme, markupBasisPoints(25), '2026-10-15', '2026-10-15', 'u-boss', '2026-10-15T08:00:00.000Z');
-  assert.deepEqual(charge(dayStart => markups.at(acme, dayStart)), [[10_000_000, 11_500_000], [20_000_000, 25_000_000]], 'the 5 October day keeps its 15%');
-  markups.set({ tenant: 'acme', client: 'globex' }, 0, '2026-10-16', '2026-10-16', 'u-boss', '2026-10-16T08:00:00.000Z');
-  assert.equal(markups.at({ tenant: 'acme', client: 'globex' }, Date.parse('2026-10-20T00:00:00Z')), 0, 'a Client markup wins over its Tenant');
-  assert.equal(markups.at({ tenant: 'acme', client: 'globex' }, Date.parse('2026-10-05T00:00:00Z')), 1500, 'before its own markup a Client takes the Tenant');
+  assert.deepEqual(charge(linkedAt(acme)), [[10_000_000, 10_000_000], [20_000_000, 20_000_000]], 'no markup bills the estimate');
+  markups.set(acme, 'all', markupBasisPoints('15'), '2026-10-01', '2026-10-10', 'u-boss', '2026-10-10T08:00:00.000Z');
+  assert.deepEqual(charge(linkedAt(acme)), [[10_000_000, 11_500_000], [20_000_000, 23_000_000]]);
+  assert.throws(() => markups.set(acme, 'all', 2500, '2026-10-01', '2026-10-15', 'u-boss', '2026-10-15T08:00:00.000Z'), MarkupError, 'a change may not reach back');
+  assert.throws(() => markups.set(acme, 'all', 2500, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z'), MarkupError, 'a markup already in effect is not replaced');
+  markups.set(acme, 'all', markupBasisPoints(25), '2026-10-15', '2026-10-15', 'u-boss', '2026-10-15T08:00:00.000Z');
+  assert.deepEqual(charge(linkedAt(acme)), [[10_000_000, 11_500_000], [20_000_000, 25_000_000]], 'the 5 October day keeps its 15%');
+  markups.set({ tenant: 'acme', client: 'globex' }, 'all', 0, '2026-10-16', '2026-10-16', 'u-boss', '2026-10-16T08:00:00.000Z');
+  assert.equal(markups.at({ tenant: 'acme', client: 'globex' }, 'linked-session', Date.parse('2026-10-20T00:00:00Z')), 0, 'a Client markup wins over its Tenant');
+  assert.equal(markups.at({ tenant: 'acme', client: 'globex' }, 'linked-session', Date.parse('2026-10-05T00:00:00Z')), 1500, 'before its own markup a Client takes the Tenant');
   assert.deepEqual(store.readings('s-1').map(entry => entry.costMicros), [10_000_000, 30_000_000], 'the recorded estimate never carries a markup');
   assert.equal(billableMicros(toMicros(1.234567), 1250), 1_388_888);
   assert.throws(() => markupBasisPoints('-5'));
   assert.throws(() => markupBasisPoints('12.345'));
   assert.throws(() => markupBasisPoints('1000.01'));
+});
+
+test('a markup for all sources applies to both, and a markup for one source changes only that source', () => {
+  const markups = new UsageMarkupStore(new DatabaseSync(':memory:'));
+  const acme = { tenant: 'acme' };
+  const oct20 = Date.parse('2026-10-20T00:00:00Z');
+  markups.set(acme, 'all', 1000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  assert.deepEqual([markups.at(acme, 'ploeg-run', oct20), markups.at(acme, 'linked-session', oct20)], [1000, 1000], 'one percentage for both by default');
+  markups.set(acme, 'linked-session', 3000, '2026-10-10', '2026-10-10', 'u-boss', '2026-10-10T08:00:00.000Z');
+  assert.deepEqual([markups.at(acme, 'ploeg-run', oct20), markups.at(acme, 'linked-session', oct20)], [1000, 3000]);
+  assert.equal(markups.at(acme, 'linked-session', Date.parse('2026-10-05T00:00:00Z')), 1000, 'before its own markup a source takes the one for all');
+  assert.throws(() => markups.set(acme, 'linked-session', 0, '2026-10-12', '2026-10-15', 'u-boss', '2026-10-15T08:00:00.000Z'), MarkupError, 'a source markup is forward-only too');
+  markups.set({ tenant: 'acme', client: 'globex' }, 'ploeg-run', 500, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  assert.deepEqual([markups.at({ tenant: 'acme', client: 'globex' }, 'ploeg-run', oct20), markups.at({ tenant: 'acme', client: 'globex' }, 'linked-session', oct20)], [500, 3000], 'the Client sets Ploeg Runs only; its estimates keep the Tenant markup');
+});
+
+test('a Work Item’s Ploeg spend stays metered and unmarked, and only closed Shifts bill, with the markup of the day each closed', () => {
+  const markups = new UsageMarkupStore(new DatabaseSync(':memory:'));
+  const acme = { tenant: 'acme' };
+  markups.set(acme, 'ploeg-run', 2000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  markups.set(acme, 'linked-session', 9000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  markups.set(acme, 'ploeg-run', 5000, '2026-10-10', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  const usage = ploegRunUsage([{ spentUsd: 2, closedAt: '2026-10-05T10:00:00Z' }, { spentUsd: 4, closedAt: '2026-10-12T10:00:00Z' }, { spentUsd: 1, closedAt: null }], dayStart => markups.at(acme, 'ploeg-run', dayStart), Date.parse('2026-10-20T00:00:00Z'));
+  assert.deepEqual(usage, { meteredUsd: 7, billableUsd: 8.4, markupPercent: '50', openShifts: 1, source: 'ploeg-run', basis: 'metered' }, '2 x 1.2 + 4 x 1.5; the open Shift is metered, not billed; the estimate markup never applies');
+  assert.deepEqual(ploegRunUsage([], () => 1000, 0), { meteredUsd: null, billableUsd: null, markupPercent: '10', openShifts: 0, source: 'ploeg-run', basis: 'metered' });
+  assert.equal(markedUp(1.25, 0), 1.25);
 });
 
 test('the FOCUS export adds Linked Session rows only when asked, at list price, with the estimate and the billable amount apart', () => {
@@ -149,8 +178,8 @@ test('the FOCUS export adds Linked Session rows only when asked, at list price, 
   const result = focusExport([], query({ linkedSessions: 'include', tenant: 'acme' }), { owner: () => undefined, linked: [charge, other, outside] });
   assert.equal(result.counts.linkedSessionRows, 1);
   const [row] = result.rows;
-  assert.deepEqual([row.BilledCost, row.EffectiveCost, row.ListCost, row.x_UnfoldEstimatedCost, row.x_UnfoldBillableCost, row.x_UnfoldMarkupPercent, row.x_UnfoldSpendStatus, row.x_UnfoldCostSource, row.ResourceType, row.SubAccountId, row.x_UnfoldLinkedSessionCount],
-    [{ decimal: '0' }, { decimal: '0' }, { decimal: '12.345678' }, { decimal: '12.345678' }, { decimal: '13.580246' }, { decimal: '10' }, 'Estimate', 'telemetry-estimate', 'Linked sessions', 'globex', { decimal: '2' }]);
+  assert.deepEqual([row.BilledCost, row.EffectiveCost, row.ListCost, row.x_UnfoldEstimatedCost, row.x_UnfoldBillableCost, row.x_UnfoldMarkupPercent, row.x_UnfoldSpendStatus, row.x_UnfoldCostSource, row.x_UnfoldCostBasis, row.ResourceType, row.SubAccountId, row.x_UnfoldLinkedSessionCount],
+    [{ decimal: '0' }, { decimal: '0' }, { decimal: '12.345678' }, { decimal: '12.345678' }, { decimal: '13.580246' }, { decimal: '10' }, 'Estimate', 'linked-session', 'telemetry-estimate', 'Linked sessions', 'globex', { decimal: '2' }]);
   assert.doesNotMatch(focusCsv(result.rows), /u-ryan|0f6c1c9e/, 'no person or session id leaves in the file');
   const euros = focusExport([], query({ linkedSessions: 'include', currency: 'EUR', usdToEur: '0.5' }), { owner: () => undefined, linked: [charge] }).rows[0];
   assert.deepEqual([euros.ListCost, euros.x_UnfoldBillableCost, euros.PricingCurrency], [{ decimal: '6.172839' }, { decimal: '6.790123' }, 'USD']);
@@ -160,10 +189,12 @@ test('the export reads recorded charges only for Work Items the requester may re
   const db = new DatabaseSync(':memory:');
   const usage = new LinkedUsage(db, {} as AppConfig);
   usage.store.record('s-1', 4, tokens(10), '2026-10-05T10:00:00.000Z');
+  usage.markups.set({ tenant: 'acme' }, 'ploeg-run', 5000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  usage.markups.set({ tenant: 'acme' }, 'linked-session', 1000, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
   const sessions = { 's-1': { id: 's-1', workItems: [{ id: '184' }, { id: '185' }, { id: '186' }] } } as Record<string, { id: string; workItems: { id: string }[] }>;
   const item = (id: string) => ({ id, title: id, team: 'silver', target: null, externalRef: '' });
   const result = await linkedWorkCharges(usage, id => sessions[id], Date.parse('2026-10-01T00:00:00Z'), Date.parse('2026-11-01T00:00:00Z'), async id => id === '184' ? { item: item(id), owner: { tenant: 'acme' } } : id === '185' ? { item: item(id), owner: undefined } : undefined);
-  assert.deepEqual(result.charges.map(charge => [charge.workItemId, charge.costMicros]), [['184', 1_333_334]], 'its share only, not the whole session');
+  assert.deepEqual(result.charges.map(charge => [charge.workItemId, charge.costMicros, charge.basisPoints, charge.billableMicros]), [['184', 1_333_334, 1000, 1_466_667]], 'its share only, with the linked-session markup');
   assert.equal(result.unowned, 1);
 });
 
@@ -183,9 +214,24 @@ test('only an administrator sets a markup through Billing, and a change that rea
   const put = (user: User, data: Record<string, unknown>) => billingRoute(service, user, 'PUT', '/api/billing/usage-markups', new URLSearchParams(), async () => data);
   await assert.rejects(put(owner, { tenant: 'default', percent: 10 }), (error: BillingError) => error.status === 403);
   const set = await put(admin, { tenant: 'default', percent: '12.5', effectiveFrom: '2026-09-01' });
+  assert.equal((set as { json: { source: string } }).json.source, 'all', 'one markup for every source unless named');
+  await assert.rejects(put(admin, { tenant: 'default', source: 'chats', percent: 5 }), (error: BillingError) => error.code === 'billing_markup');
+  assert.equal(((await put(admin, { tenant: 'default', source: 'ploeg-run', percent: 5 })) as { json: { source: string } }).json.source, 'ploeg-run');
   assert.deepEqual((set as { json: { percent: string; basisPoints: number } }).json.percent, '12.5');
   await assert.rejects(put(admin, { tenant: 'default', percent: 20, effectiveFrom: '2026-10-01' }), (error: BillingError) => error.code === 'billing_markup_history');
   await assert.rejects(put(admin, { tenant: 'default', percent: 'lots' }), (error: BillingError) => error.code === 'billing_markup');
   const listed = await billingRoute(service, admin, 'GET', '/api/billing/usage-markups', new URLSearchParams(), async () => ({}));
-  assert.equal((listed as { json: { markups: unknown[] } }).json.markups.length, 1);
+  assert.equal((listed as { json: { markups: unknown[] } }).json.markups.length, 2);
+});
+
+test('markups stored before markups had a source keep applying to every source', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE usage_markups (tenant TEXT NOT NULL, client TEXT NOT NULL, effective_from TEXT NOT NULL, basis_points INTEGER NOT NULL, set_at TEXT NOT NULL, set_by TEXT NOT NULL, PRIMARY KEY (tenant, client, effective_from))');
+  db.prepare('INSERT INTO usage_markups VALUES (?,?,?,?,?,?)').run('acme', '', '2026-10-01', 1500, '2026-10-01T08:00:00.000Z', 'u-boss');
+  const markups = new UsageMarkupStore(db);
+  const oct20 = Date.parse('2026-10-20T00:00:00Z');
+  assert.deepEqual([markups.at({ tenant: 'acme' }, 'ploeg-run', oct20), markups.at({ tenant: 'acme' }, 'linked-session', oct20)], [1500, 1500]);
+  markups.set({ tenant: 'acme' }, 'ploeg-run', 500, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  assert.equal(markups.at({ tenant: 'acme' }, 'ploeg-run', oct20), 500, 'a source markup on the same day as an old one is its own row');
+  assert.equal(new UsageMarkupStore(db).all().length, 2, 'opening the store again changes nothing');
 });
