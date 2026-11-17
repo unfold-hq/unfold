@@ -83,8 +83,9 @@ Unfold's own columns start with `x_Unfold`, as FOCUS requires of custom columns:
 | `x_UnfoldWorkItemId`, `x_UnfoldExternalReference` | The Work Item and its ticket, such as `VIK-41` |
 | `x_UnfoldRunId`, `x_UnfoldRunCount` | The Run (null on a Work Item row) and how many Runs the row adds |
 | `x_UnfoldInputTokens`, `x_UnfoldOutputTokens`, `x_UnfoldCacheReadInputTokens`, `x_UnfoldCacheCreationInputTokens` | Token counts. On a Work Item row a count is null when any of its Runs did not report it |
-| `x_UnfoldCostSource` | `ploeg` for a Run's cost, `telemetry-estimate` for a Linked Session row |
-| `x_UnfoldEstimatedCost`, `x_UnfoldMarkupPercent`, `x_UnfoldBillableCost`, `x_UnfoldLinkedSessionCount` | Only on a Linked Session row: the recorded estimate, the owner's markup that day, the estimate plus that markup, and how many sessions the row adds. Null on a Ploeg row |
+| `x_UnfoldCostSource`, `x_UnfoldCostBasis` | `ploeg-run` and `metered` on a Run or Work Item row; `linked-session` and `telemetry-estimate` on a Linked Session row. The two never share a row |
+| `x_UnfoldMarkupPercent`, `x_UnfoldBillableCost` | The owner's markup on the row's source that day, and the row's cost plus that markup. On a settled Run row the cost is `BilledCost`, which itself stays the metered cost; on a Linked Session row it is the estimate. Null on an unsettled row, which is never billable |
+| `x_UnfoldEstimatedCost`, `x_UnfoldLinkedSessionCount` | Only on a Linked Session row: the recorded estimate and how many sessions the row adds. Null on a Run row, which holds no estimate |
 
 ## Unsettled spend is never billed
 
@@ -93,12 +94,16 @@ A Run's cost settles once it finished and holds no budget. Before that it is uns
 - `unsettled=exclude`, the default, leaves those Runs out. `X-Unfold-Unsettled-Runs` counts them.
 - `unsettled=include` writes them with every cost column 0, `x_UnfoldSpendStatus` `Unsettled` and the amount seen so far in `x_UnfoldObservedCost`. A FinOps tool that adds `BilledCost` adds nothing for them.
 
+## Markups
+
+An administrator sets a markup per Tenant, or per Client, under Billing (`PUT /api/billing/usage-markups`): for Ploeg Runs (`source: ploeg-run`), for Linked Sessions (`linked-session`), or for both at once (`all`, the default). A row's billable amount is its own cost plus the markup on its own source; an estimate is never added to a metered cost, and no recorded or metered column carries a markup. Without a markup the billable amount equals the cost. A changed markup applies from its first day on, today or later, so an exported month keeps its amounts.
+
 ## Linked Session estimates
 
 People who run Claude Code on their own machine and link the session to a Work Item ([Link your Claude Code sessions](../../../../docs/how-to/link-claude-code-sessions.md)) cause cost that Ploeg never sees. Unfold records Claude Code's own estimate of each session at API list prices, from the metrics store, and keeps it after the store drops the session ([ADR 0069](../adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md)). With `linkedSessions=include`, the export adds one row per Work Item and UTC day:
 
 - `ListCost` is the estimate. `BilledCost`, `EffectiveCost`, `ContractedCost` and `PricingCurrencyEffectiveCost` are 0, because nobody invoiced it: a Claude plan is not billed at API prices, and FOCUS keeps estimates out of `BilledCost`.
-- `x_UnfoldEstimatedCost` repeats the estimate as recorded. `x_UnfoldBillableCost` is the estimate plus the markup of that day for the Work Item's Client or Tenant, set under Billing (`PUT /api/billing/usage-markups`). Without a markup the two are equal. Changing a markup applies from its first day on, so an exported month keeps its amounts.
+- `x_UnfoldEstimatedCost` repeats the estimate as recorded. `x_UnfoldBillableCost` is the estimate plus the `linked-session` markup of that day for the Work Item's Client or Tenant.
 - A session linked to several Work Items splits each day's estimate evenly between them, in whole micro-dollars, so the sum over Work Items is the session's estimate.
 - The day of a row is the UTC day Unfold read the figure: after each live read on the session or Work Item page, and a few minutes after the session stops working or ends. A session's cost before its first reading lands on that first day.
 - The row names the Work Item, Client and Tenant, never the session or the person. `ResourceType` is `Linked sessions`, `ServiceName` `Claude Code`, and the provider columns `Anthropic`.
