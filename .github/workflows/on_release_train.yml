@@ -2,7 +2,7 @@ name: '[Workflow] On Release Train'
 
 on:
   workflow_run:
-    workflows: ['[Workflow] On Source Change']
+    workflows: ['\[Workflow\] On Source Change']
     types: [completed]
     branches: [development]
   schedule:

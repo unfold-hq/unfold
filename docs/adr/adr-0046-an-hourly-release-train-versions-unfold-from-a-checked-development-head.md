@@ -128,6 +128,7 @@ On GitHub Actions the hourly schedule is no reliable start. Between the workflow
 
 * Good, because an Unfold candidate follows a merge after the push check and the train's own checks, without waiting for a schedule GitHub may not run.
 * Bad, because every green push to `development` with unreleased application commits runs the checks a second time in the train. GitHub-hosted runners on this public repository cost no money; the cost is runner time.
+* Neutral: `workflows` is a filter pattern, so the brackets of `[Workflow] On Source Change` are escaped as `\[Workflow\]`. Unescaped, the pattern matched no workflow and three green push checks on 2026-11-17 started no train.
 * Neutral: a merge made with `GITHUB_TOKEN`, such as a Ploeg pin merged by `on_ploeg_pin.yml`, starts no push run and so no train; the schedule, the next merge or a dispatch picks it up.
 
 ### Confirmation of the 2026-11-17 amendment
