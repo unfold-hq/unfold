@@ -2,8 +2,8 @@
 type: explanation
 audience: [owner, contributor, agent]
 owner: unfold
-last_verified: 2026-11-01
-verified_by: "Source read on 2026-11-01 of unfold origin/development (apps/unfold/src/tenancy.ts, tenant-scope.ts, oidc.ts, config.ts, tracker-connections.ts, tenant-export.ts, ops/helm/unfold/values.yaml), ploeg-hq/ploeg origin/development 7419f2f (no tenant_id in Go; ADR-0178, 0179 and 0181 proposed), the owner's cluster repository main (kubernetes/apps/authentik, kubernetes/apps/security/access-plane, kubernetes/apps/network/cloudflare-tunnel, ADR-0056, 0057, 0059) and the owner's production cluster repository main (infra/unfold-staging-edge.tf, kubernetes/apps/unfold-staging). Identity broker facts from the vendors' documentation on the same day. Prompted by the owner on 2026-11-01 after Unfold staging went live behind Cloudflare Access with a one-time PIN. Nothing was run."
+last_verified: 2026-11-17
+verified_by: "Source read on 2026-11-01 of unfold origin/development (apps/unfold/src/tenancy.ts, tenant-scope.ts, oidc.ts, config.ts, tracker-connections.ts, tenant-export.ts, ops/helm/unfold/values.yaml), ploeg-hq/ploeg origin/development 7419f2f (no tenant_id in Go; ADR-0178, 0179 and 0181 proposed), the owner's cluster repository main (kubernetes/apps/authentik, kubernetes/apps/security/access-plane, kubernetes/apps/network/cloudflare-tunnel, ADR-0056, 0057, 0059) and the owner's production cluster repository main (infra/unfold-staging-edge.tf, kubernetes/apps/unfold-staging). Identity broker facts from the vendors' documentation on the same day. Prompted by the owner on 2026-11-01 after Unfold staging went live behind Cloudflare Access with a one-time PIN. Nothing was run. On 2026-11-17 the owner chose the broker (ADR-0058) and to move staging to it directly; role mapping by email and domain was re-read in apps/unfold/src/oidc.ts (commit 2e044790)."
 ---
 
 # Customer environments
@@ -61,7 +61,7 @@ Proposed, for the owner to decide. They follow the order the owner chose on 2026
 
 Unfold already does OIDC with discovery, PKCE and a JWKS check (`apps/unfold/src/oidc.ts`). Every installation signs people in through it, and `auth.localLogin: false` removes the password form, the `POST /api/login` route and the bootstrap administrator. The chart already refuses `false` without `config.auth.oidc`. Cloudflare Access stays in front of staging as a second wall, with the same identity provider, so a person signs in once and both layers see the same session.
 
-On staging the owner chose Google Workspace directly until the broker exists (decided 2026-11-01). Access moves to it in a pull request in the owner's production cluster repository once a person has made the Google OAuth client. Unfold itself cannot follow yet: it takes a person's role from a role claim or a groups claim (`entitledRole` in `apps/unfold/src/oidc.ts`), and a Google ID token carries neither. Turning local login off on staging therefore waits for either the broker, which emits the groups, or a small Unfold change that maps a verified email address or Workspace domain to a role.
+Staging moves to the broker of direction 2 directly, with the owner's organisation as its first Tenant (decided 2026-11-17). The interim step chosen on 2026-11-01, signing in to staging with Google Workspace directly, is skipped, so no Google OAuth client is made for it. Until the broker runs, staging keeps Cloudflare Access with a one-time PIN and its local Unfold account. An installation that does use Google directly can: `auth.oidc.roles` accepts `email:<address>` for a verified address and `hd:<domain>` for a Workspace domain besides group names (`entitledRole` in `apps/unfold/src/oidc.ts`).
 
 ### 2. One customer identity broker, with an organisation per Tenant
 
@@ -90,7 +90,7 @@ For the owner the choice is between Zitadel and moving Authentik to the producti
 | What a mistake can reach | one organisation's settings | applications, sources and policies are global, so one bad policy reaches every customer |
 | Cost | none for the open source build | open source core; tenancy needs Enterprise |
 
-The proposal is **Zitadel on the production cluster**, not on the owner's staging cluster, because customer sign-in must not depend on the owner's staging cluster ([ADR-0040](../adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md)). The owner's staff reach it through federation: the owner's organisation in Zitadel links Google Workspace (or the owner's staging cluster Authentik, once it is published), so staff keep one Google sign-in and the security-key check of an ADR of the owner's cluster.
+The owner chose **Zitadel on the production cluster** on 2026-11-17 ([ADR-0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md)), not on the owner's staging cluster, because customer sign-in must not depend on the owner's staging cluster ([ADR-0040](../adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md)). The owner's staff reach it through federation: the owner's organisation in Zitadel links Google Workspace (or the owner's staging cluster Authentik, once it is published), so staff keep one Google sign-in and the security-key check of an ADR of the owner's cluster.
 
 ### 3. A Tenant is an object in Git with an owner screen
 
@@ -129,20 +129,19 @@ The preview controller of Ploeg ADR-0181 creates each preview in the Tenant's pr
 
 ## Order
 
-1. Staff sign-in on staging (direction 1): Access through Google Workspace, then Unfold through the same identity provider and `auth.localLogin: false`.
-2. The broker on the production cluster, with the owner's organisation only, and staging switched to it.
-3. The `Tenant` resource and its operator for the broker organisation and the namespaces, then the Platform → Customers area that opens the pull request.
-4. LiteLLM, OpenBao and Ploeg pieces, as Ploeg ADR-0178 lands; then `tenancy.enforce: true` on staging.
-5. Agency self-onboarding and the Tenant switcher.
-6. Previews, once Ploeg ADR-0181 is built.
+1. The broker on the production cluster, with the owner's organisation only, and staging switched to it with `auth.localLogin: false` (directions 1 and 2).
+2. The `Tenant` resource and its operator for the broker organisation and the namespaces, then the Platform → Customers area that opens the pull request.
+3. LiteLLM, OpenBao and Ploeg pieces, as Ploeg ADR-0178 lands; then `tenancy.enforce: true` on staging.
+4. Agency self-onboarding and the Tenant switcher.
+5. Previews, once Ploeg ADR-0181 is built.
 
 ## Open questions
 
-Each is the owner's to decide. The owner answered 1, 3, 4 and 5 on 2026-11-01.
+Each is the owner's to decide. The owner answered 1, 3, 4 and 5 on 2026-11-01, and 2 and 6 on 2026-11-17.
 
-1. ~~Staff sign-in on staging before the broker exists.~~ Google Workspace directly, for Access and Unfold (unfold-cluster ADR 0014); one OAuth client made by hand in Google's console. Publishing the owner's staging cluster Authentik was not chosen.
-2. The broker: Zitadel or Authentik moved to the production cluster. The owner asked for a closer comparison of the two first.
+1. ~~Staff sign-in on staging before the broker exists.~~ Answered on 2026-11-01 with Google Workspace directly, for Access and Unfold (an ADR of the owner's production cluster); replaced on 2026-11-17 by moving staging to the broker directly. Publishing the owner's staging cluster Authentik was not chosen.
+2. ~~The broker.~~ Zitadel on the production cluster, with an organisation per Tenant ([ADR-0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md)).
 3. ~~Self-hosted or managed.~~ Self-hosted on the production cluster.
 4. ~~Where the reconciler runs.~~ A `Tenant` custom resource and operator, with the `Tenant` files in Git.
 5. ~~Self sign-up.~~ Every customer starts with one of the owner's operators, for now.
-6. Until the broker exists: does Unfold on staging learn to map a verified Google email or Workspace domain to a role, so local login can go off now, or does local login stay on until the broker emits groups?
+6. ~~Local login on staging before the broker.~~ It stays on until staging moves to the broker. Unfold can map a verified email or Workspace domain to a role since 2026-11-01, but staging does not use Google directly.
