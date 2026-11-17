@@ -135,6 +135,30 @@ On GitHub Actions the hourly schedule is no reliable start. Between the workflow
 * [scripts/github-workflow-policy.test.cjs](../../scripts/github-workflow-policy.test.cjs), run by `mise run release-check-github`, fails when the train loses the `workflow_run` trigger on `[Workflow] On Source Change` for `development`, its schedule or its dispatch, or when `pending` starts after a push run that failed or was cancelled.
 * In operation: after a merge to `development` whose push check passes, the Actions list shows an `On Release Train` run with event `workflow_run`, and a new `unfold-v` tag follows when the head did not move.
 
+## Amendment 2026-11-17 (later): every push to `development` starts the train, because `workflow_run` started none
+
+The `workflow_run` trigger of the earlier 2026-11-17 amendment merged with pull request #56 at 14:50 UTC. `[Workflow] On Source Change` then passed on `development` twice, in runs 44109302112 (finished 15:03 UTC) and 44111681114 (finished 15:14 UTC), and GitHub started no `On Release Train` run for either: the workflow's run list holds no run with event `workflow_run`. The owner decided on 2026-11-17 that every change merged to `development` starts a release-candidate train, since Unfold is on 0.x candidates and a candidate per merge is fine.
+
+1. **`on_release_train.yml`** runs on `push` to `development` in place of `workflow_run`. The hourly schedule stays as a fallback and the manual dispatch stays. The push trigger has no `paths` filter: `pending` decides. A paths filter would drop a train that has work, for example when a docs-only merge lands while an earlier train finds the head moved and versions nothing.
+2. **`pending`** no longer reads a `workflow_run` conclusion; its gate is the repository, the branch and `UNFOLD_RELEASES_ENABLED`. It still checks out `github.ref`, the branch head when the job starts, not the commit that queued the run.
+3. **The `release-train` concurrency group with `cancel-in-progress: false`** is unchanged. With the default `queue: single`, GitHub runs one train in the group, keeps at most one pending, and cancels an older pending run when a newer one queues ([Control the concurrency of workflows and jobs](https://docs.github.com/en/actions/writing-workflows/choosing-what-your-workflow-does/control-the-concurrency-of-workflows-and-jobs)). A burst of merges therefore runs at most the train already in progress plus one train that reads the newest head; the pending runs it replaced show as cancelled.
+4. **The train's checks still run on its own head.** The push check of `on_source_change.yml` and the train now run the same gates on the same merge at about the same time. Reusing the push run's result would need the train to wait on another workflow, which is the trigger that just failed, so the duplication is accepted.
+
+### Consequences of the later 2026-11-17 amendment
+
+* Good, because a push is the event GitHub demonstrably delivers here, so a merge reaches a candidate after the train's own checks, about four minutes.
+* Good, because on GitHub-hosted runners the train's checks take about two and a half minutes (run 44105861704: `checks` 1m40s, `checks-unfold` 2m34s, every gate run, none reused), not the 45 minutes of the Forgejo runners this ADR was written for. The Bad consequence that merges less than about 50 minutes apart release nothing shrinks to merges less than about four minutes apart.
+* Bad, because every merge runs `checks`, `checks-unfold` and `build-contexts` twice, once in each workflow: about seven runner-minutes per merge with unreleased application commits. GitHub-hosted runners on this public repository cost no money.
+* Bad, because a merge that adds no unreleased application commit still starts a train whose `pending` takes a runner for about ten seconds and ends.
+* Neutral: a merge made with `GITHUB_TOKEN`, such as a Ploeg pin merged by `on_ploeg_pin.yml`, still creates no push run, so the schedule, the next merge or a dispatch picks it up.
+* Neutral: why `workflow_run` did not fire was not established. The `workflows` filter names `[Workflow] On Source Change`; if GitHub reads that name as a glob, the brackets form a character class that does not match the name. GitHub's documentation does not say how the filter matches.
+
+### Confirmation of the later 2026-11-17 amendment
+
+* [scripts/github-workflow-policy.test.cjs](../../scripts/github-workflow-policy.test.cjs), run by `mise run release-check-github`, fails when the train loses its `push` trigger on `development`, gains a `paths` filter, loses its schedule or dispatch, or when its concurrency group is not exactly `release-train` with `cancel-in-progress: false`, another workflow joins that group, or `pending` checks out anything but `github.ref`.
+* Mutation, 2026-11-17: removing the push trigger, removing the concurrency block, keying the group by commit, setting `cancel-in-progress: true`, adding `paths: ['apps/**']` and checking out `github.sha` in `pending` each failed the suite; unmutated, it passes.
+* In operation: after a merge to `development` the Actions list shows an `On Release Train` run with event `push`, and a new `unfold-v` tag follows within minutes when the head did not move.
+
 ## Pros and Cons of the Options
 
 ### Keep releasing from each push, with `cancel-in-progress: true`
@@ -158,3 +182,4 @@ On GitHub Actions the hourly schedule is no reliable start. Between the workflow
 * 2026-10-25: amended. Releases are tags only, so `pending` and `current` are computed from tags, not release commits.
 * 2026-11-02: amended. The release jobs run `webgrip-release --no-align --layout trains` from `harbor.webgrip.dev/webgrip/semantic-release` 2.5.1 instead of the `semantic-release-monorepo` composite of `webgrip/workflows`, which [homelab ADR-0089](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/docs/techdocs/docs/adr/adr-0089-tooling-repositories-release-in-layers.md) retires. Point 3 of the outcome holds with that command in place of the composite.
 * 2026-11-17: amended. A green push check on `development` also starts the train, because GitHub dropped most scheduled runs.
+* 2026-11-17: amended again. Every push to `development` starts the train in place of `workflow_run`, which started no train after two green push checks.

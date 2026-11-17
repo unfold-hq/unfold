@@ -169,10 +169,15 @@ test('the pull request gate waits for every job except the advisory ones, and pa
 });
 
 test('the release train versions Unfold and the site from a checked development head, with the repository\'s own toolchain', () => {
-  assert.deepEqual(Object.keys(train.on).sort(), ['schedule', 'workflow_dispatch', 'workflow_run']);
+  assert.deepEqual(Object.keys(train.on).sort(), ['push', 'schedule', 'workflow_dispatch']);
+  assert.deepEqual(train.on.push, { branches: ['development'] }, 'every merge to development starts a train, and pending, not a paths filter, decides whether it has work');
   assert.match(train.on.schedule[0].cron, /^\d+ \* \* \* \*$/);
-  assert.deepEqual(train.on.workflow_run, { workflows: [workflows['on_source_change.yml'].name], types: ['completed'], branches: ['development'] });
-  assert.deepEqual(train.concurrency, { group: 'release-train', 'cancel-in-progress': false });
+  assert.deepEqual(train.concurrency, { group: 'release-train', 'cancel-in-progress': false }, 'one train runs and at most one waits, so a burst of merges yields one train on the newest head');
+  for (const [file, workflow] of Object.entries(workflows)) {
+    const groups = [workflow.concurrency, ...Object.values(workflow.jobs ?? {}).map(job => job.concurrency)].filter(Boolean).map(concurrency => concurrency.group ?? concurrency);
+    if (file !== 'on_release_train.yml') assert.ok(!groups.some(group => String(group).includes('release-train')), file);
+  }
+  assert.equal(train.jobs.pending.steps[0].with.ref, '${{ github.ref }}', 'pending reads the branch head when it starts, not the commit that queued it');
   assert.deepEqual(Object.keys(train.jobs).sort(), ['build-contexts', 'checks', 'checks-unfold', 'pending', 'ploeg-pin', 'release', 'site-release']);
   for (const ref_name of ['development', 'main', 'topic']) {
     for (const gate of ['', 'false', 'true']) {
@@ -180,9 +185,9 @@ test('the release train versions Unfold and the site from a checked development 
       for (const name of ['pending', 'release', 'site-release']) assert.equal(evaluate(train.jobs[name].if, context), ref_name === 'development' && gate === 'true', `${name} ${ref_name} ${gate}`);
     }
   }
-  for (const [event_name, conclusion, starts] of [['schedule', undefined, true], ['workflow_dispatch', undefined, true], ['workflow_run', 'success', true], ['workflow_run', 'failure', false], ['workflow_run', 'cancelled', false]]) {
-    const context = { github: { ref_name: 'development', event_name, event: { workflow_run: { conclusion } } }, vars: { UNFOLD_RELEASES_ENABLED: 'true' } };
-    assert.equal(evaluate(train.jobs.pending.if, context), starts, `${event_name} ${conclusion}`);
+  for (const event_name of ['push', 'schedule', 'workflow_dispatch']) {
+    const context = { github: { ref_name: 'development', event_name }, vars: { UNFOLD_RELEASES_ENABLED: 'true' } };
+    assert.equal(evaluate(train.jobs.pending.if, context), true, event_name);
   }
   for (const name of ['checks', 'checks-unfold', 'build-contexts', 'ploeg-pin']) {
     assert.deepEqual(train.jobs[name].needs, ['pending']);

@@ -1,9 +1,7 @@
 name: '[Workflow] On Release Train'
 
 on:
-  workflow_run:
-    workflows: ['[Workflow] On Source Change']
-    types: [completed]
+  push:
     branches: [development]
   schedule:
     - cron: '7 * * * *'
@@ -18,7 +16,7 @@ permissions:
 
 jobs:
   pending:
-    if: github.repository == 'unfold-hq/unfold' && github.ref_name == 'development' && vars.UNFOLD_RELEASES_ENABLED == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    if: github.repository == 'unfold-hq/unfold' && github.ref_name == 'development' && vars.UNFOLD_RELEASES_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
