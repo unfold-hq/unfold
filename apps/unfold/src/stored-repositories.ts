@@ -1,13 +1,19 @@
+import { randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AppConfig, Repository, User } from './types.ts';
 import { TaskError } from './task-providers/shared.ts';
-import { defaultTenant, repositoryKey, validTenancyId } from './tenancy.ts';
+import { defaultTenant, ownership, repositoryKey, validTenancyId } from './tenancy.ts';
 import type { ClientProject, ClientProjects } from './integration-store.ts';
 
 /** A repository an Admin added from the screen (system ADR-0048): owned by the Tenant, keyed by forge host and `owner/name`. */
 export type StoredRepository = { id: string; key: string; url: string; name: string; description: string; baseBranch: string; tenant: string; integrationAccount?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
-/** Whether a stored repository is in use, or hidden by a configured one with the same key or id. */
-export type RepositoryState = 'active' | 'shadowed';
+/**
+ * Whether a stored repository is in use; `shadowed` when a configured repository has its key or id, another Tenant's
+ * repository has its `owner/name`, or its forge host is not one the configuration uses; `off` while the
+ * `repositories.stored` flag is off.
+ */
+export type RepositoryState = 'active' | 'shadowed' | 'off';
 /** A Client Project's permission to route work to a repository. */
 export type RepositoryGrant = { clientProject: string; name: string; grantedAt: string; grantedBy: string };
 /** A stored repository as people see it. */
@@ -18,6 +24,9 @@ export type GrantChange = { action: 'create' | 'delete'; repository: StoredRepos
 type Access = { enforced: boolean; manages(user: User, tenant: string): boolean; sees(user: User, tenant: string): boolean; now(): string; log(event: string, fields: Record<string, unknown>): void };
 
 const repositoryId = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** Every stored repository id starts with this, and the ids Unfold gives them never equal a configured id. */
+export const storedIdPrefix = 'r-';
+const internalSuffixes = ['.local', '.localhost', '.internal', '.lan', '.home.arpa', '.svc', '.cluster.local', '.corp', '.intranet'];
 const branch = /^(?!.*\.\.)(?!\/)(?!.*\/$)[A-Za-z0-9._/-]{1,255}$/;
 const maxRepositories = 500;
 
@@ -26,20 +35,31 @@ function text(value: unknown, label: string, max: number): string {
   return value.trim();
 }
 
+/** A host Unfold never reaches for a stored repository: an IP address, a name without a dot, or a name only a private network resolves. */
+export function internalHost(host: string): boolean {
+  const name = host.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  return isIP(name) !== 0 || !name.includes('.') || name === 'localhost' || internalSuffixes.some(suffix => name.endsWith(suffix));
+}
+
+const hostOf = (key: string) => key.startsWith('path:') ? undefined : key.slice(0, key.indexOf('/'));
+const pathOf = (key: string) => key.startsWith('path:') ? key : key.slice(key.indexOf('/') + 1);
+
 function forgeUrl(value: unknown): { url: string; key: string } {
   const url = text(value, 'Repository URL', 2048);
   let parsed: URL;
   try { parsed = new URL(url); } catch { throw new TaskError(400, 'repository_invalid', 'Repository URL must be an HTTPS address such as https://github.com/acme/shop.'); }
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) throw new TaskError(400, 'repository_invalid', 'Repository URL must be an HTTPS address without a user name, password, query or fragment.');
+  if (parsed.port) throw new TaskError(400, 'repository_invalid', 'Repository URL must use the forge\'s standard HTTPS port.');
+  if (internalHost(parsed.hostname)) throw new TaskError(400, 'repository_invalid', 'Repository URL must name a public forge host, not an address or an internal name.');
   const key = repositoryKey(url);
   if (key.split('/').length < 3) throw new TaskError(400, 'repository_invalid', 'Repository URL must name the owner and the repository, such as https://github.com/acme/shop.');
   return { url: url.replace(/\/+$/, ''), key };
 }
 
-function slug(name: string, taken: Set<string>): string {
-  const base = name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/, '') || 'repository';
-  if (!taken.has(base)) return base;
-  for (let index = 2; ; index++) if (!taken.has(`${base}-${index}`)) return `${base}-${index}`;
+function storedId(name: string, taken: (id: string) => boolean): string {
+  const base = `${storedIdPrefix}${name.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48).replace(/-+$/, '') || 'repository'}`;
+  if (!taken(base)) return base;
+  for (;;) { const id = `${base}-${randomBytes(3).toString('hex')}`; if (!taken(id)) return id; }
 }
 
 /**
@@ -53,6 +73,7 @@ export class StoredRepositories {
   private readonly projects: ClientProjects;
   private readonly access: Access;
   private readonly listeners: ((change: GrantChange) => void)[] = [];
+  private joined = false;
 
   constructor(db: DatabaseSync, config: AppConfig, projects: ClientProjects, access: Access) {
     this.db = db;
@@ -80,15 +101,35 @@ export class StoredRepositories {
 
   private configured(): Repository[] { return this.config.repositories.filter(entry => !entry.stored); }
 
-  /** Whether `repository` is in use: `shadowed` when a configured repository has its key or its id. */
+  /** The forge hosts of the configured repositories: the only hosts a stored repository may name. */
+  forgeHosts(): Set<string> { return new Set(this.configured().flatMap(entry => { const host = hostOf(repositoryKey(entry.url)); return host && !internalHost(host) ? [host] : []; })); }
+
+  /**
+   * Whether `repository` is in use. It is `shadowed` when a configured repository has its key or id, when a repository
+   * of another Tenant, configured or stored, has its `owner/name` on any forge, since a Work Item's target names no
+   * host, or when its forge host is not one the configuration uses.
+   */
   state(repository: StoredRepository): RepositoryState {
-    return this.configured().some(entry => entry.id === repository.id || repositoryKey(entry.url) === repository.key) ? 'shadowed' : 'active';
+    if (!this.joined) return 'off';
+    const path = pathOf(repository.key);
+    const host = hostOf(repository.key);
+    if (!host || internalHost(host) || !this.forgeHosts().has(host)) return 'shadowed';
+    if (this.configured().some(entry => entry.id === repository.id || repositoryKey(entry.url) === repository.key || (pathOf(repositoryKey(entry.url)) === path && ownership(entry).tenant !== repository.tenant))) return 'shadowed';
+    return this.repositories().some(other => other.id !== repository.id && other.tenant !== repository.tenant && pathOf(other.key) === path) ? 'shadowed' : 'active';
   }
 
-  /** Puts the stored repositories into `config.repositories` after the configured ones, replacing what an earlier sync put there. */
+  /** Whether stored repositories join `config.repositories`: only while the `repositories.stored` flag is on. Answers whether that changed. */
+  join(on: boolean): boolean {
+    if (this.joined === on) return false;
+    this.joined = on;
+    return true;
+  }
+
+  /** Puts the stored repositories into `config.repositories` after the configured ones, replacing what an earlier sync put there. While they may not join, it only takes them out. */
   sync(): void {
     const list = this.config.repositories;
     for (let index = list.length - 1; index >= 0; index--) if (list[index].stored) list.splice(index, 1);
+    if (!this.joined) return;
     for (const repository of this.repositories()) {
       if (this.state(repository) !== 'active') { this.access.log('repositories.shadowed', { repository: repository.id, key: repository.key }); continue; }
       list.push({ id: repository.id, name: repository.name, description: repository.description, url: repository.url, baseBranch: repository.baseBranch, verify: [], tenant: repository.tenant, stored: true });
@@ -105,7 +146,7 @@ export class StoredRepositories {
   private owned(user: User, id: string): StoredRepository {
     const repository = this.repository(id);
     if (!repository || !this.access.sees(user, repository.tenant)) {
-      if (!repository && this.configured().some(entry => entry.id === id)) throw new TaskError(409, 'repository_read_only', 'This repository is in the server configuration, so it is changed there and not here.');
+      if (!repository && this.configured().some(entry => entry.id === id && this.access.sees(user, ownership(entry).tenant))) throw new TaskError(409, 'repository_read_only', 'This repository is in the server configuration, so it is changed there and not here.');
       throw new TaskError(404, 'repository_not_found', 'There is no such repository. Reload the page to see the ones there are.');
     }
     if (!this.access.manages(user, repository.tenant)) throw new TaskError(403, 'forbidden', `Only an administrator${this.access.enforced ? ` of Tenant ${repository.tenant}` : ''} changes repositories.`);
@@ -134,12 +175,14 @@ export class StoredRepositories {
     const { url, key } = forgeUrl(input.url);
     const stored = this.repositories();
     if (stored.length >= maxRepositories) throw new TaskError(409, 'repository_invalid', `Unfold keeps at most ${maxRepositories} repositories added from the screen. Remove one first.`);
-    if (stored.some(entry => entry.key === key) || this.configured().some(entry => repositoryKey(entry.url) === key)) throw new TaskError(409, 'repository_exists', `Unfold already has ${key}.`);
+    if (stored.some(entry => entry.tenant === tenant && entry.key === key) || this.configured().some(entry => ownership(entry).tenant === tenant && repositoryKey(entry.url) === key)) throw new TaskError(409, 'repository_exists', `This Tenant already has ${key}.`);
+    if (!this.forgeHosts().has(hostOf(key)!)) throw new TaskError(400, 'repository_invalid', `Repository URL must be on a forge host the server configuration uses: ${[...this.forgeHosts()].sort().join(', ') || 'none is configured yet'}.`);
     const name = input.name === undefined ? key.split('/').slice(1).join('/') : text(input.name, 'Name', 100);
     const description = input.description === undefined || input.description === '' ? '' : text(input.description, 'Description', 500);
     const baseBranch = this.baseBranch(input.baseBranch);
     const integrationAccount = this.forgeAccount(input.integrationAccount, tenant);
-    const id = slug(key.split('/').at(-1)!, new Set([...this.config.repositories.map(entry => entry.id), ...stored.map(entry => entry.id)]));
+    const taken = new Set([...this.config.repositories.map(entry => entry.id), ...stored.map(entry => entry.id)]);
+    const id = storedId(key.split('/').at(-1)!, candidate => taken.has(candidate));
     const at = this.access.now();
     const repository: StoredRepository = { id, key, url, name, description, baseBranch, tenant, ...(integrationAccount ? { integrationAccount } : {}), createdAt: at, createdBy: user.name, updatedAt: at, updatedBy: user.name };
     let project: ClientProject;

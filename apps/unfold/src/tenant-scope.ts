@@ -37,15 +37,24 @@ const pathOf = (key: string) => key.startsWith('path:') ? key : key.slice(key.in
  */
 export class TenantScope {
   readonly enforced: boolean;
-  private readonly repositoryList: Repository[];
-  private readonly sourceList: TaskSourceConfig[];
+  private readonly config: Pick<AppConfig, 'repositories' | 'taskSources' | 'tenancy'>;
+  private repositoryList: Repository[] = [];
+  private sourceList: TaskSourceConfig[] = [];
   private readonly byTarget = new Map<string, Repository[]>();
   private readonly byPath = new Map<string, Repository[]>();
 
   constructor(config: Pick<AppConfig, 'repositories' | 'taskSources' | 'tenancy'>) {
     this.enforced = config.tenancy?.enforce === true;
-    this.repositoryList = config.repositories ?? [];
-    this.sourceList = config.taskSources ?? [];
+    this.config = config;
+    this.rebuild();
+  }
+
+  /** Reads the repositories and task sources again and rebuilds the Work Item ownership indexes, as after a sync of stored ones. */
+  rebuild(): void {
+    this.repositoryList = this.config.repositories ?? [];
+    this.sourceList = this.config.taskSources ?? [];
+    this.byTarget.clear();
+    this.byPath.clear();
     const add = (map: Map<string, Repository[]>, key: string, repository: Repository) => { const list = map.get(key) ?? []; if (!list.includes(repository)) list.push(repository); map.set(key, list); };
     for (const source of this.sourceList) {
       const repository = this.repositoryList.find(entry => entry.id === source.repositoryId);

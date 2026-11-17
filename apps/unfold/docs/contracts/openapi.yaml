@@ -1505,7 +1505,7 @@ paths:
       tags: [Tasks]
       operationId: listStoredRepositories
       summary: 'Repositories people added from the screen'
-      description: 'The stored repositories of the Tenants the person reaches, each with its `state`, its Repository Grants and whether the person may change it. `shadowed` means a repository in the server configuration has the same key (forge host and `owner/name`) or id: the configured one is used and the stored one is kept. `manageTenants` lists the Tenants whose repositories the person may add. Repositories in the server configuration are not listed here.'
+      description: 'The stored repositories of the Tenants the person reaches, each with its `state`, its Repository Grants and whether the person may change it. `shadowed` means the stored one is kept and not used: a repository in the server configuration has the same key (forge host and `owner/name`) or id, a repository of another Tenant has the same `owner/name`, or its host is no longer one the configuration uses. `off` means the `repositories.stored` flag is off, so no stored repository is used. `manageTenants` lists the Tenants whose repositories the person may add. Repositories in the server configuration are not listed here.'
       x-unfold-role: viewer
       responses:
         '200':
@@ -1524,7 +1524,7 @@ paths:
       tags: [Tasks]
       operationId: createStoredRepository
       summary: 'Add a repository and grant it to Own work'
-      description: 'Stores the repository for `tenant` and grants it to the Tenant''s Own work, which is created on first use. It then joins the repositories the workbench uses, after the configured ones. `url` is an HTTPS forge address without credentials, query or fragment (400 `repository_invalid`); its key is the forge host and `owner/name`, lower-cased and without `.git`. 409 `repository_exists` when Unfold already has a repository with that key. Nothing is sent to Ploeg or the forge. 403 for anyone but an administrator, and while tenancy is enforced for an administrator who is not an Admin of `tenant`.'
+      description: 'Stores the repository for `tenant` and grants it to the Tenant''s Own work, which is created on first use. While the `repositories.stored` flag is on, it then joins the repositories the workbench uses, after the configured ones; while it is off, this route, `PATCH` and `DELETE` answer 404 `repositories_off`. `url` is an HTTPS forge address on the standard port, without credentials, query or fragment, on a host the configured repositories use and never an IP address or private name (400 `repository_invalid`); its key is the forge host and `owner/name`, lower-cased and without `.git`. 409 `repository_exists` when the Tenant already has a repository with that key; the same key in another Tenant is stored and shadowed. The id starts with `r-` and the `Location` header names the new repository. It is cloned anonymously, never with the shared git secret. Nothing is sent to Ploeg or the forge. 403 for anyone but an administrator, and while tenancy is enforced for an administrator who is not an Admin of `tenant`.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }
@@ -1552,17 +1552,18 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/repositories/{storedRepositoryId}:
     parameters:
-      - { name: storedRepositoryId, in: path, required: true, example: shop, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' } }
+      - { name: storedRepositoryId, in: path, required: true, example: r-shop, schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' } }
     patch:
       tags: [Tasks]
       operationId: updateStoredRepository
       summary: 'Change a stored repository'
-      description: 'Changes `name`, `description` or `baseBranch`; the URL and key stay. 409 `repository_read_only` for a repository in the server configuration; 404 `repository_not_found`, also for one of a Tenant the person does not reach.'
+      description: 'Changes `name`, `description` or `baseBranch`; the URL and key stay. 404 `repositories_off` while the `repositories.stored` flag is off. 409 `repository_read_only` for a repository in the server configuration the person reaches; 404 `repository_not_found`, also for a stored or configured one of a Tenant the person does not reach.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }
@@ -1594,7 +1595,7 @@ paths:
       tags: [Tasks]
       operationId: removeStoredRepository
       summary: 'Remove a stored repository and its Repository Grants'
-      description: '409 `repository_in_use` while saved task sources still use it; 409 `repository_read_only` for one in the server configuration; 404 `repository_not_found`.'
+      description: '404 `repositories_off` while the `repositories.stored` flag is off. 409 `repository_in_use` while saved task sources still use it; 409 `repository_read_only` for one in the server configuration; 404 `repository_not_found`.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }
@@ -7865,7 +7866,7 @@ components:
         baseBranch: { type: string }
         tenant: { type: string }
         integrationAccount: { type: string }
-        state: { type: string, enum: [active, shadowed] }
+        state: { type: string, enum: [active, shadowed, off] }
         manage: { type: boolean, description: 'Whether the caller may change or remove it.' }
         grants:
           type: array

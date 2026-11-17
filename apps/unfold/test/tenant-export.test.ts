@@ -122,7 +122,7 @@ test('the bundle carries no secret: no password hash, token, key, credential or 
   assert.equal(rows(bundle, 'task-sources')[0].project, 'acme/repo');
   assert.match(rows(bundle, 'session-events')[0].data.text, /\[redacted\]/);
   assert.equal(bundle.manifest.secrets.exported, false);
-  assert.deepEqual(bundle.manifest.excluded.map(entry => entry.table).sort(), ['audit_exports', 'card_import', 'editor_credentials', 'intake_deliveries', 'internal_state', 'jobs', 'linked_session_notice_snapshots', 'logins', 'mcp_event_subscriptions', 'mcp_event_verifications', 'notify_cursors', 'notify_handed_transitions', 'notify_outbox', 'notify_slack_pending', 'outbound_cursors', 'outbound_sign_off_changes', 'sqlite_sequence', 'ssf_seen']);
+  assert.deepEqual(bundle.manifest.excluded.map(entry => entry.table).sort(), ['audit_exports', 'card_import', 'editor_credentials', 'intake_deliveries', 'internal_state', 'jobs', 'linked_session_notice_snapshots', 'logins', 'mcp_event_subscriptions', 'mcp_event_verifications', 'notify_cursors', 'notify_handed_transitions', 'notify_outbox', 'notify_slack_pending', 'outbound_cursors', 'outbound_sign_off_changes', 'sqlite_sequence', 'ssf_seen', 'tracker_connections']);
 });
 
 test('with Tenant checks enforced, the bundle holds only what the Tenant owns', async t => {
@@ -261,7 +261,7 @@ test('the manifest lists every file with its row count and SHA-256, and every ro
   const bundle = await exported(dir, { ...base(store), flagDocument: () => ({ flags: {} }) });
 
   assert.equal(bundle.manifest.format, 'unfold-tenant-export');
-  assert.equal(bundle.manifest.formatVersion, 1);
+  assert.equal(bundle.manifest.formatVersion, 2);
   assert.equal(bundle.sha256, createHash('sha256').update(await readFile(join(dir, 'bundle.tar.gz'))).digest('hex'));
   const listed = new Set(bundle.manifest.files.map(file => file.path));
   assert.deepEqual([...bundle.members.keys()].filter(name => name !== 'manifest.json').sort(), [...listed].sort(), 'the manifest lists every other member');

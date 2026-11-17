@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { application, login, request } from './api-support.ts';
+import { flagSettings, loadRegistry } from '../src/flags.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/store.ts';
 import { TrackerConnections } from '../src/tracker-connections.ts';
@@ -34,7 +35,7 @@ function configFor(dataDir: string): AppConfig {
   } as unknown as AppConfig;
 }
 
-test('a store written by the schema before Integration Accounts migrates without losing a row, and every token still opens under its id', async t => {
+test('a store written by the schema before Integration Accounts is copied without losing a row, keeps its old table, and every token still opens under its id', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'unfold-migration-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'unfold.sqlite');
@@ -56,8 +57,10 @@ test('a store written by the schema before Integration Accounts migrates without
   const config = configFor(dir);
   const migrated = new TrackerConnections(store, config, { enforced: true, now: () => new Date('2026-11-17T00:00:00.000Z') });
   const tables = (store.db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as { name: string }[]).map(row => row.name);
-  assert.ok(!tables.includes('tracker_connections') && !tables.some(name => name.endsWith('_before')), 'the old table and the copy are gone');
-  for (const table of ['integration_accounts', 'tracker_connection_sources', 'client_projects', 'repositories', 'repository_grants']) assert.ok(tables.includes(table), `${table} exists`);
+  assert.ok(!tables.some(name => name.endsWith('_before')), 'the copy made while reshaping is gone');
+  assert.equal(count(store, 'SELECT count(*) AS n FROM tracker_connections'), connections.length, 'the old table stays for a rollback');
+  assert.deepEqual(store.db.prepare('PRAGMA foreign_key_list(tracker_connection_sources)').all().map((key: any) => key.from), ['client_project_id'], 'a source refers to its Client Project, and its connection id is checked by Unfold, so every image can add one');
+  for (const table of ['tracker_connections', 'integration_accounts', 'tracker_connection_sources', 'client_projects', 'repositories', 'repository_grants']) assert.ok(tables.includes(table), `${table} exists`);
   assert.ok((store.db.prepare("SELECT name FROM sqlite_schema WHERE type='index' AND tbl_name='tracker_connection_sources'").all() as { name: string }[]).some(row => row.name === 'tracker_connection_sources_connection'), 'the source index is on the new table');
 
   const byId = [...connections].sort((left, right) => left.id.localeCompare(right.id));
@@ -86,6 +89,11 @@ test('a store written by the schema before Integration Accounts migrates without
   assert.deepEqual(again.connections().map(entry => entry.id), byId.map(entry => entry.id), 'forge accounts are not tracker connections');
 });
 
+const storedRepositoriesOn = (config: AppConfig) => {
+  config.flags = flagSettings({ flags: { 'repositories.stored': { defaultVariant: 'on' } } }, loadRegistry(), {});
+  config.repositories.push({ id: 'home', name: 'Home', description: '', url: 'https://forge.example.test/home/site.git', baseBranch: 'main', verify: [] });
+};
+
 async function signIn(app: Awaited<ReturnType<typeof application>>, id: string, role: User['role'], memberships?: Membership[]) {
   if (!app.app.store.getUser(id)) app.app.store.addUser({ id, name: id, role, passwordHash: '', ...(memberships ? { memberships } : {}) });
   return new Auth(app.app.store, app.config).issue({ id, name: id, role }).cookie.split(';')[0];
@@ -97,7 +105,7 @@ const auditEntities = (app: Awaited<ReturnType<typeof application>>, types: stri
   .map(entry => `${entry.tenant} ${entry.event.entity.type} ${entry.event.activity_name} ${entry.event.status}`);
 
 test('an administrator adds a repository from the screen: Own work is made on first use, holds a grant, and the repository joins the configured ones', async t => {
-  const app = await application('live');
+  const app = await application('live', storedRepositoriesOn);
   t.after(() => app.close());
   const { cookie } = await login(app.url);
 
@@ -113,7 +121,7 @@ test('an administrator adds a repository from the screen: Own work is made on fi
   const created = await request(app.url, '/api/repositories', { method: 'POST', cookie, body: { url: 'https://Forge.Example.test/Acme/Shop.git', baseBranch: 'trunk' } });
   assert.equal(created.status, 201, created.text);
   const repository = created.body.repository;
-  assert.equal(repository.id, 'shop');
+  assert.equal(repository.id, 'r-shop', 'a stored id never equals a configured one');
   assert.equal(repository.key, 'forge.example.test/acme/shop');
   assert.equal(repository.name, 'acme/shop');
   assert.equal(repository.baseBranch, 'trunk');
@@ -127,31 +135,31 @@ test('an administrator adds a repository from the screen: Own work is made on fi
   assert.equal(projects.body.tenants[0].visible, false, 'no Client, so the screens show no projects');
   assert.deepEqual(projects.body.tenants[0].projects.map((project: any) => [project.name, project.isDefault, project.id === repository.grants[0].clientProject]), [['Own work', true, true]]);
 
-  assert.deepEqual(app.config.repositories.map(entry => [entry.id, entry.stored ?? false]), [['order-service', false], ['shop', true]], 'stored repositories come after the configured ones');
+  assert.deepEqual(app.config.repositories.map(entry => [entry.id, entry.stored ?? false]), [['order-service', false], ['home', false], ['r-shop', true]], 'stored repositories come after the configured ones');
   const second = await request(app.url, '/api/repositories', { method: 'POST', cookie, body: { url: 'https://forge.example.test/acme/web' } });
   assert.equal(second.status, 201);
   assert.equal(second.body.repository.grants[0].clientProject, repository.grants[0].clientProject, 'Own work is made once');
 
-  const badBranch = await request(app.url, '/api/repositories/shop', { method: 'PATCH', cookie, body: { name: 'Webshop', baseBranch: '../main' } });
+  const badBranch = await request(app.url, '/api/repositories/r-shop', { method: 'PATCH', cookie, body: { name: 'Webshop', baseBranch: '../main' } });
   assert.equal(badBranch.status, 400);
-  const changed = await request(app.url, '/api/repositories/shop', { method: 'PATCH', cookie, body: { name: 'Webshop' } });
+  const changed = await request(app.url, '/api/repositories/r-shop', { method: 'PATCH', cookie, body: { name: 'Webshop' } });
   assert.equal(changed.body.repository.name, 'Webshop');
   assert.equal(changed.body.repository.key, 'forge.example.test/acme/shop');
-  assert.equal(app.config.repositories.find(entry => entry.id === 'shop')?.name, 'Webshop');
+  assert.equal(app.config.repositories.find(entry => entry.id === 'r-shop')?.name, 'Webshop');
   const configured = await request(app.url, '/api/repositories/order-service', { method: 'DELETE', cookie });
   assert.equal(configured.status, 409);
   assert.equal(configured.body.error.code, 'repository_read_only');
 
   app.app.store.db.prepare("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,created_at,body) VALUES(?,?,'tracker',?,?,?,?)").run('tc-0123456789ab', 'default', 'clickup', clickup, at, JSON.stringify(connection('tc-0123456789ab', 'default', 'Unfold bot')));
   const admin = app.app.store.getUserByName('admin')!;
-  const saved = app.app.connections.addSource({ id: admin.id, name: admin.name, role: 'admin' }, 'tc-0123456789ab', { project: '777', name: 'Sprint 12', repositoryId: 'shop' });
+  const saved = app.app.connections.addSource({ id: admin.id, name: admin.name, role: 'admin' }, 'tc-0123456789ab', { project: '777', name: 'Sprint 12', repositoryId: 'r-shop' });
   assert.equal(saved.clientProject, repository.grants[0].clientProject, 'a source without a Client lands in Own work');
-  const inUse = await request(app.url, '/api/repositories/shop', { method: 'DELETE', cookie });
+  const inUse = await request(app.url, '/api/repositories/r-shop', { method: 'DELETE', cookie });
   assert.equal(inUse.status, 409);
   assert.equal(inUse.body.error.code, 'repository_in_use');
-  assert.equal((await request(app.url, '/api/repositories/web', { method: 'DELETE', cookie })).status, 200);
-  assert.equal(count(app.app.store, "SELECT count(*) AS n FROM repository_grants WHERE repository_id='web'"), 0);
-  assert.deepEqual(app.config.repositories.map(entry => entry.id), ['order-service', 'shop']);
+  assert.equal((await request(app.url, '/api/repositories/r-web', { method: 'DELETE', cookie })).status, 200);
+  assert.equal(count(app.app.store, "SELECT count(*) AS n FROM repository_grants WHERE repository_id='r-web'"), 0);
+  assert.deepEqual(app.config.repositories.map(entry => entry.id), ['order-service', 'home', 'r-shop']);
 
   assert.deepEqual(auditEntities(app, ['Repository', 'Repository Grant', 'Client Project']), [
     'default Repository Create Failure', 'default Repository Create Failure', 'default Repository Create Failure', 'default Repository Create Failure',
@@ -163,7 +171,7 @@ test('an administrator adds a repository from the screen: Own work is made on fi
 });
 
 test('a repository added to the configuration later wins, and the stored one is shadowed and kept', async t => {
-  const app = await application('live');
+  const app = await application('live', storedRepositoriesOn);
   t.after(() => app.close());
   const { cookie } = await login(app.url);
   assert.equal((await request(app.url, '/api/repositories', { method: 'POST', cookie, body: { url: 'https://forge.example.test/acme/shop' } })).status, 201);
@@ -172,13 +180,13 @@ test('a repository added to the configuration later wins, and the stored one is 
   await app.restart();
   const { cookie: after } = await login(app.url);
   const listed = await request(app.url, '/api/repositories', { cookie: after });
-  assert.deepEqual(listed.body.repositories.map((entry: any) => [entry.id, entry.state]), [['shop', 'shadowed']]);
-  assert.deepEqual(app.config.repositories.map(entry => entry.id), ['order-service', 'webshop'], 'the configured entry is used');
-  assert.equal(count(app.app.store, "SELECT count(*) AS n FROM repositories WHERE id='shop'"), 1, 'and the stored one is not deleted');
+  assert.deepEqual(listed.body.repositories.map((entry: any) => [entry.id, entry.state]), [['r-shop', 'shadowed']]);
+  assert.deepEqual(app.config.repositories.map(entry => entry.id), ['order-service', 'home', 'webshop'], 'the configured entry is used');
+  assert.equal(count(app.app.store, "SELECT count(*) AS n FROM repositories WHERE id='r-shop'"), 1, 'and the stored one is not deleted');
 });
 
 test('only an Admin of the Tenant adds or changes its repositories; another Tenant cannot tell they exist; projects show once the Tenant has a Client', async t => {
-  const app = await application('live', config => { config.tenancy = { enforce: true }; });
+  const app = await application('live', config => { storedRepositoriesOn(config); config.tenancy = { enforce: true }; });
   t.after(() => app.close());
   const owner = await signIn(app, 'olga', 'admin', [{ kind: 'tenant', tenant: 'agency', role: 'admin' }]);
   const outsider = await signIn(app, 'otto', 'admin', [{ kind: 'tenant', tenant: 'other', role: 'admin' }]);
@@ -194,10 +202,10 @@ test('only an Admin of the Tenant adds or changes its repositories; another Tena
   assert.equal(unknownAccount.status, 400, 'an integration account must be a forge account of the Tenant');
   assert.equal((await request(app.url, '/api/repositories', { method: 'POST', cookie: owner, body: { tenant: 'agency', url: 'https://forge.example.test/agency/site' } })).status, 201);
 
-  assert.deepEqual((await request(app.url, '/api/repositories', { cookie: developer })).body.repositories.map((entry: any) => [entry.id, entry.manage]), [['site', false]]);
+  assert.deepEqual((await request(app.url, '/api/repositories', { cookie: developer })).body.repositories.map((entry: any) => [entry.id, entry.manage]), [['r-site', false]]);
   assert.deepEqual((await request(app.url, '/api/repositories', { cookie: outsider })).body.repositories, []);
-  for (const method of ['PATCH', 'DELETE']) assert.equal((await request(app.url, '/api/repositories/site', { method, cookie: outsider, body: { name: 'x' } })).status, 404, `${method} from another Tenant`);
-  assert.equal((await request(app.url, '/api/repositories/site', { method: 'PATCH', cookie: developer, body: { name: 'x' } })).status, 403);
+  for (const method of ['PATCH', 'DELETE']) assert.equal((await request(app.url, '/api/repositories/r-site', { method, cookie: outsider, body: { name: 'x' } })).status, 404, `${method} from another Tenant`);
+  assert.equal((await request(app.url, '/api/repositories/r-site', { method: 'PATCH', cookie: developer, body: { name: 'x' } })).status, 403);
   assert.deepEqual((await request(app.url, '/api/client-projects', { cookie: outsider })).body.tenants.map((entry: any) => [entry.tenant, entry.projects.length]), [['other', 0]]);
 
   const agency = async () => (await request(app.url, '/api/client-projects', { cookie: owner })).body.tenants.find((entry: any) => entry.tenant === 'agency');
