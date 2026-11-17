@@ -285,6 +285,18 @@ Agent Trace records say which lines of a commit an agent wrote. Three things car
 
 Records another tool writes can reach Unfold too: send them to your session with `POST /api/linked-sessions/<id>/traces`. The session page then names that tool beside the commit's AI-written lines.
 
+## What a session costs and how it is billed
+
+The cost Unfold shows for a Claude Code session is Claude Code's own estimate at API list prices, from its telemetry. A Claude plan is not billed these prices, so it is an estimate, and every screen and export says so.
+
+* **Unfold keeps it.** Each time the session's page or a Work Item page reads the telemetry, and a few minutes after the session stops working or ends, Unfold records the session's cost and tokens with the time it read them. The metrics store forgets old sessions (often after 30 days); the recorded figure stays. A page whose store no longer has the session shows the **Recorded estimate**, and **Your usage** uses the recorded sum when it is higher than what the store still knows.
+* **It is never made up.** A read that found no tokens records nothing, and a smaller later read never lowers what was recorded. An unknown cost reads as unknown, not as zero.
+* **It belongs to the Work Items the session is linked to.** A session linked to two Work Items gives each half of each day's cost, so nothing is counted twice. Link sessions to the right Work Item before you export a month: the split follows the links at the time of the export.
+* **Billing a Client.** An administrator sets a markup per Tenant, or per Client, under Billing (`PUT /api/billing/usage-markups`, such as `{"tenant": "default", "client": "acme", "percent": "15"}`). The markup changes only the billable amount; the recorded estimate stays as it was. A new markup starts today or later, so a month you already billed keeps its amounts. The Work Item page shows **Billable** next to the estimate when a markup applies.
+* **The figures for an invoice** come from the [FOCUS cost export](../../apps/unfold/docs/operations/focus-cost-export.md#linked-session-estimates) with `linkedSessions=include`: one row per Work Item and day, with the estimate and the billable amount in separate columns, and no person named.
+
+Only administrators see the total of everyone's sessions on a Work Item; anyone else sees the share of their own. [ADR 0069](../../apps/unfold/docs/adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md) records the design, which is proposed.
+
 ## What leaves your machine
 
 The plugin sends:
