@@ -1,3 +1,4 @@
+import type { TaskSourceConfig } from '../tasks.ts';
 import type { ScopeEntry, TaskProviderAdapter, TaskRequest } from './registry.ts';
 import { authorize } from './repository-issues.ts';
 import { apiWebRoot, entries, field, listPage, nativeTaskId, numericId, readOne, record, requireSuffix, TaskError, updated } from './shared.ts';
@@ -22,6 +23,25 @@ async function spaceChildren(id: string, request: TaskRequest): Promise<ScopeEnt
   return [...visible, ...containers(lists, 'lists', 'list', true, false)];
 }
 
+const markedId = /^[0-9a-z]{6,12}$/;
+const customId = /^[A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,9}$/;
+const lookupMisses = new Set([400, 401, 403, 404]);
+
+async function customTask(source: TaskSourceConfig, key: string, workspaces: string[], request: TaskRequest): Promise<string | undefined> {
+  for (const workspace of workspaces.slice(0, 3)) {
+    const found = await request(`/task/${encodeURIComponent(key)}`, { custom_task_ids: 'true', team_id: workspace }).then(answer => record(answer.value), (error: unknown) => {
+      if (error instanceof TaskError && lookupMisses.has(error.status)) return undefined;
+      throw error;
+    });
+    if (found && homeList(found) === source.project && typeof found.id === 'string' && clickupTaskId.test(found.id)) return found.id;
+  }
+  return undefined;
+}
+
+async function workspaceIds(request: TaskRequest): Promise<string[]> {
+  return entries(record((await request('/team')).value).teams).map(team => String(team.id ?? '')).filter(id => containerId.test(id));
+}
+
 /** ClickUp's own Markdown, tidied for Unfold's renderer: images become links that say so, and the inline HTML ClickUp mixes in (underline, line breaks) becomes plain text. */
 export function clickupMarkdown(text: string): string {
   return text
@@ -40,6 +60,7 @@ export const clickup: TaskProviderAdapter = {
   label: 'ClickUp',
   descriptionFormat: 'markdown',
   idMark: '#',
+  markPrefix: 'CU-',
   priorities: { names: ['', 'urgent', 'high', 'normal', 'low'], oneIsHighest: true },
   linkedAccount: 'clickup',
   rateLimit: 'ClickUp lets each account ask 100 times a minute on most plans.',
@@ -52,6 +73,16 @@ export const clickup: TaskProviderAdapter = {
   },
   webRoot: apiWebRoot,
   taskUrl: (_source, id) => `https://app.clickup.com/t/${encodeURIComponent(id)}`,
+  async resolveReference(source, candidate, _webHost, request) {
+    if (candidate.kind === 'mark') return markedId.test(candidate.id) ? { externalId: candidate.id } : undefined;
+    if (candidate.kind === 'key') { const id = customId.test(candidate.key) ? await customTask(source, candidate.key, await workspaceIds(request), request) : undefined; return id ? { externalId: id } : undefined; }
+    if (candidate.kind !== 'url' || candidate.host !== 'app.clickup.com') return undefined;
+    const native = /^\/t\/([0-9a-z]{6,12})$/.exec(candidate.path);
+    if (native) return { externalId: native[1] };
+    const custom = /^\/t\/([0-9]{1,20})\/([A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,9})$/.exec(candidate.path);
+    const id = custom ? await customTask(source, custom[2], [custom[1]], request) : undefined;
+    return id ? { externalId: id } : undefined;
+  },
   headers: (source, headers) => authorize(source, headers, ''),
   parse(source, value, limit) {
     const id = nativeTaskId(clickupTaskId, value.id);

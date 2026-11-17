@@ -1,6 +1,6 @@
 import type { FiledIssue, IssueFix, TaskSourceConfig } from '../tasks.ts';
 import type { FileRequest, IssueFiling, TaskProviderAdapter } from './registry.ts';
-import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, releaseAfter, repositoryIssueDetails, repositoryIssuePath, repositoryIssueUrl } from './repository-issues.ts';
+import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, releaseAfter, repositoryIssueDetails, repositoryIssuePath, repositoryIssueReference, repositoryIssueUrl } from './repository-issues.ts';
 import { apiWebRoot, listPage, numericId, plainComment, readOne, record, requireSuffix, TaskError, when } from './shared.ts';
 
 /**
@@ -70,4 +70,5 @@ export const forgejo: TaskProviderAdapter = {
   details: (_source, value, read) => repositoryIssueDetails(value, read),
   list: (source, page, reading) => listPage(page, reading, { path: repositoryIssuePath(source), query: { page: String(page), limit: '50', state: 'open', type: 'issues', sort: 'updated', direction: 'desc' }, pageSize: 50, skip: isPullRequest }),
   read: (source, id, truncate, reading) => readOne(id, truncate, reading, `${repositoryIssuePath(source)}/${id}`),
+  resolveReference: repositoryIssueReference,
 };

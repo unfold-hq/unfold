@@ -1,5 +1,6 @@
 import type { TaskSourceConfig } from '../tasks.ts';
 import type { TaskProviderAdapter } from './registry.ts';
+import { repositoryIssueReference } from './repository-issues.ts';
 import { apiWebRoot, field, listPage, nativeTaskId, numericId, pathProject, readOne, requireSuffix, TaskError, updated } from './shared.ts';
 
 const issuePath = (source: TaskSourceConfig): string => `/projects/${encodeURIComponent(source.project)}/issues`;
@@ -44,4 +45,5 @@ export const gitlab: TaskProviderAdapter = {
   details: (_source, value, read) => ({ labels: Array.isArray(value.labels) ? value.labels.slice(0, 50).map(entry => typeof entry === 'string' ? read.label(entry) : entry && typeof entry === 'object' ? read.label((entry as Record<string, unknown>).name) : undefined).filter((name): name is string => Boolean(name)).map(name => ({ name })) : [], assignees: read.people(value.assignees, 'username', 'name'), dueAt: read.date(value.due_date), identifier: typeof value.iid === 'number' ? `#${value.iid}` : undefined }),
   list: (source, page, reading) => listPage(page, reading, { path: issuePath(source), query: { page: String(page), per_page: '50', state: 'opened', scope: 'all', order_by: 'updated_at', sort: 'desc' }, pageSize: 50 }),
   read: (source, id, truncate, reading) => readOne(id, truncate, reading, `${issuePath(source)}/${id}`),
+  resolveReference: repositoryIssueReference,
 };

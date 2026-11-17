@@ -3,7 +3,8 @@ import type { AppConfig, User } from './types.ts';
 import { foreignTool, parseAgentTrace, traceLines, traceLinesByAgent, type AgentTraceRecord } from './agent-trace.ts';
 import { readSessionTelemetry, type SessionTelemetry } from './linked-telemetry.ts';
 import { aiCommitTrailers, aiMarkingBlock } from './ai-marking.ts';
-import { referencePrefixes, trackerReference } from './task-providers/index.ts';
+import { referencePrefixes, trackerReference, type TaskCandidate } from './task-providers/index.ts';
+import { branchCandidates, referenceLimits, taskCandidates, type ResolveTasks } from './linked-references.ts';
 
 /** The harnesses whose sessions a person can link. */
 export const linkedHarnesses = ['claude-code', 'opencode', 'codex', 'acp'] as const;
@@ -60,8 +61,11 @@ export type LinkedEventInput = {
   workItem: string; pullRequests: string[]; commit: { sha: string; subject: string; trailer: boolean } | null;
   mentions: LinkedMentions;
 };
-/** The tracker tasks (`VIK-123`) and Work Items a prompt or commit message named, extracted on the person's machine. */
-export type LinkedMentions = { refs: { provider: string; externalId: string; ref: string }[]; workItems: string[] };
+/**
+ * The tracker tasks and Work Items a prompt or commit message named, extracted on the person's machine: references with
+ * a prefix Unfold named (`VIK-123`), Work Item ids, and id-shaped task candidates that the person's task sources resolve.
+ */
+export type LinkedMentions = { refs: { provider: string; externalId: string; ref: string }[]; workItems: string[]; tasks: TaskCandidate[] };
 /** An open Work Item as Unfold's Now read returns it, enough to match a pull request or a repository. */
 export type LinkedNowItem = { id: string; title: string; state: string; updatedAt: string; target: { owner: string; repo: string } | null; pullRequestUrl?: string; pullRequest?: { url: string } | null };
 /** An open Work Item on the session's repository that the session may be working on. */
@@ -69,7 +73,7 @@ export type LinkedSuggestion = { id: string; title: string; state: string; updat
 /** The reads of Ploeg a Linked Session needs: a Work Item the person may read, and the Work Items of one tracker task. */
 export type LinkedPloeg = {
   detail(user: User, id: string): Promise<{ item: { id: string; title: string; provider: string; externalId: string } }>;
-  trackerItems(user: User, provider: string, externalId: string): Promise<{ items: { id: string; state: string }[] }>;
+  trackerItems(user: User, provider: string, externalId: string): Promise<{ items: { id: string; state: string; target?: { owner: string; repo: string } | null }[] }>;
   now?(user: User): Promise<{ waiting: LinkedNowItem[]; active: LinkedNowItem[] }>;
 };
 
@@ -127,7 +131,7 @@ export function trackerReferences(values: unknown): LinkedMentions['refs'] {
 function parseMentions(value: unknown): LinkedMentions {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const workItems = Array.isArray(raw.workItems) ? [...new Set(raw.workItems.slice(0, 20).filter((entry): entry is string => typeof entry === 'string' && workItemPattern.test(entry)))].slice(0, 10) : [];
-  return { refs: trackerReferences(raw.refs), workItems };
+  return { refs: trackerReferences(raw.refs), workItems, tasks: taskCandidates(raw.tasks) };
 }
 
 /** A pull request address compared without case, trailing slash or the `pull`/`pulls` difference between forges. */
@@ -259,8 +263,10 @@ export class LinkedSessions {
   private ploeg: LinkedPloeg;
   private fetcher: typeof fetch;
   private clock: () => Date;
-  constructor(db: DatabaseSync, config: AppConfig, ploeg: LinkedPloeg, options: { fetch?: typeof fetch; now?: () => Date } = {}) {
+  private resolveTasks: ResolveTasks | undefined;
+  constructor(db: DatabaseSync, config: AppConfig, ploeg: LinkedPloeg, options: { fetch?: typeof fetch; now?: () => Date; resolveTasks?: ResolveTasks } = {}) {
     this.store = new LinkedSessionStore(db);
+    this.resolveTasks = options.resolveTasks;
     this.config = config;
     this.ploeg = ploeg;
     this.fetcher = options.fetch ?? fetch;
@@ -292,6 +298,8 @@ export class LinkedSessions {
       const found = await this.ploeg.trackerItems(user, ref.provider, ref.externalId).catch(() => ({ items: [] }));
       for (const item of found.items.slice(0, 3)) attachments.push({ id: item.id, how: mentioned });
     }
+    for (const entry of await this.resolvedWork(user, branchChanged ? branchCandidates(branch) : [])) attachments.push({ id: entry, how: 'branch' });
+    for (const entry of await this.resolvedWork(user, input.mentions.tasks)) attachments.push({ id: entry, how: mentioned });
     for (const id of input.mentions.workItems) {
       if (known.has(id) || dismissed.has(id)) continue;
       if (await this.ploeg.detail(user, id).then(() => true, () => false)) attachments.push({ id, how: mentioned });
@@ -342,6 +350,23 @@ export class LinkedSessions {
 
   private attachAutomatic(session: LinkedSession, id: string, how: LinkedHow, user: User, at: string): void {
     if (this.canAttach(session, id)) this.attach(session, id, how, user, at);
+  }
+
+  /**
+   * The Work Items that candidates name: each candidate resolved in the person's own task sources, then only the Work
+   * Items Ploeg holds for that task and lets the person read, and for a reference that names a repository only those
+   * targeting it. A lookup that fails links nothing and never fails the report.
+   */
+  private async resolvedWork(user: User, candidates: TaskCandidate[]): Promise<string[]> {
+    if (!candidates.length || !this.resolveTasks) return [];
+    const tasks = await this.resolveTasks(user, candidates.slice(0, referenceLimits.candidates)).catch(() => []);
+    const out = new Set<string>();
+    for (const task of tasks.slice(0, referenceLimits.candidates)) {
+      const found = await this.ploeg.trackerItems(user, task.provider, task.externalId).catch(() => ({ items: [] }));
+      const items = task.repository ? found.items.filter(item => item.target && `${item.target.owner}/${item.target.repo}`.toLowerCase() === task.repository) : found.items;
+      for (const item of items.slice(0, 3)) out.add(item.id);
+    }
+    return [...out];
   }
 
   private async openWork(user: User): Promise<LinkedNowItem[]> {
