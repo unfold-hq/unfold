@@ -1,7 +1,7 @@
 import { state } from '../core/state.js';
 import { api } from '../core/api.js';
 import { escape, safeUrl, renderHtml } from '../core/dom.js';
-import { money, plural } from '../core/format.js';
+import { dateTime, money, plural, relativeWords } from '../core/format.js';
 import { icon } from '../core/icons.js';
 import { refreshCounts } from '../core/counts.js';
 import { badge, button, chip, demoNote, dl, skeleton } from '../core/ui.js';
@@ -117,6 +117,12 @@ function checklist() {
   return `<header class="card-header health-summary"><div class="card-heading"><h2 class="card-title" id="health-title">Health checks</h2><p class="card-subtitle">${escape(summary)}.</p></div><div class="health-tally">${tally}</div></header><ol class="health-list">${checks.map(checkRow).join('')}</ol>`;
 }
 
+function moment(value, title) {
+  const when = dateTime(value);
+  if (!when) return null;
+  return `<time class="num" datetime="${escape(value)}" title="${escape(title)}">${escape(when)}</time> <span class="muted">(${escape(relativeWords(value))})</span>`;
+}
+
 function facts() {
   const boot = state.bootstrap;
   const policy = boot.gatewayPolicy;
@@ -124,6 +130,8 @@ function facts() {
   const rows = [
     ['Mode', boot.mode === 'demo' ? badge({ tone: 'attention', label: 'Demo', size: 'sm', title: 'A local demonstration: no model calls, no spend' }) : badge({ tone: 'success', label: 'Live', size: 'sm' })],
     ['Version', state.health?.version ? `<span class="num">${escape(state.health.version)}</span>` : null],
+    ['Released', moment(state.health?.releasedAt, 'When this release was published')],
+    ['Deployed', moment(state.health?.startedAt, 'When this server started: its last deploy or restart')],
     ['Session ceiling', `<span class="num">${escape(money(boot.maxBudgetUsd))}</span> per session`],
     ['Sessions at once', `<span class="num">${escape(boot.maxConcurrentSessions)}</span>`],
     ['Shared execution', boot.sharedExecution ? 'On: tasks continue Ploeg Work Items' : 'Off'],

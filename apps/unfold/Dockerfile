@@ -46,7 +46,7 @@ COPY --from=stage --chown=1000:1000 /app /app
 COPY --from=stage --chown=1000:1000 /data /data
 RUN ["git", "--version"]
 WORKDIR /app
-ENV UNFOLD_HOST=0.0.0.0 UNFOLD_PORT=4080 UNFOLD_DATA_DIR=/data
+ENV UNFOLD_HOST=0.0.0.0 UNFOLD_PORT=4080 UNFOLD_DATA_DIR=/data UNFOLD_RELEASED_AT=${IMAGE_CREATED}
 EXPOSE 4080
 USER node
 ENV NODE_COMPILE_CACHE=/app/.node-cache

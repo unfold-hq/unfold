@@ -20,6 +20,8 @@ test('bootstrap advertises enabled placements and session creation validates the
   const health = await request(server.url, '/api/health', { cookie: alice.cookie });
   assert.deepEqual(health.body.workspaceBackends, ['docker', 'local']);
   assert.equal(health.body.workspaceBackend, 'docker');
+  assert.equal(health.body.releasedAt, null);
+  assert.ok(Number.isFinite(Date.parse(health.body.startedAt)));
   const defaulted = await request(server.url, '/api/sessions', { method: 'POST', cookie: alice.cookie, body: createInput({ runtime: 'opencode' }) });
   assert.equal(defaulted.status, 201, defaulted.text);
   assert.equal(defaulted.body.placement, 'docker');
