@@ -15,6 +15,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 COPY src ./src
+COPY ploeg-release.json ./ploeg-release.json
 COPY public ./public
 COPY examples ./examples
 COPY scripts ./scripts

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { connectionsHeadline, connectionsMarkup, connectionsModel } from '../public/connections.js';
+import { checklistHeadline, checklistMarkup, connectionsHeadline, connectionsMarkup, connectionsModel } from '../public/connections.js';
 
 const at = Date.parse('2026-10-19T10:00:00Z');
 const repository = (key, extra = {}) => ({ key, label: key, forge: 'forgejo', owner: 'acme', repo: key, baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: '2026-10-18T10:00:00Z', boards: ['Unfold'], ...extra });
@@ -62,4 +62,36 @@ test('names from Ploeg are escaped', () => {
   const html = connectionsMarkup(connectionsModel(data({ boards: [board('<img src=x onerror=alert(1)>')] }), at), { now: at });
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;img src=x/);
+});
+
+const stages = manage => [
+  { id: 'sign-in', stage: 0, title: 'Sign in', status: 'ok', text: 'You are signed in.' },
+  { id: 'installation', stage: 1, title: 'Installation', status: 'problem', text: 'An install value is missing.', ...(manage ? { action: { label: 'Show the install values', kind: 'install-values' } } : { fix: 'Ask an administrator to connect this.' }), checks: [{ id: 'install-bindings', stage: 1, title: 'The Team accepts Lists from the screen', status: 'problem', reason: 'bindings_not_accepted', text: 'The installation has not opted in.', install: 'teams.<team>.trackerBindings.connections' }] },
+  { id: 'bind-lists', stage: 9, title: 'Bind Lists', status: 'unavailable', text: 'This Ploeg does not bind Lists to a Team at runtime yet.', waitsFor: { record: 'Ploeg ADR-0186', release: null }, configEntry: 'Ploeg: trackers.<tracker>.projects', ...(manage ? { action: { label: 'Show the configuration entry', kind: 'config-entry' }, fix: 'Until then, add it to the configuration.' } : { fix: 'Ask an administrator to connect this.' }) },
+];
+
+test('the checklist shows each stage with its state, its fix and the action that fixes it', () => {
+  const checklist = { manage: true, stages: stages(true), installValues: [{ prerequisite: 'A Team exists', value: 'executor.teams[]', read: 'Teams read' }] };
+  assert.equal(checklistHeadline(checklist), '1 of 3 stages done. Next: Installation.');
+  const html = checklistMarkup(checklist);
+  assert.match(html, /Not opted in/);
+  assert.match(html, /Install value: <code>teams\.&lt;team&gt;\.trackerBindings\.connections<\/code>/);
+  assert.match(html, /Show the install values/);
+  assert.match(html, /executor\.teams\[\]/);
+  assert.match(html, /Not available yet/);
+  assert.match(html, /Waits for Ploeg ADR-0186\./);
+  assert.match(html, /Show the configuration entry/);
+  assert.doesNotMatch(html, /…|text-overflow/);
+});
+
+test('someone who does not manage the Tenant reads the checklist without actions', () => {
+  const html = checklistMarkup({ manage: false, stages: stages(false), installValues: [] });
+  assert.match(html, /Ask an administrator to connect what is missing/);
+  assert.match(html, /Ask an administrator to connect this\./);
+  assert.doesNotMatch(html, /Show the install values|Show the configuration entry|<button/);
+});
+
+test('every configured board and repository says it is configured by the installation', () => {
+  const html = connectionsMarkup(connectionsModel(data(), at), { now: at });
+  assert.equal(html.match(/Configured by the installation/g).length, 3);
 });

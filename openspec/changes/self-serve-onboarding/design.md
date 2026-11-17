@@ -405,9 +405,12 @@ key with short-lived read tokens Ploeg mints. Unfold's publisher token
 Unfold follows ADR-0044: it sends nothing Ploeg cannot answer, stays usable,
 and says why.
 
-- The new routes are optional reads and writes in Unfold's expectation set
-  ([ploeg-expectations.json](../../../apps/unfold/src/ploeg-expectations.json)),
-  each tied to its owning Ploeg record. The version route reports contract
+- The new routes are recorded beside Unfold's expectation set, in
+  [ploeg-steps.json](../../../apps/unfold/src/ploeg-steps.json), each tied to
+  its owning Ploeg record. They move into
+  [ploeg-expectations.json](../../../apps/unfold/src/ploeg-expectations.json)
+  once a released Ploeg serves them: Ploeg decodes that file strictly and
+  checks every interaction in it against its served schemas. The version route reports contract
   majors, not routes, so Unfold learns whether Ploeg serves a step from the
   step's read route (a `404` on `GET …/tracker-bindings` means "not served").
   It never probes with a write.

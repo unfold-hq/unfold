@@ -15,14 +15,14 @@ output pasted in the pull request.
 
 ## 1. S1 Checklist backbone
 
-- [ ] 1.1 Settings → Connections renders the stage lines and the board and repository lines with a fix action per non-green line
-- [ ] 1.2 An Admin lands on Connections after sign-in only while the Tenant has no source and no repository, stored or configured; others see the lines read-only with "Ask an administrator", without the Admins listed
-- [ ] 1.2a Stage 1 installation lines: Team exists and its `spendCap` from the Teams read, webhook state from the connections read; `registration_not_accepted`, `bindings_not_accepted`, `permission_required` and `person_claim_required` shown as "not opted in" with the install value; **Show the install values**
-- [ ] 1.3 Configured entries shown as "Configured by the installation" from Ploeg's connections read
-- [ ] 1.4 Rewrite the Tasks page "How connections work" dialog for the screen flow
-- [ ] 1.5 Product events `onboarding.started` (once per Tenant), `step_completed`, `step_failed`, `step_refused`, `first_agent_pr_opened`, `first_task_pr_opened`; store test for no screen text
-- [ ] 1.6 `ploeg_step_unavailable` refusal and the step-availability check from the read routes, recorded in `ploeg-expectations.json`; the ADR-0192 release recorded there for the second-forge gate; test that no write is sent
-- [ ] 1.7 Docs: `docs/concepts/connect-a-repository.md` stage table and `apps/unfold/docs/operations/task-connections.md`
+- [x] 1.1 Settings → Connections renders the stage lines and the board and repository lines with a fix action per non-green line
+- [x] 1.2 An Admin lands on Connections after sign-in only while the Tenant has no source and no repository, stored or configured; others see the lines read-only with "Ask an administrator", without the Admins listed
+- [x] 1.2a Stage 1 installation lines: Team exists and its `spendCap` from the Teams read, webhook state from the connections read; `registration_not_accepted`, `bindings_not_accepted`, `permission_required` and `person_claim_required` shown as "not opted in" with the install value; **Show the install values**
+- [x] 1.3 Configured entries shown as "Configured by the installation" from Ploeg's connections read
+- [x] 1.4 Rewrite the Tasks page "How connections work" dialog for the screen flow
+- [ ] 1.5 Product events `onboarding.started` (once per Tenant), `step_completed`, `step_failed`, `step_refused`, `first_agent_pr_opened`, `first_task_pr_opened`; store test for no screen text. Built: the events, the once-per-Tenant rules and the store test; detecting the first pull requests from Ploeg's reads is left to S8
+- [x] 1.6 `ploeg_step_unavailable` refusal and the step-availability check from the read routes, recorded in `ploeg-expectations.json`; the ADR-0192 release recorded there for the second-forge gate; test that no write is sent. Recorded in `src/ploeg-steps.json` instead: Ploeg decodes the expectation set strictly and checks each interaction against its served schemas, so an unserved route cannot go there
+- [x] 1.7 Docs: `docs/concepts/connect-a-repository.md` stage table and `apps/unfold/docs/operations/task-connections.md`
 
 ## 2. S2 Saved sources get their Ploeg target
 
