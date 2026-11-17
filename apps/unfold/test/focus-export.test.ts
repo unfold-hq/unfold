@@ -228,7 +228,7 @@ const assertValid = (columns: readonly string[], rows: Record<string, Cell>[]) =
 test('the query picks a UTC period and refuses what it cannot export, and never invents an exchange rate', () => {
   const month = focusExportQuery(new URLSearchParams(), Date.parse('2026-10-30T23:59:00Z'));
   assert.deepEqual([focusTime(month.from), focusTime(month.to)], ['2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z'], 'the current month by default');
-  assert.deepEqual({ ...month, from: 0, to: 0 }, { from: 0, to: 0, format: 'csv', granularity: 'run', unsettled: 'exclude', currency: { code: 'USD' }, provider: 'unknown' });
+  assert.deepEqual({ ...month, from: 0, to: 0 }, { from: 0, to: 0, format: 'csv', granularity: 'run', unsettled: 'exclude', currency: { code: 'USD' }, provider: 'unknown', linkedSessions: 'exclude' });
   const range = focusExportQuery(new URLSearchParams({ from: '2026-01-01', to: '2026-04-01', format: 'jsonl', granularity: 'work-item', unsettled: 'include', currency: 'EUR', usdToEur: '0.9210', tenant: 'agency', client: 'x', provider: 'Anthropic' }));
   assert.deepEqual([focusTime(range.from), focusTime(range.to), range.currency, range.tenant, range.client, range.provider], ['2026-01-01T00:00:00Z', '2026-04-01T00:00:00Z', { code: 'EUR', perUsd: 0.921 }, 'agency', 'x', 'Anthropic']);
   const refused = (params: Record<string, string>) => assert.throws(() => focusExportQuery(new URLSearchParams(params)), FocusQueryError, JSON.stringify(params));
@@ -257,7 +257,7 @@ test('each settled Run is one FOCUS row on the day it finished, owned by its Cli
     ['unfold:run:420', '2026-10-05T00:00:00Z', 'y', 'Client', '2'],
     ['unfold:run:412', '2026-10-07T00:00:00Z', 'x', 'Client', '0.000000123'],
   ]);
-  assert.deepEqual(counts, { settledRuns: 4, unsettledRuns: 1, unreportedRuns: 1, unownedWorkItems: 1, truncated: false }, 'the September Run and the Run outside a Shift are not October usage; 44 has no single owner');
+  assert.deepEqual(counts, { settledRuns: 4, unsettledRuns: 1, unreportedRuns: 1, unownedWorkItems: 1, truncated: false, linkedSessionRows: 0 }, 'the September Run and the Run outside a Shift are not October usage; 44 has no single owner');
   const first = rows[0]!;
   assert.equal(first.ChargePeriodEnd, '2026-10-06T00:00:00Z');
   assert.deepEqual([first.BillingPeriodStart, first.BillingPeriodEnd, first.BillingAccountId, first.BillingCurrency, first.ChargeClass, first.ChargeCategory], ['2026-10-01T00:00:00Z', '2026-11-01T00:00:00Z', 'agency', 'USD', null, 'Usage']);
@@ -331,7 +331,7 @@ test('the Parquet column types are the FOCUS 1.4 data types, and a decimal keeps
     if (spec) assert.equal(focusColumnTypes[column], spec[2], column);
     else assert.match(column, /^x_/);
   }
-  assert.deepEqual(focusExportColumns.filter(column => column.startsWith('x_') && focusColumnTypes[column] === 'Decimal'), ['x_UnfoldObservedCost', 'x_UnfoldExchangeRate', 'x_UnfoldRunCount', 'x_UnfoldInputTokens', 'x_UnfoldOutputTokens', 'x_UnfoldCacheReadInputTokens', 'x_UnfoldCacheCreationInputTokens']);
+  assert.deepEqual(focusExportColumns.filter(column => column.startsWith('x_') && focusColumnTypes[column] === 'Decimal'), ['x_UnfoldObservedCost', 'x_UnfoldExchangeRate', 'x_UnfoldRunCount', 'x_UnfoldInputTokens', 'x_UnfoldOutputTokens', 'x_UnfoldCacheReadInputTokens', 'x_UnfoldCacheCreationInputTokens', 'x_UnfoldEstimatedCost', 'x_UnfoldMarkupPercent', 'x_UnfoldBillableCost', 'x_UnfoldLinkedSessionCount']);
   const [row] = focusExport(world(), october(), { owner, now }).rows;
   const extreme = { ...row!, BilledCost: { decimal: '-1234567890123456789.0123456789' }, x_UnfoldInputTokens: { decimal: '9007199254740993' } };
   const { rows } = await parseParquet(focusParquet([extreme]));
@@ -422,7 +422,7 @@ test('GET /api/ploeg/cost-export downloads FOCUS rows for operators and administ
 
 test('the file names its period, and an export with no rows is a header only', () => {
   const query: FocusExportQuery = october();
-  assert.equal(focusFile({ rows: [], counts: { settledRuns: 0, unsettledRuns: 0, unreportedRuns: 0, unownedWorkItems: 0, truncated: true } }, query).headers['X-Unfold-Truncated'], 'true');
+  assert.equal(focusFile({ rows: [], counts: { settledRuns: 0, unsettledRuns: 0, unreportedRuns: 0, unownedWorkItems: 0, truncated: true, linkedSessionRows: 0 } }, query).headers['X-Unfold-Truncated'], 'true');
   assert.equal(focusFile(null, query).filename, 'unfold-focus-cost-demo-2026-10-01-to-2026-11-01.csv');
   const parquet = focusFile(null, october({ format: 'parquet' }));
   assert.deepEqual([parquet.filename, parquet.contentType, parquet.body instanceof Uint8Array], ['unfold-focus-cost-demo-2026-10-01-to-2026-11-01.parquet', 'application/vnd.apache.parquet', true]);

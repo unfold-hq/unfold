@@ -2,6 +2,8 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { AppConfig, User } from './types.ts';
 import { foreignTool, parseAgentTrace, traceLines, traceLinesByAgent, type AgentTraceRecord } from './agent-trace.ts';
 import { readSessionTelemetry, type SessionTelemetry } from './linked-telemetry.ts';
+import { linkedCharges, workItemUsage, type LinkedUsage, type RecordedUsage, type WorkItemUsage } from './linked-usage.ts';
+import type { Ownership } from './tenancy.ts';
 import { aiCommitTrailers, aiMarkingBlock } from './ai-marking.ts';
 import { referencePrefixes, trackerReference, type TaskCandidate } from './task-providers/index.ts';
 import { branchCandidates, referenceLimits, taskCandidates, type ResolveTasks } from './linked-references.ts';
@@ -250,7 +252,7 @@ export class LinkedSessionStore {
 }
 
 /** A Linked Session as the API presents it: its stored facts, its shown state, its Unfold page and how to resume it. */
-export type PresentedLinkedSession = Omit<LinkedSession, 'dismissed' | 'resolvedBranch'> & { state: LinkedStatus | 'stale'; displayTitle: string; link: string; resume: string; mine: boolean; aiLines: number; telemetry?: SessionTelemetry; linkedAt?: string };
+export type PresentedLinkedSession = Omit<LinkedSession, 'dismissed' | 'resolvedBranch'> & { state: LinkedStatus | 'stale'; displayTitle: string; link: string; resume: string; mine: boolean; aiLines: number; telemetry?: SessionTelemetry; recordedUsage?: RecordedUsage; linkedAt?: string };
 
 /**
  * Records what people's own agent sessions report, links them to Work Items the person may read, and keeps the
@@ -264,9 +266,11 @@ export class LinkedSessions {
   private fetcher: typeof fetch;
   private clock: () => Date;
   private resolveTasks: ResolveTasks | undefined;
-  constructor(db: DatabaseSync, config: AppConfig, ploeg: LinkedPloeg, options: { fetch?: typeof fetch; now?: () => Date; resolveTasks?: ResolveTasks } = {}) {
+  private usage?: LinkedUsage;
+  constructor(db: DatabaseSync, config: AppConfig, ploeg: LinkedPloeg, options: { fetch?: typeof fetch; now?: () => Date; resolveTasks?: ResolveTasks; usage?: LinkedUsage } = {}) {
     this.store = new LinkedSessionStore(db);
     this.resolveTasks = options.resolveTasks;
+    this.usage = options.usage;
     this.config = config;
     this.ploeg = ploeg;
     this.fetcher = options.fetch ?? fetch;
@@ -330,6 +334,7 @@ export class LinkedSessions {
     }
     if (branchChanged && session.branch === branch) session.resolvedBranch = branch;
     this.store.save(session);
+    if (input.event === 'idle' || input.event === 'end') this.usage?.notice(session);
     const presented = this.present(session, user, base);
     const expiresAt = options.credentialExpiresAt && Number.isFinite(Date.parse(options.credentialExpiresAt)) ? new Date(options.credentialExpiresAt).toISOString() : '';
     const credential = expiresAt ? { expiresAt, expiresSoon: Date.parse(expiresAt) - this.clock().getTime() <= credentialWarningMs } : null;
@@ -424,7 +429,10 @@ export class LinkedSessions {
   async view(user: User, id: string, base: string, withTelemetry = false): Promise<PresentedLinkedSession> {
     const session = await this.readable(user, id);
     const presented = this.present(session, user, base);
-    if (withTelemetry && session.harness === 'claude-code' && (session.ownerId === user.id || user.role === 'admin')) presented.telemetry = await readSessionTelemetry(this.config.observability, session.id, session.startedAt, { fetch: this.fetcher, now: this.clock().getTime() });
+    if (withTelemetry && session.harness === 'claude-code' && (session.ownerId === user.id || user.role === 'admin')) {
+      presented.telemetry = await readSessionTelemetry(this.config.observability, session.id, session.startedAt, { fetch: this.fetcher, now: this.clock().getTime() });
+      this.keep(presented);
+    }
     return presented;
   }
 
@@ -446,10 +454,39 @@ export class LinkedSessions {
     if (withTelemetry) {
       const visible = sessions.filter(entry => entry.session.ownerId === user.id || user.role === 'admin');
       for (let start = 0; start < visible.length; start += linkedTelemetryConcurrency) {
-        await Promise.all(visible.slice(start, start + linkedTelemetryConcurrency).map(async entry => { entry.shown.telemetry = await readSessionTelemetry(this.config.observability, entry.session.id, entry.session.startedAt, { fetch: this.fetcher, now: this.clock().getTime() }); }));
+        await Promise.all(visible.slice(start, start + linkedTelemetryConcurrency).map(async entry => {
+          entry.shown.telemetry = await readSessionTelemetry(this.config.observability, entry.session.id, entry.session.startedAt, { fetch: this.fetcher, now: this.clock().getTime() });
+          this.keep(entry.shown);
+        }));
       }
     }
     return sessions.map(entry => entry.shown);
+  }
+
+  private keep(shown: PresentedLinkedSession): void {
+    if (!this.usage || shown.harness !== 'claude-code') return;
+    if (shown.telemetry) this.usage.remember(shown.id, shown.telemetry);
+    const recorded = this.usage.recorded(shown.id);
+    if (recorded) shown.recordedUsage = recorded;
+  }
+
+  /**
+   * The recorded Linked Session cost of one Work Item, after Ploeg confirms the person may read it: an administrator
+   * gets every linked Claude Code session's share (`scope: all`), anyone else only their own (`scope: own`). `owner` is
+   * the Work Item's Tenant and Client, whose markup gives the billable amount; without one the markup is 0.
+   */
+  async workItemUsage(user: User, workItemId: string, owner: Ownership | undefined): Promise<WorkItemUsage & { scope: 'all' | 'own' }> {
+    if (!workItemPattern.test(workItemId)) fail(400, 'work_item_id', 'Use a Work Item id.');
+    await this.ploeg.detail(user, workItemId);
+    const scope = user.role === 'admin' ? 'all' : 'own';
+    const sessions = this.store.forWorkItem(workItemId, linkedLimits.listed).filter(session => session.harness === 'claude-code' && (scope === 'all' || session.ownerId === user.id));
+    const markups = this.usage?.markups;
+    const markupOf = (_id: string, dayStart: number) => owner && markups ? markups.at(owner, dayStart) : 0;
+    const charges = this.usage ? linkedCharges(this.usage.store, sessions, 0, Number.MAX_SAFE_INTEGER, markupOf).filter(charge => charge.workItemId === workItemId) : [];
+    const recorded = sessions.map(session => this.usage?.store.latest(session.id)).filter(entry => entry !== undefined);
+    const observedAt = recorded.map(entry => entry.observedAt).sort().at(-1) ?? null;
+    const today = Math.floor(this.clock().getTime() / 86_400_000) * 86_400_000;
+    return { ...workItemUsage(charges, sessions.length, recorded.length, observedAt, markupOf(workItemId, today)), scope };
   }
 
   /** Links or unlinks one Work Item. Only the owner or an administrator may, and only to a Work Item they may read; an unlinked Work Item is not linked again by the branch. */

@@ -3,6 +3,7 @@ import type { Ask } from './ask/types.ts';
 import type { LinkedSession } from './linked-sessions.ts';
 import { digestFacts, digestReadLimit } from './linked-handoff.ts';
 import { digestSessionLimit, readSessionsUsage, type TokenCounts } from './linked-telemetry.ts';
+import type { RecordedUsage } from './linked-usage.ts';
 
 /** The periods Your usage covers: the current UTC calendar month, the period an Ask Allowance resets on, or the last 30 days. */
 export const usagePeriods = ['month', '30d'] as const;
@@ -26,6 +27,7 @@ export type MyUsage = {
   linkedSessions: {
     count: number; claudeCode: number; uncosted: number;
     estimateUsd: number | null; costStatus: 'estimate'; tokens: TokenCounts | null;
+    estimateSource: 'telemetry' | 'recorded' | null; recordedAt: string | null;
     telemetry: 'connected' | 'not_configured' | 'unreadable'; reason: string | null; truncated: boolean;
   };
   notAttributed: { source: 'ploeg_runs' | 'chats'; reason: string }[];
@@ -99,7 +101,22 @@ export type UsageSources = {
   asksBetween(askerId: string, since: string, until: string, limit: number): Ask[];
   sessionSpendSince(ownerId: string, since: string, limit: number): Pick<Session, 'spentUsd' | 'observedUsd' | 'costStatus' | 'budgetUsd'>[];
   linkedOwned(ownerId: string, limit: number): LinkedSession[];
+  recordedUsage?(sessionId: string): RecordedUsage | undefined;
 };
+
+/**
+ * The Linked Session estimate Your usage shows: the live sum from the metrics store, or the sum of the estimates Unfold
+ * recorded for the same sessions when that is higher or the store cannot answer, as after the store dropped old samples.
+ */
+export function linkedEstimate(live: { costUsd: number | null; tokens: TokenCounts | null }, recorded: RecordedUsage[]): { estimateUsd: number | null; tokens: TokenCounts | null; estimateSource: 'telemetry' | 'recorded' | null; recordedAt: string | null } {
+  const recordedAt = recorded.map(entry => entry.observedAt).sort().at(-1) ?? null;
+  const recordedUsd = recorded.length ? rounded(recorded.reduce((sum, entry) => sum + entry.costUsd, 0)) : null;
+  if (recordedUsd !== null && (live.costUsd === null || live.costUsd < recordedUsd)) {
+    const tokens = recorded.reduce((sum, entry) => ({ input: sum.input + entry.tokens.input, output: sum.output + entry.tokens.output, cacheRead: sum.cacheRead + entry.tokens.cacheRead, cacheCreation: sum.cacheCreation + entry.tokens.cacheCreation }), { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
+    return { estimateUsd: recordedUsd, tokens, estimateSource: 'recorded', recordedAt };
+  }
+  return { estimateUsd: live.costUsd, tokens: live.tokens, estimateSource: live.costUsd === null ? null : 'telemetry', recordedAt };
+}
 
 /**
  * Your usage: what one person's own Asks, workbench sessions and Linked Sessions cost in a period. Every read is keyed
@@ -125,6 +142,7 @@ export class MyUsageService {
     const facts = digestFacts(linked, since.getTime());
     const range = `${Math.max(600, Math.ceil((until.getTime() - since.getTime()) / 1000))}s`;
     const telemetry = await readSessionsUsage(this.config.observability, facts.ids.slice(0, digestSessionLimit), range, { fetch: this.fetcher });
+    const estimate = linkedEstimate(telemetry, facts.ids.slice(0, digestSessionLimit).map(id => this.sources.recordedUsage?.(id)).filter((entry): entry is RecordedUsage => entry !== undefined));
     const askMoney = usageMoney(asks.map(askPrice));
     const sessionMoney = usageMoney(sessions.map(sessionPrice));
     const budgetUsd = rounded(sessions.filter(session => session.costStatus !== 'demo').reduce((sum, session) => sum + (amount(session.budgetUsd) ? session.budgetUsd : 0), 0));
@@ -135,7 +153,7 @@ export class MyUsageService {
       sessions: { ...sessionMoney, budgetUsd, truncated: sessions.length >= usageReadLimits.sessions },
       linkedSessions: {
         count: facts.active, claudeCode: facts.ids.length, uncosted: facts.uncosted,
-        estimateUsd: telemetry.costUsd, costStatus: 'estimate', tokens: telemetry.tokens,
+        ...estimate, costStatus: 'estimate',
         telemetry: !this.config.observability?.metricsUrl ? 'not_configured' : telemetry.read ? 'connected' : 'unreadable',
         reason: telemetry.reason, truncated: linked.length >= digestReadLimit || facts.ids.length > digestSessionLimit,
       },

@@ -101,7 +101,7 @@ test('Your usage answers only the signed-in person’s own Asks, sessions and Li
   assert.deepEqual(usage.linkedSessions.tokens, { input: 5000, output: 700, cacheRead: 0, cacheCreation: 0 });
   assert.deepEqual(usage.notAttributed.map((entry: { source: string }) => entry.source), ['ploeg_runs', 'chats']);
   assert.ok(metrics.queries.every(query => query.includes('session-op-0001') && !query.includes('session-other-0002')), 'the metrics store is asked about the caller’s own sessions only');
-  assert.doesNotMatch(mine.text, /\b100\b|\b40\b|\b50\b|session-other/, 'nothing of another person reaches the answer');
+  assert.doesNotMatch(mine.text.replace(/"\d{4}-\d{2}-\d{2}T[\d:.]+Z"/g, '"<time>"'), /\b100\b|\b40\b|\b50\b|session-other/, 'nothing of another person reaches the answer');
 
   const admin = (await request(server.url, '/api/me/usage?period=30d', boss)).body.usage;
   assert.deepEqual([admin.asks.count, admin.sessions.count, admin.linkedSessions.count, admin.spent.usd], [0, 0, 0, 0], 'an administrator gets their own usage, not everyone’s');
