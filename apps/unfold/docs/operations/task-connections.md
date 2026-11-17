@@ -140,11 +140,65 @@ The adapter uses the configured repository scope, excludes pull requests, and fe
 
 ### GitHub
 
-Use a fine-grained personal access token limited to the selected repository with **Issues: read**. The list and get issue endpoints support that permission. GitHub's issues API also returns pull requests; the adapter excludes records containing `pull_request`. See the [official issue endpoint contract](https://docs.github.com/en/rest/issues/issues#list-repository-issues).
+Unfold reads and files GitHub issues either as a **GitHub App**, which is the recommended credential, or with a token in the variable `tokenEnv` names. A source takes exactly one of the two: setting both, or `githubApp` on another tracker, stops Unfold at start-up. The list and get issue endpoints need **Issues: read**. GitHub's issues API also returns pull requests; the adapter excludes records containing `pull_request`. See the [official issue endpoint contract](https://docs.github.com/en/rest/issues/issues#list-repository-issues).
 
 The `baseUrl` is `https://api.github.com` for GitHub.com and `https://api.SUBDOMAIN.ghe.com`, with no path, for an enterprise on GHE.com, where `SUBDOMAIN` is the enterprise's dedicated subdomain ([GitHub's REST API base URL](https://docs.github.com/en/enterprise-cloud@latest/rest/using-the-rest-api/getting-started-with-the-rest-api), [GHE.com network details](https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/network-details-for-ghecom)). Enterprise Server keeps its own host with the `/api/v3` path. Any other `ghe.com` host or path is rejected, and issue links open on the matching web host: `github.com`, `SUBDOMAIN.ghe.com` or the Enterprise Server host.
 
-The current connection accepts a provisioned token. It does not install a GitHub App, renew installation tokens, or create pull requests. A GitHub App installation token expires after an hour, so it only works where something outside Unfold renews the variable `tokenEnv` names; a fine-grained personal access token, preferably of a dedicated machine account, is the shape this connection is built for. To file [Report a problem](#file-report-a-problem-into-a-tracker) issues the same token also needs **Issues: read and write**. Public and private connectivity must still be qualified against the configured GitHub.com, GHE.com or Enterprise Server instance.
+#### Connect as a GitHub App
+
+With `githubApp` Unfold holds no token at all. It signs a JSON Web Token with the App's private key (RS256, issued a minute in the past, valid for nine minutes) and asks GitHub for an installation token for the source's one repository with exactly these permissions:
+
+| Repository permission | Access | What Unfold uses it for |
+| --- | --- | --- |
+| Issues | Read and write | List, read and file issues, add the `reported-in-app` label, comment on a filed report, read its timeline |
+| Metadata | Read | Basic repository data; GitHub includes it with repository permissions, and Unfold asks for it explicitly so the grant it checks matches the one GitHub returns |
+| Contents | Read | List releases, for *Fixed in* a release on a private repository |
+
+GitHub lists these per endpoint in [Permissions required for GitHub Apps](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps): the issue, label, comment and timeline endpoints under Issues, `GET /repos/{owner}/{repo}/releases` under Contents. Give the App nothing else. Unfold sends `repositories: [<name>]` and that permission set to [`POST /app/installations/{id}/access_tokens`](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app), and refuses a token whose answer reaches further, another repository, every repository, another permission or a higher level, with `github_app_grant_too_wide`, without using it. An installation that lacks one of the three permissions answers `github_app_permissions_missing`; accept the App's permission request on the installation.
+
+Each token is kept in memory for the repository it was minted for and minted again five minutes before GitHub's `expires_at`. A request GitHub answers with 401 mints once more and is repeated once. Nothing is written to disk.
+
+```json
+{
+  "id": "acme-github",
+  "name": "Acme · GitHub",
+  "provider": "github",
+  "baseUrl": "https://api.github.com",
+  "project": "acme/application",
+  "repositoryId": "application",
+  "githubApp": { "appId": 123456, "privateKeyEnv": "UNFOLD_GITHUB_APP_PRIVATE_KEY" },
+  "executionOwner": "ploeg"
+}
+```
+
+| `githubApp` field | Meaning |
+| --- | --- |
+| `appId` | The App ID, or the App's Client ID, from the App's settings page. Neither is a secret |
+| `installationId` | Optional. Leave it out and Unfold looks the installation up with `GET /repos/{owner}/{repo}/installation` once per repository |
+| `privateKeyEnv` | The environment variable that holds the App's PEM private key |
+| `privateKeyFile` | Instead of `privateKeyEnv`: the absolute path of a mounted file that holds it. Unfold reads the file again at every mint, so a rotated key needs no restart |
+
+Unfold checks at start-up that the key reads as a PEM RSA private key; a task source with a missing or broken key stops Unfold, a reports connection with one is turned off with `reports.app_key_missing`.
+
+**How the key reaches the pod.** Generate a private key on the App's settings page and store it once in the deployment's secret store. Nobody copies a token anywhere, because Unfold mints its own. With the Helm chart, map the stored key to the variable `privateKeyEnv` names, either as a key of `credentialsSecret`, through `credentialRefs`, or through `externalSecrets.credentials`, which renders an ExternalSecret that External Secrets fills from the secret store:
+
+```yaml
+externalSecrets:
+  enabled: true
+  secretStoreRef: {kind: ClusterSecretStore, name: SECRET-STORE}
+  credentials:
+    UNFOLD_GITHUB_APP_PRIVATE_KEY: {key: PATH/TO/GITHUB-APP, property: private-key}
+```
+
+Outside the chart, mount the key as a read-only file and point `privateKeyFile` at it. A PEM in an environment variable may keep its line breaks or carry them as `\n`.
+
+GitHub Enterprise Server and GHE.com use the same endpoints under the same `baseUrl` as the issue reads, so an App registered on the Enterprise Server instance works with its `/api/v3` root.
+
+#### Connect with a token
+
+A fine-grained personal access token limited to the selected repository with **Issues: read**, preferably of a dedicated machine account, still works through `tokenEnv`. To file [Report a problem](#file-report-a-problem-into-a-tracker) issues it also needs **Issues: read and write**. An installation token minted outside Unfold expires after an hour; use `githubApp` instead of renewing one into `tokenEnv`.
+
+Unfold does not install a GitHub App or create pull requests through this connection. Public and private connectivity, for either credential, must still be qualified against the configured GitHub.com, GHE.com or Enterprise Server instance.
 
 ### GitLab
 
@@ -306,20 +360,26 @@ Report a problem ([RFC-0002](../../../../docs/design/rfc-0002-report-a-problem.m
 "reports": { "source": "forgejo-unfold", "project": "acme/unfold" }
 ```
 
+On GitHub, `githubApp` takes the place of `tokenEnv` in a connection of its own (see [Connect as a GitHub App](#connect-as-a-github-app)), and a task source that is an App files with a token minted for the report `project`:
+
+```json
+"reports": { "provider": "github", "baseUrl": "https://api.github.com", "project": "acme/unfold", "githubApp": { "appId": 123456, "privateKeyEnv": "UNFOLD_GITHUB_APP_PRIVATE_KEY" } }
+```
+
 Or give reports a connection of their own, which is not a task source and never appears on the Tasks page. Use this when no task source fits, for example when the repository is one Ploeg dispatches work for, where a task source owned by Unfold is refused at start-up:
 
 ```json
 "reports": { "provider": "forgejo", "baseUrl": "https://forgejo.example/api/v1", "project": "acme/unfold", "tokenEnv": "UNFOLD_REPORTS_FORGEJO_TOKEN" }
 ```
 
-* `source` names a task source with a token whose adapter files issues (Forgejo, GitHub, Vikunja or Jira). Leave `reports` out to use the first such source that Unfold owns (`executionOwner: interactive`) and its own project. A source Ploeg dispatches from is never the default, and naming one requires a different `project`, so a report never becomes agent work. Set `reports` to `false` to keep every report in Unfold and file nothing.
+* `source` names a task source with a token or a GitHub App whose adapter files issues (Forgejo, GitHub, Vikunja or Jira). Leave `reports` out to use the first such source that Unfold owns (`executionOwner: interactive`) and its own project. A source Ploeg dispatches from is never the default, and naming one requires a different `project`, so a report never becomes agent work. Set `reports` to `false` to keep every report in Unfold and file nothing.
 * `project` is optional: `owner/repository` on Forgejo and GitHub, a numeric project ID on Vikunja, or a project key on Jira, when reports belong somewhere other than the source's work.
-* If the variable `tokenEnv` names is not set, Unfold starts anyway, logs `reports.token_missing` and keeps reports without filing them.
-* On Forgejo and GitHub the issue gets the label `reported-in-app` when the repository has one by that name; Unfold never creates it. GitHub only applies a label set by an account with at least triage access to the repository, and files the issue without it otherwise.
+* If the variable `tokenEnv` names is not set, Unfold starts anyway, logs `reports.token_missing` and keeps reports without filing them. An unreadable GitHub App private key does the same with `reports.app_key_missing`. A connection of its own with both `tokenEnv` and `githubApp`, or neither, stops Unfold at start-up.
+* On Forgejo and GitHub the issue gets the label `reported-in-app` when the repository has one by that name; Unfold never creates it. GitHub's [create an issue](https://docs.github.com/en/rest/issues/issues#create-an-issue) drops labels set by a user without push access; when the new issue comes back without the label, Unfold adds it with [`POST /repos/{owner}/{repo}/issues/{number}/labels`](https://docs.github.com/en/rest/issues/labels#add-labels-to-an-issue), which GitHub lists under the Issues write permission for an App's installation token. A personal token needs at least triage access to the repository for that call; a GitHub App needs only Issues read and write. A refused label never stops the report.
 * The token needs to create issues and upload issue attachments on Forgejo (`write:issue`), create issues and comment on them on GitHub (a fine-grained token with **Issues: read and write** on the repository; see [GitHub](#github)), create tasks and attachments in the project on Vikunja, or create issues and attachments and add comments in the project on Jira (see [Jira](#jira)).
 * Unfold keeps each report before it files it. If the tracker refuses or cannot be reached, the person sees "Saved. Unfold will file it when the tracker answers", and Unfold retries with growing gaps for 24 hours, continuing an issue it already created. The server log line `report.file_failed` gives the tracker's answer.
 * Files are deleted 90 days after a report is filed. The report row and its address stay.
-* Unfold follows each filed report on the tracker every ten minutes for 180 days (two weeks after it closes, longer while a merged fix waits for a release) and shows the reporter where it stands. On Forgejo the token also needs to read the repository's pull requests and releases (`read:repository`) for *Fixed in* a release. On GitHub the fix is the newest pull request of the same repository in the issue's timeline that references it, and *Fixed in* needs **Contents: read** to list releases; the token's own comments are recognised through `GET /user`, which an installation token cannot read. A failed read logs `report.follow_failed` and keeps the last answer.
+* Unfold follows each filed report on the tracker every ten minutes for 180 days (two weeks after it closes, longer while a merged fix waits for a release) and shows the reporter where it stands. On Forgejo the token also needs to read the repository's pull requests and releases (`read:repository`) for *Fixed in* a release. On GitHub the fix is the newest pull request of the same repository in the issue's timeline that references it, and *Fixed in* needs **Contents: read** to list releases. With a token, Unfold recognises its own comments by the login `GET /user` returns. An installation token cannot read `GET /user`, so with `githubApp` Unfold reads the App's slug once from `GET /app`, signed with the App's JWT, and treats comments by `SLUG[bot]`, the login GitHub shows on what an App writes, as its own. A failed read logs `report.follow_failed` and keeps the last answer.
 * People can reply to their filed report from Unfold, and a repeat report joins an open one as a comment. Both are written by the token's account, so the token needs to comment on issues or tasks.
 * `acknowledgement` (optional, both forms) is one line of at most 280 characters the success screen shows, for example `"We read every report on weekdays."`. Leave it out rather than promise a response time you do not keep.
 * With no tracker configured, and always in the demo, Unfold keeps the report and says so.

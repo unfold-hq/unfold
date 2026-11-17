@@ -215,6 +215,7 @@
           "project": { "type": "string", "minLength": 1, "maxLength": 512, "description": "Repository, project or list on the tracker, in the provider's own form." },
           "repositoryId": { "$ref": "#/$defs/slug", "description": "Registered repository the source's tasks change." },
           "tokenEnv": { "$ref": "#/$defs/envName", "description": "Environment variable holding the tracker API token." },
+          "githubApp": { "$ref": "#/$defs/githubApp", "description": "GitHub only, instead of tokenEnv: the GitHub App Unfold mints its own short-lived installation tokens as." },
           "executionOwner": { "type": "string", "enum": ["interactive", "ploeg"], "description": "Who runs the source's tasks: people from the workbench, or Ploeg." },
           "ploeg": {
             "type": "object",
@@ -756,7 +757,7 @@
       }
     },
     "reports": {
-      "description": "Where Report a problem files: false turns it off; { source, project? } uses a task source with a token; { provider, baseUrl, project, tokenEnv } is a connection of its own. Absent, the first interactive source that can file issues; off in demo mode.",
+      "description": "Where Report a problem files: false turns it off; { source, project? } uses a task source with a token; { provider, baseUrl, project, tokenEnv or githubApp } is a connection of its own. Absent, the first interactive source that can file issues; off in demo mode.",
       "anyOf": [
         { "const": false },
         {
@@ -778,6 +779,18 @@
             "baseUrl": { "type": "string", "maxLength": 2048, "pattern": "^https?://\\S+$", "description": "Tracker API root." },
             "project": { "type": "string", "minLength": 1, "description": "Repository or project reports are filed in." },
             "tokenEnv": { "$ref": "#/$defs/envName", "description": "Environment variable holding the tracker token; unset keeps reports without filing them." },
+            "acknowledgement": { "$ref": "#/$defs/acknowledgement" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider", "baseUrl", "project", "githubApp"],
+          "properties": {
+            "provider": { "type": "string", "enum": ["github"], "description": "Tracker reports are filed on." },
+            "baseUrl": { "type": "string", "maxLength": 2048, "pattern": "^https?://\\S+$", "description": "Tracker API root." },
+            "project": { "type": "string", "minLength": 1, "description": "Repository reports are filed in." },
+            "githubApp": { "$ref": "#/$defs/githubApp", "description": "The GitHub App Unfold files as, instead of tokenEnv; an unreadable private key keeps reports without filing them." },
             "acknowledgement": { "$ref": "#/$defs/acknowledgement" }
           }
         }
@@ -983,6 +996,18 @@
     "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
     "tenancyId": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" },
     "envName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$" },
+    "githubApp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appId"],
+      "description": "A GitHub App: Unfold signs a JWT with its private key and mints installation tokens for the one repository, with Issues write, Metadata read and Contents read. Set exactly one of privateKeyEnv and privateKeyFile.",
+      "properties": {
+        "appId": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^([1-9][0-9]{0,19}|Iv[0-9A-Za-z._-]{1,62})$" }], "description": "The App ID, or the App's Client ID." },
+        "installationId": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" }], "description": "The installation that holds the repository; looked up from the repository when absent." },
+        "privateKeyEnv": { "$ref": "#/$defs/envName", "description": "Environment variable holding the App's PEM private key." },
+        "privateKeyFile": { "type": "string", "pattern": "^/", "maxLength": 1024, "description": "Absolute path of a mounted file holding the App's PEM private key, read again at every mint." }
+      }
+    },
     "envNameOrUnderscore": { "type": "string", "pattern": "^[A-Z_][A-Z0-9_]{0,127}$" },
     "unfoldEnvName": { "type": "string", "pattern": "^UNFOLD_[A-Z0-9_]{1,100}$" },
     "deliveryEnvName": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{2,100}$" },

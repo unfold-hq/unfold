@@ -261,7 +261,7 @@ test('reports can have a connection of their own, which is not a task source, an
   assert.throws(() => reportSettings({ ...raw, provider: 'gitlab' }, sources, 'live'), /reports.provider must be forgejo, github, vikunja or jira/);
   assert.throws(() => reportSettings({ ...raw, baseUrl: 'http://forgejo.test/api/v1' }, sources, 'live'), /HTTPS/);
   assert.throws(() => reportSettings({ ...raw, project: 'not a repo' }, sources, 'live'), /owner\/repository/);
-  assert.throws(() => reportSettings({ ...raw, source: 'ploeg-board' }, sources, 'live'), /provider, baseUrl, project, tokenEnv and acknowledgement only/);
+  assert.throws(() => reportSettings({ ...raw, source: 'ploeg-board' }, sources, 'live'), /provider, baseUrl, project, tokenEnv or githubApp and acknowledgement only/);
 });
 
 test('a configuration with its own report connection loads, keeps the task sources as they were, and the server files with it', async t => {

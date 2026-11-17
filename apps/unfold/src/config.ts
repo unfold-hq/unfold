@@ -6,6 +6,7 @@ import type { AppConfig, GitRewrite, Repository, Team, Placement, WorkspaceBacke
 import { mcpHttpSettings } from './mcp-auth.ts';
 import { isAgentHostOriginPattern } from './ahp/upgrade-auth.ts';
 import { validateTaskSources } from './tasks.ts';
+import { appCredentialFields } from './task-providers/index.ts';
 import { reportSettings } from './reports.ts';
 import { sentryTarget } from './error-reports.ts';
 import { demoRefusesRealPloeg, validatePloeg } from './ploeg.ts';
@@ -370,9 +371,13 @@ export function refuseDemoCredentials(raw: Record<string, unknown>, env: NodeJS.
   if (raw.links !== undefined) throw demoRefusal('links: a GitLab or ClickUp account one visitor links would act for every visitor', 'Remove links, or set mode: live');
   for (const source of Array.isArray(raw.taskSources) ? raw.taskSources : []) {
     if (plain(source) && source.tokenEnv !== undefined) throw demoRefusal(`the token of task source ${String(source.id)} (tokenEnv)`, 'Remove its tokenEnv, or set mode: live');
+    const app = plain(source) ? appCredentialFields().find(field => source[field] !== undefined) : undefined;
+    if (app) throw demoRefusal(`the app credential of task source ${String((source as Record<string, unknown>).id)} (${app})`, `Remove its ${app}, or set mode: live`);
   }
   if (plain(raw.notifications) && raw.notifications.slack !== undefined) throw demoRefusal('notifications.slack: its bot token and signing secret would act in a real Slack workspace for every visitor', 'Remove notifications.slack, or set mode: live');
   if (plain(raw.reports) && raw.reports.tokenEnv !== undefined) throw demoRefusal('reports.tokenEnv, which files reports into a real tracker', 'Remove reports, or set mode: live');
+  const reportsApp = plain(raw.reports) ? appCredentialFields().find(field => (raw.reports as Record<string, unknown>)[field] !== undefined) : undefined;
+  if (reportsApp) throw demoRefusal(`reports.${reportsApp}, which files reports into a real tracker`, 'Remove reports, or set mode: live');
   const providers = plain(raw.flags) && Array.isArray(raw.flags.providers) ? raw.flags.providers : [];
   if (providers.some(provider => plain(provider) && (provider.apiKeyEnv !== undefined || provider.tokenEnv !== undefined))) throw demoRefusal('a flag provider credential (flags.providers apiKeyEnv or tokenEnv)', 'Remove the credential, or set mode: live');
   if (env.LITELLM_MASTER_KEY) throw demoRefusal('the LiteLLM master key in LITELLM_MASTER_KEY', 'Unset LITELLM_MASTER_KEY, or set mode: live');

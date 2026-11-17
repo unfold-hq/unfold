@@ -402,6 +402,28 @@
               },
               "repositoryId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "Registered repository the source's tasks change." },
               "tokenEnv": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$", "description": "Environment variable holding the tracker API token." },
+              "githubApp": {
+                "type": "object",
+                "additionalProperties": false,
+                "description": "GitHub only, instead of tokenEnv: the GitHub App Unfold mints its own short-lived installation tokens as.",
+                "properties": {
+                  "appId": {
+                    "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^([1-9][0-9]{0,19}|Iv[0-9A-Za-z._-]{1,62})$" }],
+                    "description": "The App ID, or the App's Client ID."
+                  },
+                  "installationId": {
+                    "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" }],
+                    "description": "The installation that holds the repository; looked up from the repository when absent."
+                  },
+                  "privateKeyEnv": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,127}$", "description": "Environment variable holding the App's PEM private key." },
+                  "privateKeyFile": {
+                    "type": "string",
+                    "pattern": "^/",
+                    "maxLength": 1024,
+                    "description": "Absolute path of a mounted file holding the App's PEM private key, read again at every mint."
+                  }
+                }
+              },
               "executionOwner": {
                 "type": "string",
                 "enum": ["interactive", "ploeg"],
@@ -1304,7 +1326,7 @@
           }
         },
         "reports": {
-          "description": "Where Report a problem files: false turns it off; { source, project? } uses a task source with a token; { provider, baseUrl, project, tokenEnv } is a connection of its own. Absent, the first interactive source that can file issues; off in demo mode.",
+          "description": "Where Report a problem files: false turns it off; { source, project? } uses a task source with a token; { provider, baseUrl, project, tokenEnv or githubApp } is a connection of its own. Absent, the first interactive source that can file issues; off in demo mode.",
           "anyOf": [
             { "const": false },
             {
@@ -1327,6 +1349,42 @@
                   "type": "string",
                   "pattern": "^[A-Z][A-Z0-9_]{0,127}$",
                   "description": "Environment variable holding the tracker token; unset keeps reports without filing them."
+                },
+                "acknowledgement": { "type": "string", "minLength": 1, "maxLength": 280, "description": "One line the success screen shows after a report is filed." }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "provider": { "type": "string", "enum": ["github"], "description": "Tracker reports are filed on." },
+                "baseUrl": { "type": "string", "maxLength": 2048, "pattern": "^https?://\\S+$", "description": "Tracker API root." },
+                "project": { "type": "string", "minLength": 1, "description": "Repository reports are filed in." },
+                "githubApp": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "description": "The GitHub App Unfold files as, instead of tokenEnv; an unreadable private key keeps reports without filing them.",
+                  "properties": {
+                    "appId": {
+                      "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^([1-9][0-9]{0,19}|Iv[0-9A-Za-z._-]{1,62})$" }],
+                      "description": "The App ID, or the App's Client ID."
+                    },
+                    "installationId": {
+                      "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "string", "pattern": "^[1-9][0-9]{0,19}$" }],
+                      "description": "The installation that holds the repository; looked up from the repository when absent."
+                    },
+                    "privateKeyEnv": {
+                      "type": "string",
+                      "pattern": "^[A-Z][A-Z0-9_]{0,127}$",
+                      "description": "Environment variable holding the App's PEM private key."
+                    },
+                    "privateKeyFile": {
+                      "type": "string",
+                      "pattern": "^/",
+                      "maxLength": 1024,
+                      "description": "Absolute path of a mounted file holding the App's PEM private key, read again at every mint."
+                    }
+                  }
                 },
                 "acknowledgement": { "type": "string", "minLength": 1, "maxLength": 280, "description": "One line the success screen shows after a report is filed." }
               }

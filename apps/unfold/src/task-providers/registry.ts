@@ -59,6 +59,25 @@ export interface IssueFiling {
   comment(source: TaskSourceConfig, project: string, issue: FiledIssue, body: string, call: FileRequest): Promise<void>;
 }
 
+/** The app identity a source authenticates as instead of a static token: the app, its installation when configured, and where its private key is read. */
+export type SourceApp = { id: string; installationId?: string; privateKey: { env: string } | { file: string } };
+
+/** Authenticating as an app that mints its own short-lived tokens, configured under `field` on a task source or a reports connection. */
+export interface AppAuthentication {
+  /** The configuration key that holds the app credential. */
+  readonly field: string;
+  /** Checks a configured app credential and throws an error naming `label` when it is malformed. */
+  parse(raw: unknown, label: string): SourceApp;
+  /** Why the private key cannot be used now, or undefined when it can. */
+  keyProblem(app: SourceApp): string | undefined;
+  /** A token for the source's repository, minted when none is cached or `fresh` asks for a new one. */
+  token(source: TaskSourceConfig, fresh: boolean): Promise<string>;
+  /** The cached token of the source, for redaction, without minting. */
+  cached(source: TaskSourceConfig): string | undefined;
+  /** The login the app's own comments carry. */
+  login(source: TaskSourceConfig): Promise<string>;
+}
+
 /** One container a person picks on the way to a project, such as a ClickUp Workspace, Space, Folder or List. `project` marks one a task source can read; `children` one that holds more containers. */
 export type ScopeEntry = { kind: string; id: string; name: string; project: boolean; children: boolean };
 /** What a tracker says about one project before it becomes a task source: its name, the containers above it, whether it is archived and its statuses. */
@@ -119,6 +138,8 @@ export interface TaskProviderAdapter {
   readonly handoff?: TaskHandoff;
   readonly issues?: IssueFiling;
   readonly setup?: TaskSetup;
+  /** Present when a source may authenticate as an app instead of with a token. */
+  readonly appAuth?: AppAuthentication;
   /** One sentence on how often the tracker lets one account ask, for a rate-limit message. */
   readonly rateLimit?: string;
   /** Tidies a description for the browser's Markdown renderer without changing the snapshot or its revision. */
@@ -174,5 +195,7 @@ export function orList(names: string[]): string { return names.length < 2 ? name
 
 /** The labels of the adapters that hand off to Ploeg, in registration order. */
 export function handoffLabels(): string[] { return taskProviders().filter(adapter => adapter.handoff).map(adapter => adapter.label); }
+/** The configuration keys of every adapter's app credential, once each. */
+export function appCredentialFields(): string[] { return [...new Set(taskProviders().flatMap(adapter => adapter.appAuth ? [adapter.appAuth.field] : []))]; }
 /** The labels of the adapters that file Report a problem issues, in registration order. */
 export function issueLabels(): string[] { return taskProviders().filter(adapter => adapter.issues).map(adapter => adapter.label); }

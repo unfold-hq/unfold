@@ -8,6 +8,8 @@
 {{- range $key := list "execution" "links" "delivery" "billing" -}}{{- if hasKey $.Values.config $key -}}{{- fail (printf "mode demo gives every visitor admin; it cannot use config.%s, which reaches real systems with credentials. Set mode: live" $key) -}}{{- end -}}{{- end -}}
 {{- range (default (list) .Values.config.taskSources) -}}{{- if hasKey . "tokenEnv" -}}{{- fail (printf "mode demo gives every visitor admin; it cannot hold the token of task source %v. Remove its tokenEnv, or set mode: live" (get . "id")) -}}{{- end -}}{{- end -}}
 {{- if hasKey (default (dict) .Values.config.reports) "tokenEnv" -}}{{- fail "mode demo gives every visitor admin; it cannot hold config.reports.tokenEnv. Remove it, or set mode: live" -}}{{- end -}}
+{{- range (default (list) .Values.config.taskSources) -}}{{- if hasKey . "githubApp" -}}{{- fail (printf "mode demo gives every visitor admin; it cannot hold the GitHub App of task source %v. Remove its githubApp, or set mode: live" (get . "id")) -}}{{- end -}}{{- end -}}
+{{- if hasKey (default (dict) .Values.config.reports) "githubApp" -}}{{- fail "mode demo gives every visitor admin; it cannot hold config.reports.githubApp. Remove it, or set mode: live" -}}{{- end -}}
 {{- end -}}
 {{- include "unfold.validateSecrets" . -}}
 {{- $_ := set $cfg "publicDir" "/app/public" -}}

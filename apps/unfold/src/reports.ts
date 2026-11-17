@@ -5,7 +5,9 @@ import type { TaskSourceConfig } from './tasks.ts';
 import type { Store, StoredReport, StoredReportFile, StoredReportIssue } from './store.ts';
 import { JobQueue } from './jobs/queue.ts';
 import { JobWorker, type JobOutcome } from './jobs/worker.ts';
-import { apiRoot, attachToIssue, canAttachToIssue, canUpdateIssueBody, commentOnIssue, createIssue, describeIssueTarget, filesIssues, issueBodyFormat, issueProviderLabels, issueProviderNames, readIssueState, reportTargetProject, TaskError, updateIssueBody, type IssueFile, type IssueState } from './tasks.ts';
+import { appCredentialFields, taskProvider } from './task-providers/index.ts';
+import { hasCredential } from './task-providers/shared.ts';
+import { apiRoot, attachToIssue, canAttachToIssue, canUpdateIssueBody, commentOnIssue, createIssue, describeIssueTarget, filesIssues, issueBodyFormat, issueProviderLabels, issueProviderNames, readIssueState, reportTargetProject, sourceApp, TaskError, updateIssueBody, type IssueFile, type IssueState } from './tasks.ts';
 
 export const maxReportBytes = 8 * 1024 * 1024;
 export const maxReportFiles = 5;
@@ -71,22 +73,24 @@ export type ReportOutcome = { id: string; status: StoredReport['status']; url?: 
 /**
  * Resolves `reports` from the configuration file. `false` turns filing off. `{ source, project? }` names a task source
  * whose provider files issues and optionally another repository or project. `{ provider, baseUrl, project, tokenEnv }` is a
- * connection of its own, which never appears among the task sources or on the Tasks page. Leaving `reports` out picks
+ * connection of its own, which never appears among the task sources or on the Tasks page; where the provider's adapter
+ * authenticates as an app, the app credential takes the place of `tokenEnv`. Leaving `reports` out picks
  * the first source with a token, whose provider files issues, that Unfold owns. A source Ploeg dispatches from is never a default,
  * and naming one needs another project, so a report never becomes agent work. A missing token turns filing off with a
- * warning instead of stopping Unfold. Returns null when nothing can file reports.
+ * warning instead of stopping Unfold, and so does an app's unreadable private key. A source that authenticates as an
+ * app files with a token minted for the report project. Returns null when nothing can file reports.
  */
 export function reportSettings(raw: unknown, sources: TaskSourceConfig[] | undefined, mode: AppConfig['mode']): ReportTarget | null {
   if (raw === false || mode === 'demo') return null;
-  const fileable = (sources ?? []).filter(source => filesIssues(source.provider) && source.token);
+  const fileable = (sources ?? []).filter(source => filesIssues(source.provider) && hasCredential(source));
   if (raw === undefined) {
     const own = fileable.find(source => source.executionOwner === 'interactive');
     return own ? { source: own, project: own.project } : null;
   }
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('reports must be false, { source, project? } or { provider, baseUrl, project, tokenEnv }');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error(`reports must be false, { source, project? } or { provider, baseUrl, project, ${credentialWords()} }`);
   const value = raw as Record<string, unknown>;
   if ('provider' in value) return ownConnection(value);
-  if (Object.keys(value).some(key => !['source', 'project', 'acknowledgement'].includes(key))) throw new Error('reports must be false, { source, project?, acknowledgement? } or { provider, baseUrl, project, tokenEnv, acknowledgement? }');
+  if (Object.keys(value).some(key => !['source', 'project', 'acknowledgement'].includes(key))) throw new Error(`reports must be false, { source, project?, acknowledgement? } or { provider, baseUrl, project, ${credentialWords()}, acknowledgement? }`);
   const acknowledgement = acknowledgementSetting(value.acknowledgement);
   const source = fileable.find(entry => entry.id === value.source);
   if (!source) throw new Error(`reports.source must name a ${issueProviderLabels()} task source with a token`);
@@ -94,8 +98,10 @@ export function reportSettings(raw: unknown, sources: TaskSourceConfig[] | undef
   if (typeof project !== 'string') throw new Error('reports.project must name the repository or project on the report tracker');
   const target = reportTargetProject(source, project);
   if (source.executionOwner === 'ploeg' && target === source.project) throw new Error(`reports.project must differ from ${source.id}'s project: Ploeg dispatches the tasks there, so a report would become agent work`);
-  return { source, project: target, ...(acknowledgement ? { acknowledgement } : {}) };
+  return { source: source.app ? { ...source, project: target } : source, project: target, ...(acknowledgement ? { acknowledgement } : {}) };
 }
+
+function credentialWords(): string { return ['tokenEnv', ...appCredentialFields()].join(' or '); }
 
 function acknowledgementSetting(value: unknown): string | undefined {
   if (value === undefined) return undefined;
@@ -104,17 +110,28 @@ function acknowledgementSetting(value: unknown): string | undefined {
 }
 
 function ownConnection(value: Record<string, unknown>): ReportTarget | null {
-  if (Object.keys(value).some(key => !['provider', 'baseUrl', 'project', 'tokenEnv', 'acknowledgement'].includes(key))) throw new Error('reports with its own connection takes provider, baseUrl, project, tokenEnv and acknowledgement only');
+  if (Object.keys(value).some(key => !['provider', 'baseUrl', 'project', 'tokenEnv', 'acknowledgement', ...appCredentialFields()].includes(key))) throw new Error(`reports with its own connection takes provider, baseUrl, project, ${credentialWords()} and acknowledgement only`);
   const acknowledgement = acknowledgementSetting(value.acknowledgement);
   if (typeof value.provider !== 'string' || !filesIssues(value.provider)) throw new Error(`reports.provider must be ${issueProviderNames()}`);
-  if (typeof value.tokenEnv !== 'string' || !/^[A-Z][A-Z0-9_]{0,127}$/.test(value.tokenEnv)) throw new Error('reports.tokenEnv must name an environment variable');
-  if (typeof value.project !== 'string') throw new Error('reports.project must name the repository or project on the report tracker');
   const provider = value.provider;
+  const app = sourceApp(value, provider, 'reports');
+  const appField = taskProvider(provider).appAuth?.field;
+  if (!app && (typeof value.tokenEnv !== 'string' || !/^[A-Z][A-Z0-9_]{0,127}$/.test(value.tokenEnv))) throw new Error(`reports.tokenEnv must name an environment variable${appField ? `, or reports.${appField} must name the app Unfold files as` : ''}`);
+  if (typeof value.project !== 'string') throw new Error('reports.project must name the repository or project on the report tracker');
   const base: TaskSourceConfig = { id: 'reports', name: 'Report a problem', provider, baseUrl: apiRoot(value.baseUrl, provider), project: '', repositoryId: '', executionOwner: 'interactive' };
   const project = reportTargetProject(base, value.project);
-  const token = process.env[value.tokenEnv];
+  if (app) {
+    const problem = taskProvider(provider).appAuth!.keyProblem(app);
+    if (problem) {
+      console.error(JSON.stringify({ level: 'warn', event: 'reports.app_key_missing', message: `${problem} Unfold keeps reports and files none` }));
+      return null;
+    }
+    return { source: { ...base, project, app }, project, ...(acknowledgement ? { acknowledgement } : {}) };
+  }
+  const tokenEnv = String(value.tokenEnv);
+  const token = process.env[tokenEnv];
   if (!token) {
-    console.error(JSON.stringify({ level: 'warn', event: 'reports.token_missing', message: `reports.tokenEnv names ${value.tokenEnv}, which is not set; Unfold keeps reports and files none` }));
+    console.error(JSON.stringify({ level: 'warn', event: 'reports.token_missing', message: `reports.tokenEnv names ${tokenEnv}, which is not set; Unfold keeps reports and files none` }));
     return null;
   }
   return { source: { ...base, project, token }, project, ...(acknowledgement ? { acknowledgement } : {}) };
