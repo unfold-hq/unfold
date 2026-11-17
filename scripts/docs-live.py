@@ -74,9 +74,20 @@ def verify(base, staging, read=read_url, site_url=None):
     return {'revision': expected['revision'], 'human_pages': len(pages), 'markdown_pages': len(pages), 'source_hashes': len(manifest['sources']), 'machine_index_links': len(links), 'schemas': len(schemas), 'pagefind_pages': count}
 
 
+def verify_settled(base, staging, read=read_url, site_url=None, settle_seconds=300, pause=15.0, clock=time.monotonic, sleep=time.sleep):
+    deadline = clock() + settle_seconds
+    while True:
+        try:
+            return verify(base, staging, read, site_url)
+        except AssertionError:
+            if clock() + pause > deadline:
+                raise
+            sleep(pause)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--base', help='published site to check; defaults to site_url in mkdocs.yml')
     args = parser.parse_args()
     base = args.base or yaml.safe_load((root / 'mkdocs.yml').read_text())['site_url']
-    print(json.dumps(verify(base, root / '.build/docs')))
+    print(json.dumps(verify_settled(base, root / '.build/docs')))
