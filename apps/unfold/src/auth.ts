@@ -54,14 +54,16 @@ function delegatedRoute(req: IncomingMessage): boolean {
   return delegatedRoutes.some(([method, pattern]) => method === req.method && pattern.test(path));
 }
 
+const editorNames: Record<string, string> = { mcp: 'unfold-mcp', acp: 'unfold-acp-agent', 'claude-code': 'Claude Code', vscode: 'VS Code' };
+
 /**
- * The name an editor sign-in and its credential carry: `VS Code`, `unfold-mcp` or `unfold-acp-agent` when the client
- * says it is one of those, followed by ` on <host>` when the client names a valid host. Unfold builds the name, so a
- * client cannot put its own text on the approval page.
+ * The name an editor sign-in and its credential carry: `VS Code`, `unfold-mcp`, `unfold-acp-agent` or `Claude Code`
+ * when the client says it is one of those, followed by ` on <host>` when the client names a valid host. Unfold builds
+ * the name, so a client cannot put its own text on the approval page.
  */
 export function editorLabel(client: unknown, host: unknown): string {
-  const name = client === 'mcp' ? 'unfold-mcp' : client === 'acp' ? 'unfold-acp-agent' : 'VS Code';
-  if (client !== 'mcp' && client !== 'acp' && client !== 'vscode') return name;
+  const name = typeof client === 'string' && Object.hasOwn(editorNames, client) ? editorNames[client] : undefined;
+  if (!name) return 'VS Code';
   return typeof host === 'string' && /^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$/.test(host) ? `${name} on ${host}` : name;
 }
 

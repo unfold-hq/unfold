@@ -195,7 +195,7 @@ paths:
             schema:
               type: object
               properties:
-                client: { type: string, enum: [vscode, mcp] }
+                client: { type: string, enum: [vscode, mcp, acp, claude-code] }
                 host: { type: string, maxLength: 63 }
       responses:
         '200':
