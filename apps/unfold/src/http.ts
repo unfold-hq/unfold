@@ -62,6 +62,7 @@ import { taskKeyRing } from './mcp-tasks.ts';
 import { McpEvents } from './mcp-events.ts';
 import { entitledRole } from './oidc.ts';
 import { LinkedSessions, parseLinkedEvent } from './linked-sessions.ts';
+import { TaskReferenceResolver } from './linked-references.ts';
 import { LinkedUsage, linkedWorkCharges, ploegRunUsage } from './linked-usage.ts';
 import { ploegTrackerReference } from './task-providers/index.ts';
 import { LinkedHandoff, handoffRoute as serveLinkedHandoff, isHandoffRoute } from './linked-handoff.ts';
@@ -274,8 +275,14 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   void delivery.reconcileAll().catch(() => undefined);
   const handoff = new TaskHandoff(config, ploeg);
   const tenants = new TenantScope(config);
+  const references = new TaskReferenceResolver(async user => (await Promise.all(tenants.sources(user).map(async source => {
+    const provider = sourceLinkProvider(source);
+    if (!provider) return source;
+    const token = links ? await links.token(user.id, provider).catch(() => undefined) : undefined;
+    return token ? withLinkedToken(source, token) : undefined;
+  }))).filter(source => source !== undefined));
   const linkedUsage = new LinkedUsage(store.db, config, { jobs });
-  const linked = new LinkedSessions(store.db, config, ploeg, { usage: linkedUsage });
+  const linked = new LinkedSessions(store.db, config, ploeg, { resolveTasks: references.resolve, usage: linkedUsage });
   const linkedHandoff = new LinkedHandoff(linked, ploeg, store, config);
   const usage = new MyUsageService({ asksBetween: (...args) => store.asksBetween(...args), sessionSpendSince: (...args) => store.sessionSpendSince(...args), linkedOwned: (ownerId, limit) => linked.store.owned(ownerId, limit), recordedUsage: id => linkedUsage.recorded(id) }, config);
   const takeOver = new TakeOver(ploeg);

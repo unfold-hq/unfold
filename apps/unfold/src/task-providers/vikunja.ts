@@ -50,6 +50,8 @@ export const vikunjaIssues: IssueFiling = {
   },
 };
 
+const referencePrefix = 'VIK';
+
 /**
  * Vikunja tasks of one project. Descriptions are HTML. Its tasks are referred to as `VIK-<id>`, and Ploeg means
  * Vikunja when a Work Item names no provider. Hand-off assigns a team's Vikunja user, found among the project's users
@@ -61,13 +63,19 @@ export const vikunja: TaskProviderAdapter = {
   label: 'Vikunja',
   priorities: { names: ['', 'low', 'medium', 'high', 'urgent', 'do now'], oneIsHighest: false },
   descriptionFormat: 'html',
-  reference: { prefix: 'VIK', ploegDefault: true },
+  reference: { prefix: referencePrefix, ploegDefault: true },
   taskId: numericId,
   issues: vikunjaIssues,
   apiRoot: (_url, path) => requireSuffix(path, '/api/v1'),
   project: numericProject,
   webRoot: apiWebRoot,
   taskUrl: (_source, id, _value, base) => `${base}/tasks/${id}`,
+  async resolveReference(_source, candidate, webHost) {
+    if (candidate.kind === 'key') { const [prefix, id] = candidate.key.split('-'); return prefix === referencePrefix ? { externalId: id } : undefined; }
+    if (candidate.kind !== 'url' || !webHost || candidate.host !== webHost) return undefined;
+    const match = /^\/tasks\/([1-9][0-9]{0,18})$/.exec(candidate.path);
+    return match ? { externalId: match[1] } : undefined;
+  },
   headers: (source, headers) => authorize(source, headers, 'Bearer'),
   parse(source, value, limit) {
     const id = nativeTaskId(numericId, value.id);

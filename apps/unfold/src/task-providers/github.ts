@@ -1,6 +1,6 @@
 import type { FiledIssue, IssueFix } from '../tasks.ts';
 import type { IssueFiling, TaskProviderAdapter } from './registry.ts';
-import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, releaseAfter, repositoryIssueDetails, repositoryIssuePath, repositoryIssueUrl } from './repository-issues.ts';
+import { authorize, isPullRequest, ownerRepository, parseRepositoryIssue, releaseAfter, repositoryIssueDetails, repositoryIssuePath, repositoryIssueReference, repositoryIssueUrl } from './repository-issues.ts';
 import { githubApp } from './github-app.ts';
 import { apiWebRoot, entries, listPage, numericId, plainComment, readOne, record, TaskError, when } from './shared.ts';
 
@@ -92,4 +92,5 @@ export const github: TaskProviderAdapter = {
   details: (_source, value, read) => repositoryIssueDetails(value, read),
   list: (source, page, reading) => listPage(page, reading, { path: repositoryIssuePath(source), query: { page: String(page), per_page: '50', state: 'open', sort: 'updated', direction: 'desc' }, pageSize: 50, skip: isPullRequest }),
   read: (source, id, truncate, reading) => readOne(id, truncate, reading, `${repositoryIssuePath(source)}/${id}`),
+  resolveReference: repositoryIssueReference,
 };
