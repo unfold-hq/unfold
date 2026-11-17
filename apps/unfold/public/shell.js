@@ -10,6 +10,9 @@ import { lockupSvg, markSvg } from './core/brand.js';
 import { avatar } from './core/ui.js';
 import { enabled } from './core/flags.js';
 import { contractBanner } from './core/status-signal.js';
+import { unreadReleases } from './views/whats-new.js';
+
+function whatsNewDescription() { const unread = unreadReleases(); return unread ? `What’s new: ${unread} unread release${unread === 1 ? '' : 's'}` : 'What’s new'; }
 
 const lockup = lockupSvg({ className: 'app-lockup' });
 const mark = markSvg({ className: 'app-mark' });
@@ -105,7 +108,7 @@ function navMarkup(where) {
 }
 
 function sidebarMarkup() {
-  const version = state.bootstrap.version ? `<p class="app-version">Unfold ${escape(state.bootstrap.version)}</p>` : '';
+  const version = state.bootstrap.version ? `<button type="button" class="app-version" data-action="whats-new-open" title="What’s new in Unfold"><span>Unfold <span class="num">${escape(state.bootstrap.version)}</span></span><span class="app-version-dot" data-whats-new aria-hidden="true"${unreadReleases() ? '' : ' hidden'}></span><span class="sr-only" data-whats-new-describe>${escape(whatsNewDescription())}</span></button>` : '';
   return `<div class="app-sidebar"><a class="app-brand" href="#now" aria-label="Unfold home">${lockup}${mark}</a>${navMarkup('sidebar')}${version}</div>`;
 }
 
@@ -150,7 +153,7 @@ function themeSwitch() {
 
 function accountItems() {
   const demo = state.bootstrap.mode === 'demo';
-  return `${themeSwitch()}<p class="app-menu-heading">Your cards</p>${cardPages.map(([, href, glyph, label]) => `<a class="app-menu-item" href="${href}">${icon(glyph)}<span>${label}</span></a>`).join('')}<hr class="app-menu-rule"><a class="app-menu-item" href="#settings/preferences">${icon('settings')}<span>Preferences</span></a><a class="app-menu-item" href="#settings/editors">${icon('code')}<span>Connect VS Code</span></a><button class="app-menu-item" type="button" data-action="shortcuts-open">${icon('keyboard')}<span>Keyboard shortcuts</span>${singleKeysEnabled() ? '<kbd class="app-kbd">?</kbd>' : ''}</button>${demo ? '' : `<button class="app-menu-item" type="button" data-action="logout">${icon('logout')}<span>Sign out</span></button>`}`;
+  return `${themeSwitch()}<p class="app-menu-heading">Your cards</p>${cardPages.map(([, href, glyph, label]) => `<a class="app-menu-item" href="${href}">${icon(glyph)}<span>${label}</span></a>`).join('')}<hr class="app-menu-rule"><a class="app-menu-item" href="#settings/preferences">${icon('settings')}<span>Preferences</span></a><a class="app-menu-item" href="#settings/editors">${icon('code')}<span>Connect VS Code</span></a><button class="app-menu-item" type="button" data-action="whats-new-open">${icon('spark')}<span>What’s new</span><span class="app-version-dot" data-whats-new aria-hidden="true"${unreadReleases() ? '' : ' hidden'}></span></button><button class="app-menu-item" type="button" data-action="shortcuts-open">${icon('keyboard')}<span>Keyboard shortcuts</span>${singleKeysEnabled() ? '<kbd class="app-kbd">?</kbd>' : ''}</button>${demo ? '' : `<button class="app-menu-item" type="button" data-action="logout">${icon('logout')}<span>Sign out</span></button>`}`;
 }
 
 function userAvatar(size) {
@@ -287,6 +290,8 @@ export function updateChrome() {
   for (const dot of document.querySelectorAll('[data-signal]')) { dot.hidden = !state.statusSignal; dot.dataset.tone = state.statusSignal === 'down' ? 'danger' : 'attention'; }
   for (const description of document.querySelectorAll('[data-signal-describe]')) description.textContent = state.statusSignal ? signals[state.statusSignal] : '';
   for (const dot of document.querySelectorAll('[data-report-signal]')) dot.hidden = !state.reportUpdates;
+  for (const dot of document.querySelectorAll('[data-whats-new]')) dot.hidden = !unreadReleases();
+  for (const description of document.querySelectorAll('[data-whats-new-describe]')) description.textContent = whatsNewDescription();
   for (const flag of document.querySelectorAll('[data-report-flag]')) { flag.setAttribute('aria-label', reportLabel()); flag.title = reportLabel(); }
   for (const section of document.querySelectorAll('.app-nav-section[data-group="ploeg"]')) section.toggleAttribute('data-unconfigured', state.ploegStatus === 'unconfigured');
   updateContractBanner();

@@ -379,7 +379,7 @@ paths:
       tags: [Workbench]
       operationId: getBootstrap
       summary: 'What the browser needs to start'
-      description: 'The current user, mode, repositories, task sources, the trackers the registry knows, Teams (also as the deprecated `crews`), models, runtimes, placements, limits, report target, product-event switch and the browser-visible flag values.'
+      description: 'The current user, mode, running version, repositories, task sources, the trackers the registry knows, Teams (also as the deprecated `crews`), models, runtimes, placements, limits, report target, product-event switch and the browser-visible flag values.'
       x-unfold-role: viewer
       responses:
         '200':
@@ -391,6 +391,7 @@ paths:
                 properties:
                   user: { $ref: '#/components/schemas/User' }
                   mode: { type: string, enum: [demo, live] }
+                  version: { type: string, description: 'The running version, which the browser compares with `/api/health` to notice a newer deploy.' }
                   sharedExecution: { type: boolean }
                   agentHost: { type: boolean }
                   deliveryRepositories: { type: array, items: { type: string } }
@@ -522,6 +523,35 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/changelog:
+    get:
+      tags: [Workbench]
+      operationId: getChangelog
+      summary: 'The release notes of this version and the versions before it'
+      description: 'Built from the release-note fragments in `apps/unfold/changes` and the index the release build writes beside them. A build that is not a release lists every fragment under `unreleased`. Releases are newest first and may list no changes.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: 'The changelog.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, releases, unreleased]
+                properties:
+                  version: { type: string, description: 'The running version.' }
+                  releases:
+                    type: array
+                    items:
+                      type: object
+                      required: [version, date, changes]
+                      properties:
+                        version: { type: string }
+                        date: { type: [string, 'null'], format: date-time }
+                        changes: { type: array, items: { $ref: '#/components/schemas/ReleaseNote' } }
+                  unreleased: { type: array, items: { $ref: '#/components/schemas/ReleaseNote' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/health:
     get:
       tags: [Workbench]
@@ -7823,6 +7853,15 @@ components:
               receiptId: { type: string }
               policySha256: { type: string }
   schemas:
+    ReleaseNote:
+      type: object
+      required: [id, type, highlight, summary, details]
+      properties:
+        id: { type: string, description: 'The fragment file name without `.md`.' }
+        type: { type: string, enum: [added, changed, deprecated, removed, fixed, security] }
+        highlight: { type: boolean, description: 'When true the workbench opens What''s new by itself once after the upgrade.' }
+        summary: { type: string, maxLength: 160 }
+        details: { type: string, description: 'Markdown; empty when the note is one sentence.' }
     UsageMoney:
       type: object
       description: 'Money from one source in a period. `usd` sums the known amounts and is null when there are items and none has a known amount; `unknown` counts items without one, so a partial sum is a lower bound. `final` is true only when every amount is known and settled.'

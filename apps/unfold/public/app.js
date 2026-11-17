@@ -22,6 +22,7 @@ import { startCapture } from './core/report-capture.js';
 import { popOnHover } from './core/motion.js';
 import { followTimeCursor } from './core/time-cursor.js';
 import { flyWhileLoading } from './core/boot-flight.js';
+import { startWhatsNew, onWhatsNew } from './views/whats-new.js';
 
 const registry = createRegistry(views);
 const landing = 'now';
@@ -83,7 +84,7 @@ async function boot() {
   const params = new URLSearchParams(location.search);
   const linkNotice = params.get('linked') ? `${({ gitlab: 'GitLab', clickup: 'ClickUp' })[params.get('linked')] || params.get('linked')} is linked to your account.` : params.get('link_error') ? linkFailure(params.get('link_error')) : '';
   if (linkNotice) history.replaceState(null, '', `${location.pathname}#settings/accounts`);
-  try { state.bootstrap = await api('/api/bootstrap'); setTrackers(state.bootstrap.trackers); insight.configure(state.bootstrap.insight?.events); state.sessions = await api('/api/sessions'); const returnTo = takeReturnHash(); if (returnTo && (!location.hash || location.hash === '#now')) history.replaceState(null, '', `${location.pathname}${returnTo}`); await route(); if (state.view !== 'now') refreshCounts().catch(() => {}); refreshStatusSignal().catch(() => {}); refreshReports().catch(() => {}); if (linkNotice) notify(linkNotice, Boolean(params.get('link_error'))); }
+  try { state.bootstrap = await api('/api/bootstrap'); setTrackers(state.bootstrap.trackers); insight.configure(state.bootstrap.insight?.events); state.sessions = await api('/api/sessions'); const returnTo = takeReturnHash(); if (returnTo && (!location.hash || location.hash === '#now')) history.replaceState(null, '', `${location.pathname}${returnTo}`); await route(); if (state.view !== 'now') refreshCounts().catch(() => {}); refreshStatusSignal().catch(() => {}); refreshReports().catch(() => {}); startWhatsNew(); if (linkNotice) notify(linkNotice, Boolean(params.get('link_error'))); }
   catch (error) { if (!state.bootstrap) renderLogin(error.message.includes('Sign in') ? '' : error.message); else notify(error.message, true); }
 }
 
@@ -96,6 +97,7 @@ onUnauthorized(() => {
 onCountsChange(updateChrome);
 onStatusSignal(updateChrome);
 onReportUpdates(updateChrome);
+onWhatsNew(updateChrome);
 live.subscribe(updateLiveState);
 useNavigation({ render, boot });
 applyPreferences();
