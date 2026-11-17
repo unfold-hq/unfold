@@ -125,7 +125,7 @@ test('the workflows use only the repository secrets the move names, and the Clou
 
 test('a pull request runs the push\'s checks without write access or secrets, and builds and scans the image contexts from a fork too', () => {
   assert.deepEqual(Object.keys(pr.on).sort(), ['pull_request', 'workflow_dispatch']);
-  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-policy', 'warnings']);
+  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-notes', 'release-policy', 'warnings']);
   for (const name of ['checks', 'checks-unfold', 'warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
   for (const [name, job] of Object.entries(pr.jobs)) {
     assert.equal(job.permissions, undefined, `${name} keeps the read-only default`);
@@ -141,6 +141,16 @@ test('a pull request runs the push\'s checks without write access or secrets, an
   for (const step of gates) assert.equal(step.with['budgets-file'], 'apps/unfold/ops/security/cve-budgets.yaml');
   const verify = actions.verify.runs.steps.find(step => /mise run verify/.test(step.run ?? ''));
   assert.equal(verify.env.UNFOLD_REQUIRE_IMPORT_NOTES, 'true');
+});
+
+test('a pull request that changes Unfold for people carries a release note, and every image ships the notes of its release', () => {
+  assert.ok(pr.jobs.gate.needs.includes('release-notes'));
+  assert.match(pr.jobs['release-notes'].steps.at(-1).run, /apps\/unfold\/scripts\/changelog\.ts require --base/);
+  const published = read('.github/workflows/on_release_published.yml');
+  const steps = published.jobs['unfold-release-build'].steps;
+  assert.equal(steps[0].with['fetch-depth'], 0, 'resolving the notes reads every release tag');
+  const resolve = steps.findIndex(step => /changelog\.ts resolve/.test(step.run ?? ''));
+  assert.ok(resolve > 0 && resolve < steps.findIndex(step => step.id === 'build'), 'the notes are resolved before the image is built');
 });
 
 test('a pull request scans only the commits it adds for secrets, with the repository\'s gitleaks rules and the docs scan\'s pinned image', () => {

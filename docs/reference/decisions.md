@@ -322,6 +322,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0065](../../apps/unfold/docs/adrs/0065-unfold-tracks-agent-standards-in-a-catalogue-that-renovate-and-a-weekly-survey-keep-current.md) | Unfold tracks agent standards in a catalogue that Renovate and a weekly survey keep current | 2026-11-04 | unknown | — |
 | Unfold | [0068](../../apps/unfold/docs/adrs/0068-a-person-sees-their-own-usage-and-nobody-elses.md) | A person sees their own usage, and nobody else's | 2026-11-17 | unknown | — |
 | Unfold | [0069](../../apps/unfold/docs/adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md) | Linked Session cost is billing input, recorded as an estimate at API list prices | 2026-11-17 | unknown | — |
+| Unfold | [0070](../../apps/unfold/docs/adrs/0070-release-notes-are-written-per-change-and-the-workbench-shows-what-is-new.md) | Release notes are written per change, and the workbench shows what is new | 2026-11-17 | unknown | — |
 
 ## Other statuses
 

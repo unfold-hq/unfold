@@ -92,6 +92,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: unfold-v${{ needs.parse-release-tag.outputs.version }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Sign in to GHCR
         env:
@@ -105,6 +106,15 @@ jobs:
           name: ${{ matrix.name }}
           version: ${{ needs.parse-release-tag.outputs.version }}
           token: ${{ github.token }}
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        if: steps.probe.outputs.exists != 'true' && matrix.name == 'unfold'
+        with:
+          version: 2026.10.25
+          install_args: node
+          cache: false
+      - name: Record which release added each release note, for What's new in the image
+        if: steps.probe.outputs.exists != 'true' && matrix.name == 'unfold'
+        run: mise exec node -- node apps/unfold/scripts/changelog.ts resolve
       - name: Switch Docker to the containerd image store, so its own BuildKit pushes attestations and no BuildKit image is pulled
         if: steps.probe.outputs.exists != 'true'
         run: |

@@ -17,6 +17,8 @@ const { makeConfig, COMMIT_ANALYZER_PLUGIN, RELEASE_NOTES_PLUGIN, TAGS_ONLY_PLUG
 const root = path.resolve(__dirname, '..');
 const config = require(path.join(root, 'apps/.releaserc.cjs'));
 const policy = require('./release-policy.cjs');
+const FRAGMENT_NOTES_PLUGIN = path.join(__dirname, 'release-notes-fragments.cjs');
+const fragmentNotes = require(FRAGMENT_NOTES_PLUGIN);
 const semanticReleaseRoot = path.dirname(require.resolve('semantic-release'));
 const afterInitialDevelopment = makeConfig({ monorepo: { name: 'unfold' }, initialDevelopment: false });
 const pluginOptions = (source, name) => source.plugins.find((entry) => Array.isArray(entry) && entry[0] === name)[1];
@@ -155,7 +157,7 @@ test('a commit scoped site releases nothing on the Unfold train, breaking or not
 });
 
 test('the actual release notes retain a breaking-change compatibility warning', async () => {
-  const notes = await withApplicationCommit(historicalCommit, ({ cwd, commit }) => require(RELEASE_NOTES_PLUGIN).generateNotes(pluginOptions(config, RELEASE_NOTES_PLUGIN), {
+  const notes = await withApplicationCommit(historicalCommit, ({ cwd, commit }) => require(RELEASE_NOTES_PLUGIN).generateNotes(pluginOptions(config, FRAGMENT_NOTES_PLUGIN), {
     commits: [commit],
     lastRelease: { version: '0.3.0', gitTag: 'unfold-v0.3.0' },
     nextRelease: { version: '0.4.0-rc.1', gitTag: 'unfold-v0.4.0-rc.1' },
@@ -164,6 +166,14 @@ test('the actual release notes retain a breaking-change compatibility warning', 
   assert.match(notes, /BREAKING CHANGES/);
   assert.match(notes, /managed worker authentication is now the default/);
   assert.match(notes, /explicit legacy authentication/);
+});
+
+test('Unfold release notes lead with the release-note fragments and fold the commits away', () => {
+  assert.ok(pluginNames(config).includes(FRAGMENT_NOTES_PLUGIN));
+  assert.ok(!pluginNames(config).includes(RELEASE_NOTES_PLUGIN));
+  const commits = '## [0.4.0-rc.2](https://github.com/unfold-hq/unfold/compare/unfold-v0.4.0-rc.1...unfold-v0.4.0-rc.2) (2026-11-18)\n\n### Added\n\n* **ui:** add a dialog';
+  assert.equal(fragmentNotes.compose(commits, '### Added\n\n- See what changed.'), '## [0.4.0-rc.2](https://github.com/unfold-hq/unfold/compare/unfold-v0.4.0-rc.1...unfold-v0.4.0-rc.2) (2026-11-18)\n\n### Added\n\n- See what changed.\n\n<details>\n<summary>Commits</summary>\n\n### Added\n\n* **ui:** add a dialog\n\n</details>\n');
+  assert.match(fragmentNotes.compose('## [0.4.0-rc.3](x) (2026-11-18)', ''), /^## \[0\.4\.0-rc\.3\]\(x\) \(2026-11-18\)\n\nNothing in this release changes Unfold/);
 });
 
 test('version verification rejects major, stable, malformed and missing releases', () => {
