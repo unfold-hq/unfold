@@ -77,3 +77,4 @@ Re-evaluate when Node ships a Parquet writer, when `hyparquet-writer` stops bein
 
 * Ticket: VIK-2524.
 * Amends [ADR 0036](0036-the-agent-host-speaks-websocket-through-ws.md): `ws` is no longer the one runtime dependency. Also amends the Confirmation of [system ADR-0026](../../../../docs/adr/adr-0026-unfold-is-an-installable-web-app-that-notifies-from-the-server.md).
+* 2026-11-17: amended by [ADR 0071](0071-a-billing-system-reads-the-cost-export-with-its-own-service-account-token.md) (proposed): a configured cost export reader reads the export with its own Kubernetes service account token, within its Tenant and Teams.
