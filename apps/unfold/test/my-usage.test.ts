@@ -34,7 +34,7 @@ test('an unknown cost is never summed as zero, a demo item is left out, and a pa
 });
 
 test('the Linked Session usage asks the metrics store for cost and tokens of the named sessions only', async () => {
-  assert.equal(digestTokensQuery(['abcd1234-1', 'bad"}|.*'], '600s'), 'sum by (type) (max_over_time(claude_code_token_usage_tokens_total{session_id=~"abcd1234-1"}[600s]))');
+  assert.equal(digestTokensQuery(['abcd1234-1', 'bad"}|.*'], '600s'), 'sum by (type) (max_over_time({__name__=~"claude_code[._]token[._]usage(_tokens)?(_total)?", session_id=~"abcd1234-1"}[600s])) or sum by (type) (max_over_time({__name__=~"claude_code[._]token[._]usage(_tokens)?(_total)?", "session.id"=~"abcd1234-1"}[600s]))');
   const queries: string[] = [];
   const fetcher = (async (_url: string, init: RequestInit) => {
     const query = new URLSearchParams(String(init.body)).get('query') ?? '';
@@ -42,7 +42,7 @@ test('the Linked Session usage asks the metrics store for cost and tokens of the
     const result = query.startsWith('sum by (type)') ? [{ metric: { type: 'input' }, value: [0, '1200'] }, { metric: { type: 'output' }, value: [0, '300.4'] }] : [{ metric: {}, value: [0, '2.71828'] }];
     return new Response(JSON.stringify({ status: 'success', data: { result } }));
   }) as typeof fetch;
-  assert.deepEqual(await readSessionsUsage({ metricsUrl: 'http://vm.local' }, ['abcd1234-1'], '600s', { fetch: fetcher }), { costUsd: 2.7183, tokens: { input: 1200, output: 300, cacheRead: 0, cacheCreation: 0 }, reason: null });
+  assert.deepEqual(await readSessionsUsage({ metricsUrl: 'http://vm.local' }, ['abcd1234-1'], '600s', { fetch: fetcher }), { costUsd: 2.7183, tokens: { input: 1200, output: 300, cacheRead: 0, cacheCreation: 0 }, reason: null, read: true });
   assert.equal(queries.length, 2);
   const none = await readSessionsUsage(undefined, ['abcd1234-1'], '600s');
   assert.deepEqual([none.costUsd, none.tokens], [null, null]);
@@ -51,7 +51,7 @@ test('the Linked Session usage asks the metrics store for cost and tokens of the
   assert.deepEqual([down.costUsd, down.reason], [null, 'The metrics store answered 503.']);
 });
 
-async function metricsStore(t: TestContext) {
+async function metricsStore(t: TestContext, empty = false) {
   const queries: string[] = [];
   const server = createServer((req, res) => {
     let body = '';
@@ -59,7 +59,7 @@ async function metricsStore(t: TestContext) {
     req.on('end', () => {
       const query = new URLSearchParams(body).get('query') ?? '';
       queries.push(query);
-      const result = query.startsWith('sum by (type)') ? [{ metric: { type: 'input' }, value: [0, '5000'] }, { metric: { type: 'output' }, value: [0, '700'] }] : [{ metric: {}, value: [0, '4.5'] }];
+      const result = empty ? [] : query.startsWith('sum by (type)') ? [{ metric: { type: 'input' }, value: [0, '5000'] }, { metric: { type: 'output' }, value: [0, '700'] }] : [{ metric: {}, value: [0, '4.5'] }];
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ status: 'success', data: { result } }));
     });
@@ -123,4 +123,17 @@ test('Your usage says no telemetry is connected instead of showing a zero estima
   const usage = (await request(server.url, '/api/me/usage', op)).body.usage;
   assert.deepEqual([usage.linkedSessions.count, usage.linkedSessions.estimateUsd, usage.linkedSessions.tokens, usage.linkedSessions.telemetry], [1, null, null, 'not_configured']);
   assert.match(usage.linkedSessions.reason, /No metrics store/);
+});
+
+test('Your usage says the estimate is not known yet when the metrics store answers but holds nothing for the sessions', async t => {
+  const metrics = await metricsStore(t, true);
+  const server = await application('live', config => { config.observability = { metricsUrl: metrics.url }; });
+  t.after(() => server.close());
+  const password = randomBytes(24).toString('hex');
+  server.app.store.addUser({ id: 'op', name: 'op', role: 'viewer', passwordHash: await hashPassword(password) });
+  const op = await login(server.url, 'op', password);
+  await request(server.url, '/api/linked-sessions/events', { method: 'POST', cookie: op.cookie, body: { harness: 'claude-code', sessionId: 'session-op-0001', event: 'start' } });
+  const usage = (await request(server.url, '/api/me/usage', op)).body.usage;
+  assert.deepEqual([usage.linkedSessions.count, usage.linkedSessions.estimateUsd, usage.linkedSessions.tokens, usage.linkedSessions.telemetry], [1, null, null, 'connected']);
+  assert.match(usage.linkedSessions.reason, /no metrics for these sessions yet/);
 });

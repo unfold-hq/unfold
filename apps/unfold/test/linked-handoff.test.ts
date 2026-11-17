@@ -27,8 +27,8 @@ test('the digest counts the sessions active in the window, the Work Items they t
 });
 
 test('the digest cost is one PromQL query with a regex matcher over well-formed session ids only', async () => {
-  assert.equal(digestCostQuery(['abcd1234-1', 'bad"}|.*', 'abcd1234-2', 'abcd1234-1'], '604800s'), 'sum(max_over_time(claude_code_cost_usage_USD_total{session_id=~"abcd1234-1|abcd1234-2"}[604800s]))');
-  assert.equal(digestCostQuery(Array.from({ length: 150 }, (_, index) => `session-${String(index).padStart(4, '0')}`), '1s').split('|').length, 100, 'the matcher names at most 100 sessions');
+  assert.equal(digestCostQuery(['abcd1234-1', 'bad"}|.*', 'abcd1234-2', 'abcd1234-1'], '604800s'), 'sum (max_over_time({__name__=~"claude_code[._]cost[._]usage(_USD)?(_total)?", session_id=~"abcd1234-1|abcd1234-2"}[604800s])) or sum (max_over_time({__name__=~"claude_code[._]cost[._]usage(_USD)?(_total)?", "session.id"=~"abcd1234-1|abcd1234-2"}[604800s]))');
+  assert.equal(digestCostQuery(Array.from({ length: 150 }, (_, index) => `session-${String(index).padStart(4, '0')}`), '1s').split(' or ')[0].split('|').length, 100, 'the matcher names at most 100 sessions');
   const queries: string[] = [];
   const fetcher = (async (_url: string, init: RequestInit) => { queries.push(new URLSearchParams(String(init.body)).get('query') ?? ''); return new Response(JSON.stringify({ status: 'success', data: { result: [{ metric: {}, value: [0, '3.14159'] }] } })); }) as typeof fetch;
   assert.deepEqual(await readSessionsCost({ metricsUrl: 'http://vm.local' }, ['abcd1234-1'], '600s', { fetch: fetcher }), { costUsd: 3.1416, reason: null });

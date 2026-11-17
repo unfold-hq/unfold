@@ -32,6 +32,9 @@ test('a session page calls the cost an API-price estimate, offers resume only to
   assert.doesNotMatch(theirs, /claude --resume/);
   assert.doesNotMatch(theirs, /Telemetry/);
   assert.match(linkedSessionPage({ ...session, mine: true, telemetry: { ...telemetry, available: false, reason: 'No metrics store is configured.' } }, { now }), /No telemetry for this session[\s\S]*No metrics store is configured/);
+  const uncosted = linkedSessionPage({ ...session, mine: true, telemetry: { ...telemetry, costUsd: null, tokens: null, activeSeconds: null, reason: 'The metrics store has no Claude Code metrics for this session yet.' } }, { now });
+  assert.match(uncosted, /API-price estimate[\s\S]*Not known yet/, 'a session with telemetry but no cost says so instead of a zero');
+  assert.doesNotMatch(uncosted, /US\$\s0,00|\$0\.00/);
   assert.equal(attributionLine({ commits: [] }), 'No commits yet');
   assert.doesNotMatch(linkedSessionPage({ ...session, harness: 'acp', resume: '', mine: true }, { now }), /Resume it on your machine/, 'a session without a resume command offers none');
   assert.match(linkedStatusLine({ ...session, state: 'stale' }, now), /^Not heard from · last heard/);

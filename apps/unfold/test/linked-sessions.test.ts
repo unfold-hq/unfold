@@ -169,7 +169,7 @@ test('a session keeps the Agent Trace of its commits, counts AI lines on the com
 });
 
 test('telemetry is read by session id from the metrics and log stores, never reads prompt text, and says what it could not read', async () => {
-  assert.equal(metricQueries('s"1', '600s').cost, 'sum(max_over_time(claude_code_cost_usage_USD_total{session_id="s\\"1"}[600s]))');
+  assert.equal(metricQueries('s"1', '600s').cost, 'sum (max_over_time({__name__=~"claude_code[._]cost[._]usage(_USD)?(_total)?", session_id="s\\"1"}[600s])) or sum (max_over_time({__name__=~"claude_code[._]cost[._]usage(_USD)?(_total)?", "session.id"="s\\"1"}[600s]))');
   assert.match(logQueries('abc').events, /^\{service_name="claude-code"\} attributes\.session\.id:="abc" \| stats by \(event_name\) count\(\) hits$/);
   assert.doesNotMatch(Object.values(logQueries('abc')).join(' '), /prompt\b(?!s)|body|user\.email/);
   const seen: string[] = [];
@@ -177,7 +177,7 @@ test('telemetry is read by session id from the metrics and log stores, never rea
     const query = new URLSearchParams(String(init.body)).get('query') ?? '';
     seen.push(query);
     if (String(url).endsWith('/api/v1/query')) {
-      const result = query.includes('cost_usage') ? [{ metric: {}, value: [0, '1.23456'] }] : query.includes('token_usage') ? [{ metric: { type: 'input' }, value: [0, '1000'] }, { metric: { type: 'output' }, value: [0, '250'] }, { metric: { type: 'cacheRead' }, value: [0, '9000'] }] : [{ metric: {}, value: [0, '420.4'] }];
+      const result = query.includes('cost[._]usage') ? [{ metric: {}, value: [0, '1.23456'] }] : query.includes('token[._]usage') ? [{ metric: { type: 'input' }, value: [0, '1000'] }, { metric: { type: 'output' }, value: [0, '250'] }, { metric: { type: 'cacheRead' }, value: [0, '9000'] }] : [{ metric: {}, value: [0, '420.4'] }];
       return new Response(JSON.stringify({ status: 'success', data: { result } }));
     }
     if (query.includes('stats by (event_name)')) return new Response('{"event_name":"user_prompt","hits":"7"}\n{"event_name":"tool_result","hits":"40"}\n');
