@@ -2,7 +2,7 @@
 export const prefsKey = 'unfold.prefs';
 
 /** Each preference and its default. */
-export const prefDefaults = Object.freeze({ theme: 'system', density: 'comfortable', singleKeyShortcuts: true, live: true, notify: false, format: 'nl', lastVisit: null, team: null, cardMotion: 'auto', cardSound: false, nowView: 'fleet' });
+export const prefDefaults = Object.freeze({ theme: 'system', density: 'comfortable', singleKeyShortcuts: true, live: true, notify: false, format: 'nl', lastVisit: null, team: null, cardMotion: 'auto', cardSound: false, nowView: 'fleet', seenVersion: null });
 
 const choices = { theme: ['system', 'light', 'dark'], density: ['comfortable', 'compact'], format: ['nl', 'browser'], cardMotion: ['auto', 'full', 'calm', 'off'], nowView: ['desk', 'fleet'] };
 

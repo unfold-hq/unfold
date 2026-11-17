@@ -22,6 +22,12 @@ test('bootstrap advertises enabled placements and session creation validates the
   assert.equal(health.body.workspaceBackend, 'docker');
   assert.equal(health.body.releasedAt, null);
   assert.ok(Number.isFinite(Date.parse(health.body.startedAt)));
+  assert.equal(bootstrap.body.version, health.body.version);
+  const changelog = await request(server.url, '/api/changelog', { cookie: alice.cookie });
+  assert.equal(changelog.status, 200);
+  assert.equal(changelog.body.version, health.body.version);
+  assert.ok(Array.isArray(changelog.body.releases));
+  assert.ok(changelog.body.unreleased.every((note: any) => typeof note.summary === 'string' && ['added', 'changed', 'deprecated', 'removed', 'fixed', 'security'].includes(note.type)));
   const defaulted = await request(server.url, '/api/sessions', { method: 'POST', cookie: alice.cookie, body: createInput({ runtime: 'opencode' }) });
   assert.equal(defaulted.status, 201, defaulted.text);
   assert.equal(defaulted.body.placement, 'docker');

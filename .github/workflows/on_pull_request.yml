@@ -195,6 +195,26 @@ jobs:
         run: mise exec node -- npm ci --prefix scripts/release-config --omit=dev --ignore-scripts --no-audit --no-fund
       - uses: ./.github/actions/release-policy
 
+  release-notes:
+    if: github.repository == 'unfold-hq/unfold'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.10.25
+          install_args: node
+          cache: false
+      - name: Require a release note for a change people using Unfold will notice
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: mise exec node -- node apps/unfold/scripts/changelog.ts require --base "${BASE:-origin/development}" --head "${HEAD_SHA:-HEAD}"
+
   gitleaks:
     if: github.repository == 'unfold-hq/unfold'
     runs-on: ubuntu-24.04
@@ -215,7 +235,7 @@ jobs:
           git /repo --config /repo/.gitleaks.toml --log-opts="${BASE:-origin/development}..${HEAD_SHA:-HEAD}" --no-banner --redact
 
   gate:
-    needs: [checks, checks-unfold, build-contexts, gitleaks, agents-check, opencode-contract, ploeg-pin, ploeg-docs, release-policy]
+    needs: [checks, checks-unfold, build-contexts, gitleaks, agents-check, opencode-contract, ploeg-pin, ploeg-docs, release-policy, release-notes]
     if: github.repository == 'unfold-hq/unfold' && always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

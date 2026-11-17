@@ -19,6 +19,7 @@ COPY ploeg-release.json ./ploeg-release.json
 COPY public ./public
 COPY examples ./examples
 COPY scripts ./scripts
+COPY changes ./changes
 COPY docs/contracts/openapi.yaml ./docs/contracts/openapi.yaml
 COPY docs/contracts/config.v1.schema.json ./docs/contracts/config.v1.schema.json
 ARG IMAGE_VERSION=dev

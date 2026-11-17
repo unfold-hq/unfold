@@ -21,3 +21,4 @@ __pycache__/
 .DS_Store
 *.local.sh
 workbench/recorded/
+changes/released.json

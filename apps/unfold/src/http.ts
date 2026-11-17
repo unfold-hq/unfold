@@ -21,6 +21,7 @@ import { agentHostAuthority, agentsWindowSessionLinks } from '../public/core/age
 import { isLinkProvider, type Links } from './links.ts';
 import type { Oidc } from './oidc.ts';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { StatusBoard, gatewayProbe } from './status.ts';
 import { personProof, type PersonProofStatus } from './person-proof.ts';
 import { PloegAttribution } from './ploeg-attribution.ts';
@@ -95,9 +96,17 @@ import { listHandOffs } from './handoffs.ts';
 import { JobQueue } from './jobs/queue.ts';
 import { JobWorker } from './jobs/worker.ts';
 import { jobsRoute } from './jobs/route.ts';
+import { loadChangelog, type Changelog } from './changelog.ts';
 
 const reportRefreshWaitMs = 2500;
 export const applicationVersion = (() => { try { return String(JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version); } catch { return 'unknown'; } })();
+let applicationChangelog: Changelog | null = null;
+function changelog(): Changelog {
+  if (applicationChangelog) return applicationChangelog;
+  try { applicationChangelog = loadChangelog(fileURLToPath(new URL('../changes', import.meta.url))); }
+  catch (error) { console.log(JSON.stringify({ level: 'warn', event: 'changelog.unreadable', error: error instanceof Error ? error.message : String(error) })); applicationChangelog = { releases: [], unreleased: [] }; }
+  return applicationChangelog;
+}
 export const applicationStartedAt = new Date().toISOString();
 export function releasedAt(value: string | undefined): string | null {
   const instant = Date.parse(value ?? '');
@@ -735,7 +744,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         }
         if (method === 'GET' && path === '/api/onboarding') { await storedRepositories(); return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1'))); }
         if (method === 'GET' && path === '/api/bootstrap') return json(res, 200, sanitize({
-          user, mode: config.mode, onboarding: onboarding.landing(user), sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,
+          user, mode: config.mode, version: applicationVersion, onboarding: onboarding.landing(user), sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,
           gatewayPolicy: config.gatewayPolicy ?? null,
           observability: config.observability ?? null,
           insight: { events: config.productEvents !== false && user.role !== 'viewer' },
@@ -753,6 +762,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         if (method === 'POST' && path === '/api/status/notes') return json(res, 201, sanitize(status.addNote(user, await body(req))));
         const statusNote = path.match(/^\/api\/status\/notes\/([0-9a-f-]{36})\/resolve$/);
         if (method === 'POST' && statusNote) return json(res, 200, sanitize(status.resolveNote(user, statusNote[1])));
+        if (method === 'GET' && path === '/api/changelog') return json(res, 200, { version: applicationVersion, ...changelog() });
         if (method === 'GET' && path === '/api/health') return json(res, 200, { status: 'ok', mode: config.mode, version: applicationVersion, releasedAt: applicationReleasedAt, startedAt: applicationStartedAt, runtimes: runtimeKinds, litellm: Boolean(config.litellm), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined, workspaceBackend: config.mode === 'demo' ? 'demo' : config.runtime.backend, workspaceBackends: placements(config).map(item => item.id) });
         if (method === 'GET' && path === '/api/mcp-servers') return json(res, 200, { servers: config.mcpServers?.ploeg ? [{ id: 'ploeg', label: 'Ploeg', type: 'http', url: config.mcpServers.ploeg.url, oauth: { clientId: config.mcpServers.ploeg.clientId } }] : [] });
         const agentHostToken = path.match(/^\/api\/agent-host\/tokens\/([0-9a-f]{64})$/);
