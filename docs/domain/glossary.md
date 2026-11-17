@@ -135,10 +135,10 @@ A Client's Definition of Ready, Definition of Done and extra instructions for ag
 ## Client Project
 *Context: Offering · Owner: Unfold*
 
-A named grouping inside one Client, or inside the Agency's own work, that bundles its tracker sources, its Repository Grants, its Routing Rules, its default Team and its budget: a share of the Client Budget, or of the Agency Budget for the Agency's own work. A Work Item takes its Client and Client Project from its origin. Decided in system ADR-0048; not implemented yet.
+A named grouping inside one Client, or inside the Agency's own work, that bundles its tracker sources, its Repository Grants, its Routing Rules, its default Team and its budget: a share of the Client Budget, or of the Agency Budget for the Agency's own work. A Work Item takes its Client and Client Project from its origin. Decided in system ADR-0048. Unfold keeps them per Tenant; Own work is the only one it makes so far.
 
 **Not to be confused with** [Scope](../reference/glossary.md#scope): A tracker's own container, such as a Vikunja or Jira project.  
-**See also:** [Client](../reference/glossary.md#client), [Integration Account](#integration-account), [Repository Grant](#repository-grant), [Work Item](../reference/glossary.md#work-item)  
+**See also:** [Client](../reference/glossary.md#client), [Integration Account](#integration-account), [Repository Grant](#repository-grant), [Work Item](../reference/glossary.md#work-item), [Own work](#own-work)  
 
 ## Client Sign-off
 *Context: Offering · Owner: Unfold*
@@ -252,7 +252,7 @@ One configured way for Requests to reach a Tenant, and optionally one Client in 
 ## Integration Account
 *Context: Offering · Owner: Unfold*
 
-One account on one tracker or forge instance, such as one ClickUp workspace token or one GitHub App installation, with its credential reference. It belongs to a Tenant, and any number of sources and repositories use it. It grants nothing on its own, and it is not part of a source's or repository's identity. Not the Settings → Connections page, which checks each board's and repository's wiring. Decided in system ADR-0048; not implemented yet.
+One account on one tracker or forge instance, such as one ClickUp workspace token or one GitHub App installation, with its credential reference. It belongs to a Tenant, and any number of sources and repositories use it. It grants nothing on its own, and it is not part of a source's or repository's identity. Not the Settings → Connections page, which checks each board's and repository's wiring. Decided in system ADR-0048. Unfold keeps them keyed by Tenant, provider, instance and the installation or account id, each with a role, tracker or forge; tracker connections added from the screen are the first ones.
 
 **See also:** [Tenant](../reference/glossary.md#tenant), [Client Project](#client-project), [Repository Grant](#repository-grant)  
 
@@ -303,6 +303,14 @@ Why a Work Item waits on a person, with its fix. Unfold reads it from Ploeg's st
 
 A spec-driven change workflow and CLI. Ploeg keeps its change proposals and specs under apps/ploeg/openspec; mise.toml pins the CLI. A Work Item can name a change with a description line "openspec: <change-id>"; its Run is then briefed from the change and handed off for review only when strict validation of the change passes.
 
+
+## Own work
+*Context: Offering · Owner: Unfold*
+
+The Client Project without a Client that each Tenant has for the Agency's own work. Unfold makes it the first time a repository or a source without a Client is added from the screen, grants every such repository to it and puts every such source in it. The screens show Client Projects only once the Tenant has a Client.
+
+**Also known as:** default Client Project  
+**See also:** [Client Project](#client-project), [Repository Grant](#repository-grant), [Tenant](../reference/glossary.md#tenant)  
 
 ## Pack
 *Context: Cards*
@@ -380,7 +388,7 @@ Turning a Request into one or more Ready Work Items, each with Acceptance Condit
 ## Repository Grant
 *Context: Offering · Owner: Unfold*
 
-Permission for a Client Project to route work to a repository its Tenant owns. Several Client Projects may hold a grant on one repository, such as a shared library; each Client still sees only its own Work Items on it. Decided in system ADR-0048; not implemented yet.
+Permission for a Client Project to route work to a repository its Tenant owns. Several Client Projects may hold a grant on one repository, such as a shared library; each Client still sees only its own Work Items on it. Decided in system ADR-0048. Unfold records a grant to Own work for each repository added from the screen; enforcement does not check grants yet.
 
 **See also:** [Client Project](#client-project), [Client](../reference/glossary.md#client), [Work Target](../reference/glossary.md#work-target)  
 
