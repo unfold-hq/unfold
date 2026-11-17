@@ -2,7 +2,7 @@ import { parquetWriteBuffer, type ColumnSource, type SchemaElement } from 'hypar
 import type { FactsRun, WorkItemFacts } from './cards/facts.ts';
 import { readWindowFacts, runSpend, type FactsReach, type FactsSource } from './delivery-economics.ts';
 import type { Ownership } from './tenancy.ts';
-import { fromMicros, linkedUsageSource, markupPercent, type LinkedCharge } from './linked-usage.ts';
+import { costBasis, fromMicros, markedUp, markupPercent, type CostSource, type LinkedCharge } from './linked-usage.ts';
 
 /** The FinOps FOCUS release the export follows: the Cost and Usage dataset of FOCUS 1.4. */
 export const focusVersion = '1.4';
@@ -24,7 +24,7 @@ export const focusColumns = [
 export const focusCustomColumns = [
   'x_UnfoldSpendStatus', 'x_UnfoldObservedCost', 'x_UnfoldExchangeRate', 'x_UnfoldWorkItemId', 'x_UnfoldExternalReference', 'x_UnfoldRunId', 'x_UnfoldRunCount',
   'x_UnfoldInputTokens', 'x_UnfoldOutputTokens', 'x_UnfoldCacheReadInputTokens', 'x_UnfoldCacheCreationInputTokens',
-  'x_UnfoldCostSource', 'x_UnfoldEstimatedCost', 'x_UnfoldMarkupPercent', 'x_UnfoldBillableCost', 'x_UnfoldLinkedSessionCount',
+  'x_UnfoldCostSource', 'x_UnfoldCostBasis', 'x_UnfoldEstimatedCost', 'x_UnfoldMarkupPercent', 'x_UnfoldBillableCost', 'x_UnfoldLinkedSessionCount',
 ] as const;
 /** Every column of a row, FOCUS columns first. */
 export const focusExportColumns = [...focusColumns, ...focusCustomColumns] as const;
@@ -55,6 +55,8 @@ export type FocusCounts = { settledRuns: number; unsettledRuns: number; unreport
 export type LinkedFocusCharge = LinkedCharge & { item: { id: string; title: string; team: string; target: { owner: string; repo: string } | null; externalRef: string }; owner: Ownership };
 /** The rows of one export and what it left out. */
 export type FocusExport = { rows: FocusRow[]; counts: FocusCounts };
+/** The markup in basis points on one cost source for an owner on one UTC day. */
+export type FocusMarkup = (owner: Ownership, source: CostSource, dayStart: number) => number;
 /** Who owns a Work Item, from its target repository; undefined when no single owner does. */
 export type FocusOwner = (facts: WorkItemFacts) => Ownership | undefined;
 
@@ -153,7 +155,7 @@ const sum = (values: (number | null)[]): number | null => values.some(value => v
  * what was observed so far in `x_UnfoldObservedCost`, because FOCUS allows only invoiced amounts in BilledCost. Runs that
  * finished without a cost and Work Items no single owner reaches are only counted.
  */
-export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { owner, now = Date.now(), truncated = false, linked = [] }: { owner: FocusOwner; now?: number; truncated?: boolean; linked?: LinkedFocusCharge[] }): FocusExport {
+export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { owner, now = Date.now(), truncated = false, linked = [], markup = () => 0 }: { owner: FocusOwner; now?: number; truncated?: boolean; linked?: LinkedFocusCharge[]; markup?: FocusMarkup }): FocusExport {
   const counts: FocusCounts = { settledRuns: 0, unsettledRuns: 0, unreportedRuns: 0, unownedWorkItems: 0, truncated, linkedSessionRows: 0 };
   const charges: Charge[] = [];
   const seen = new Set<string>();
@@ -186,7 +188,7 @@ export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { o
     const key = query.granularity === 'run' ? `run:${charge.run.id}` : `${charge.facts.workItem.id}:${charge.dayStart}:${charge.status}`;
     groups.set(key, [...(groups.get(key) ?? []), charge]);
   }
-  const rows = [...groups.values()].map(group => focusRow(group, query));
+  const rows = [...groups.values()].map(group => focusRow(group, query, markup));
   if (query.linkedSessions === 'include') {
     const inside = linked.filter(charge => charge.dayStart >= query.from && charge.dayStart < query.to && (!query.tenant || charge.owner.tenant === query.tenant) && (!query.client || charge.owner.client === query.client));
     for (const charge of inside) rows.push(linkedFocusRow(charge, query));
@@ -196,7 +198,7 @@ export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { o
   return { rows, counts };
 }
 
-function focusRow(group: Charge[], query: FocusExportQuery): FocusRow {
+function focusRow(group: Charge[], query: FocusExportQuery, markup: FocusMarkup): FocusRow {
   const first = group[0]!;
   const { facts, owner, status, dayStart } = first;
   const item = facts.workItem;
@@ -206,6 +208,7 @@ function focusRow(group: Charge[], query: FocusExportQuery): FocusRow {
   const inBilling = (value: number) => focusDecimal(rate === null ? value : value * rate);
   const settled = status === 'Settled';
   const billed = settled ? inBilling(usd!) : focusDecimal(0);
+  const basisPoints = settled ? markup(owner, 'ploeg-run', dayStart) : null;
   const usage = { input: sum(group.map(charge => charge.usage.input)), output: sum(group.map(charge => charge.usage.output)), cacheRead: sum(group.map(charge => charge.usage.cacheRead)), cacheCreation: sum(group.map(charge => charge.usage.cacheCreation)) };
   const count = (value: number | null) => value === null ? null : focusDecimal(value);
   const reference = item.externalRef || `Work Item ${item.id}`;
@@ -228,7 +231,8 @@ function focusRow(group: Charge[], query: FocusExportQuery): FocusRow {
     x_UnfoldSpendStatus: status, x_UnfoldObservedCost: settled || usd === null ? null : inBilling(usd), x_UnfoldExchangeRate: rate === null ? null : focusDecimal(rate),
     x_UnfoldWorkItemId: item.id, x_UnfoldExternalReference: item.externalRef || null, x_UnfoldRunId: perRun ? first.run.id : null, x_UnfoldRunCount: focusDecimal(group.length),
     x_UnfoldInputTokens: count(usage.input), x_UnfoldOutputTokens: count(usage.output), x_UnfoldCacheReadInputTokens: count(usage.cacheRead), x_UnfoldCacheCreationInputTokens: count(usage.cacheCreation),
-    x_UnfoldCostSource: 'ploeg', x_UnfoldEstimatedCost: null, x_UnfoldMarkupPercent: null, x_UnfoldBillableCost: null, x_UnfoldLinkedSessionCount: null,
+    x_UnfoldCostSource: 'ploeg-run', x_UnfoldCostBasis: costBasis['ploeg-run'], x_UnfoldEstimatedCost: null,
+    x_UnfoldMarkupPercent: basisPoints === null ? null : focusDecimal(Number(markupPercent(basisPoints))), x_UnfoldBillableCost: basisPoints === null ? null : inBilling(markedUp(usd!, basisPoints)), x_UnfoldLinkedSessionCount: null,
   };
 }
 
@@ -245,7 +249,7 @@ export function linkedFocusRow(charge: LinkedFocusCharge, query: FocusExportQuer
   const { item, owner } = charge;
   const reference = item.externalRef || `Work Item ${item.id}`;
   const subAccount = owner.client ?? owner.tenant;
-  const tags: Record<string, string> = { 'unfold/workItem': item.id, 'unfold/team': item.team, ...(item.target ? { 'unfold/repository': `${item.target.owner}/${item.target.repo}` } : {}), 'unfold/tenant': owner.tenant, ...(owner.client ? { 'unfold/client': owner.client } : {}), 'unfold/costSource': linkedUsageSource };
+  const tags: Record<string, string> = { 'unfold/workItem': item.id, 'unfold/team': item.team, ...(item.target ? { 'unfold/repository': `${item.target.owner}/${item.target.repo}` } : {}), 'unfold/tenant': owner.tenant, ...(owner.client ? { 'unfold/client': owner.client } : {}), 'unfold/costSource': 'linked-session' };
   return {
     BilledCost: zero, BillingAccountId: owner.tenant, BillingAccountName: owner.tenant, BillingCurrency: query.currency.code,
     BillingPeriodEnd: focusTime(nextMonth(charge.dayStart)), BillingPeriodStart: focusTime(monthStart(charge.dayStart)),
@@ -260,7 +264,7 @@ export function linkedFocusRow(charge: LinkedFocusCharge, query: FocusExportQuer
     x_UnfoldSpendStatus: 'Estimate', x_UnfoldObservedCost: null, x_UnfoldExchangeRate: rate === null ? null : focusDecimal(rate),
     x_UnfoldWorkItemId: item.id, x_UnfoldExternalReference: item.externalRef || null, x_UnfoldRunId: null, x_UnfoldRunCount: null,
     x_UnfoldInputTokens: focusDecimal(charge.tokens.input), x_UnfoldOutputTokens: focusDecimal(charge.tokens.output), x_UnfoldCacheReadInputTokens: focusDecimal(charge.tokens.cacheRead), x_UnfoldCacheCreationInputTokens: focusDecimal(charge.tokens.cacheCreation),
-    x_UnfoldCostSource: linkedUsageSource, x_UnfoldEstimatedCost: inBilling(charge.costMicros), x_UnfoldMarkupPercent: focusDecimal(Number(markupPercent(charge.basisPoints))), x_UnfoldBillableCost: inBilling(charge.billableMicros), x_UnfoldLinkedSessionCount: focusDecimal(charge.sessions),
+    x_UnfoldCostSource: 'linked-session', x_UnfoldCostBasis: costBasis['linked-session'], x_UnfoldEstimatedCost: inBilling(charge.costMicros), x_UnfoldMarkupPercent: focusDecimal(Number(markupPercent(charge.basisPoints))), x_UnfoldBillableCost: inBilling(charge.billableMicros), x_UnfoldLinkedSessionCount: focusDecimal(charge.sessions),
   };
 }
 
@@ -351,10 +355,10 @@ export function focusFile(result: FocusExport | null, query: FocusExportQuery): 
 }
 
 /** Reads the facts of every Work Item with activity since the period started within `teams` that `reaches` accepts, and exports them. */
-export async function readFocusExport(source: FactsSource, query: FocusExportQuery, { teams, reaches, owner, now = Date.now(), fresh = false, maxPages = focusPageBound, linked }: { teams: readonly string[]; reaches?: FactsReach; owner: FocusOwner; now?: number; fresh?: boolean; maxPages?: number; linked?: () => Promise<{ charges: LinkedFocusCharge[]; unowned: number; truncated: boolean }> }): Promise<FocusExport> {
+export async function readFocusExport(source: FactsSource, query: FocusExportQuery, { teams, reaches, owner, now = Date.now(), fresh = false, maxPages = focusPageBound, linked, markup }: { teams: readonly string[]; reaches?: FactsReach; owner: FocusOwner; now?: number; fresh?: boolean; maxPages?: number; linked?: () => Promise<{ charges: LinkedFocusCharge[]; unowned: number; truncated: boolean }>; markup?: FocusMarkup }): Promise<FocusExport> {
   const { facts, truncated } = await readWindowFacts(source, { since: query.from, teams, reaches, fresh, maxPages });
   const sessions = query.linkedSessions === 'include' && linked ? await linked() : { charges: [], unowned: 0, truncated: false };
-  const result = focusExport(facts, query, { owner, now, truncated: truncated || sessions.truncated, linked: sessions.charges });
+  const result = focusExport(facts, query, { owner, now, truncated: truncated || sessions.truncated, linked: sessions.charges, markup });
   result.counts.unownedWorkItems += sessions.unowned;
   return result;
 }

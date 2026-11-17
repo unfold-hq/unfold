@@ -62,7 +62,7 @@ import { taskKeyRing } from './mcp-tasks.ts';
 import { McpEvents } from './mcp-events.ts';
 import { entitledRole } from './oidc.ts';
 import { LinkedSessions, parseLinkedEvent } from './linked-sessions.ts';
-import { LinkedUsage, linkedWorkCharges } from './linked-usage.ts';
+import { LinkedUsage, linkedWorkCharges, ploegRunUsage } from './linked-usage.ts';
 import { ploegTrackerReference } from './task-providers/index.ts';
 import { LinkedHandoff, handoffRoute as serveLinkedHandoff, isHandoffRoute } from './linked-handoff.ts';
 import { MyUsageService, UsageError } from './my-usage.ts';
@@ -968,8 +968,10 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
             const withTelemetry = url.searchParams.get('telemetry') === '1';
             const sessions = await linked.forWorkItem(user, workItem, base, withTelemetry);
             if (!withTelemetry) return json(res, 200, sanitize({ sessions }));
-            const owner = tenants.workItemOwner((await ploeg.detail(user, workItem)).item.target);
-            return json(res, 200, sanitize({ sessions, usage: await linked.workItemUsage(user, workItem, owner) }));
+            const detail = await ploeg.detail(user, workItem);
+            const owner = tenants.workItemOwner(detail.item.target);
+            const ploegRuns = ploegRunUsage(detail.shifts ?? [], dayStart => owner ? linkedUsage.markups.at(owner, 'ploeg-run', dayStart) : 0, Date.now());
+            return json(res, 200, sanitize({ sessions, usage: { linkedSessions: await linked.workItemUsage(user, workItem, owner), ploegRuns } }));
           }
           if (tracedRevision) {
             if (method !== 'GET') fault(405, 'method', 'Read Agent Trace records with GET.');
@@ -1159,7 +1161,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
                 if (!teams.includes(item.team) || !tenants.reachesWorkItem(user, item.target)) return undefined;
                 return { item: { id: item.id, title: item.title, team: item.team, target: item.target ? { owner: item.target.owner, repo: item.target.repo } : null, externalRef: ploegTrackerReference(item.provider, item.externalId) ?? '' }, owner: tenants.workItemOwner(item.target) };
               });
-              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => tenants.reachesWorkItem(user, facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts }));
+              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => tenants.reachesWorkItem(user, facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts, markup: (owner, source, dayStart) => linkedUsage.markups.at(owner, source, dayStart) }));
               const file = focusFile(result, query);
               res.writeHead(200, { 'Content-Type': file.contentType, 'Content-Disposition': `attachment; filename="${file.filename}"`, 'Cache-Control': 'no-store', ...file.headers });
               res.end(file.body); return;
