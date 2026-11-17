@@ -1,5 +1,6 @@
 import { createPrivateKey, sign, type KeyObject } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { rememberSecret } from '../redaction.ts';
 import type { TaskSourceConfig } from '../tasks.ts';
 import type { AppAuthentication, SourceApp } from './registry.ts';
 import { numericId, record, TaskError } from './shared.ts';
@@ -48,6 +49,7 @@ function keyText(app: SourceApp): string | undefined {
 function privateKey(app: SourceApp): KeyObject {
   const where = 'env' in app.privateKey ? `the variable ${app.privateKey.env}` : `the file ${app.privateKey.file}`;
   const text = keyText(app)?.trim();
+  rememberSecret(text);
   if (!text) throw new TaskError(502, 'github_app_key_unreadable', `The GitHub App's private key is missing: ${where} is empty or cannot be read.`);
   try {
     const key = createPrivateKey(text.includes('\n') ? text : text.replaceAll('\\n', '\n'));
@@ -139,6 +141,7 @@ async function mint(source: TaskSourceConfig, app: SourceApp, key: string): Prom
     if (error instanceof TaskError && error.code === 'github_app_not_installed') installations.delete(installationKey(source, app));
     throw error;
   }
+  if (typeof answer.token === 'string') rememberSecret(answer.token);
   const expiresAt = Date.parse(String(answer.expires_at ?? ''));
   if (typeof answer.token !== 'string' || !answer.token || /[^\x21-\x7e]/.test(answer.token) || !Number.isFinite(expiresAt)) throw new TaskError(502, 'task_response_invalid', 'GitHub did not answer with an installation token and its expiry.');
   const wider = widerThanAsked(answer, name);

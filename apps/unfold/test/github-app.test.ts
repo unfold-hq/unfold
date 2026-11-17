@@ -9,7 +9,8 @@ import { join } from 'node:path';
 import { reportSettings } from '../src/reports.ts';
 import { createIssue, listTasks, readIssueState, validateTaskSources, type FiledIssue, type TaskSourceConfig } from '../src/tasks.ts';
 import { widerThanAsked } from '../src/task-providers/github-app.ts';
-import type { Repository } from '../src/types.ts';
+import { knownSecrets, withoutKnownSecrets } from '../src/redaction.ts';
+import type { AppConfig, Repository } from '../src/types.ts';
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
 const pem = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
@@ -224,4 +225,33 @@ test('reports take tokenEnv or githubApp, never both or neither, and a source th
   const source: TaskSourceConfig = { ...appSource('https://github.example/api/v3'), executionOwner: 'ploeg' };
   const elsewhere = reportSettings({ source: 'gh', project: 'acme/feedback' }, [source], 'live');
   assert.deepEqual({ project: elsewhere?.project, sourceProject: elsewhere?.source.project }, { project: 'acme/feedback', sourceProject: 'acme/feedback' }, 'the App token is minted for the repository reports go to');
+});
+
+test('the App private key, from an environment variable or a file, and every minted token are redacted from log lines', async t => {
+  const fresh = () => generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
+  const envKey = fresh();
+  const fileKey = fresh();
+  process.env.UNFOLD_TEST_GITHUB_APP_LOG_KEY = envKey;
+  t.after(() => { delete process.env.UNFOLD_TEST_GITHUB_APP_LOG_KEY; });
+  const dir = mkdtempSync(join(tmpdir(), 'unfold-app-log-'));
+  writeFileSync(join(dir, 'key.pem'), fileKey);
+  const config = {
+    runtime: {}, auth: {},
+    taskSources: [appSource('https://github.example/api/v3', { privateKey: { env: 'UNFOLD_TEST_GITHUB_APP_LOG_KEY' } })],
+    reports: { source: appSource('https://github.example/api/v3', { privateKey: { file: join(dir, 'key.pem') } }), project: 'acme/unfold' },
+  } as unknown as AppConfig;
+  const secrets = knownSecrets(config);
+  for (const key of [envKey, fileKey]) {
+    const line = key.split('\n')[3];
+    assert.equal(withoutKnownSecrets(`{"event":"boom","key":${JSON.stringify(key)}}`, secrets), '{"event":"boom","key":"[redacted]"}');
+    assert.equal(withoutKnownSecrets(`{"event":"boom","key":"${key.trim()}"}`, secrets), '{"event":"boom","key":"[redacted]"}');
+    assert.equal(withoutKnownSecrets(`partial ${line} end`, secrets), 'partial [redacted] end', 'one line of the key is redacted too');
+  }
+
+  const github = await fakeGitHub({ grants: [{ token: 'ghs_minted_log_token' }], repository: filing });
+  t.after(() => github.close());
+  assert.equal(withoutKnownSecrets('Authorization: Bearer ghs_minted_log_token', secrets), 'Authorization: Bearer ghs_minted_log_token', 'not minted yet');
+  await createIssue(appSource(github.url), 'acme/unfold', 'Broken', 'body');
+  assert.equal(withoutKnownSecrets('{"message":"Bearer ghs_minted_log_token refused"}', secrets), '{"message":"Bearer [redacted] refused"}', 'a token minted after start-up is redacted with the start-up list');
+  assert(knownSecrets(config).includes('ghs_minted_log_token'));
 });

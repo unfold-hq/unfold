@@ -156,7 +156,7 @@ With `githubApp` Unfold holds no token at all. It signs a JSON Web Token with th
 
 GitHub lists these per endpoint in [Permissions required for GitHub Apps](https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps): the issue, label, comment and timeline endpoints under Issues, `GET /repos/{owner}/{repo}/releases` under Contents. Give the App nothing else. Unfold sends `repositories: [<name>]` and that permission set to [`POST /app/installations/{id}/access_tokens`](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app), and refuses a token whose answer reaches further, another repository, every repository, another permission or a higher level, with `github_app_grant_too_wide`, without using it. An installation that lacks one of the three permissions answers `github_app_permissions_missing`; accept the App's permission request on the installation.
 
-Each token is kept in memory for the repository it was minted for and minted again five minutes before GitHub's `expires_at`. A request GitHub answers with 401 mints once more and is repeated once. Nothing is written to disk.
+Each token is kept in memory for the repository it was minted for and minted again five minutes before GitHub's `expires_at`. A request GitHub answers with 401 mints once more and is repeated once. Nothing is written to disk. The private key, whole, JSON-escaped and line by line, and every minted token join the secrets Unfold replaces with `[redacted]` in error reports, API answers and agent output, like a `tokenEnv` value.
 
 ```json
 {
