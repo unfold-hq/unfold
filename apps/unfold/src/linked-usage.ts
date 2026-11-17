@@ -137,16 +137,27 @@ function reading(row: Record<string, string | number>): UsageReading {
   return { sessionId: String(row.session_id), observedAt: String(row.observed_at), costMicros: Number(row.cost_micros), tokens: { input: Number(row.input), output: Number(row.output), cacheRead: Number(row.cache_read), cacheCreation: Number(row.cache_creation) }, source: linkedUsageSource };
 }
 
+const markupTable = "CREATE TABLE IF NOT EXISTS usage_markups (tenant TEXT NOT NULL, client TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'all', effective_from TEXT NOT NULL, basis_points INTEGER NOT NULL, set_at TEXT NOT NULL, set_by TEXT NOT NULL, PRIMARY KEY (tenant, client, source, effective_from));";
+
 /**
  * The markups owners set on recorded costs, per Tenant and optionally per Client, for one cost source or for `all`. A
  * markup is a dated row that holds from its date until the next one of the same owner and source, so changing it never
- * changes what an earlier day bills. None means 0.
+ * changes what an earlier day bills. None means 0. A markup stored before markups had a source applies to `all`.
  */
 export class UsageMarkupStore {
   private db: DatabaseSync;
   constructor(db: DatabaseSync) {
     this.db = db;
-    this.db.exec("CREATE TABLE IF NOT EXISTS usage_markups (tenant TEXT NOT NULL, client TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'all', effective_from TEXT NOT NULL, basis_points INTEGER NOT NULL, set_at TEXT NOT NULL, set_by TEXT NOT NULL, PRIMARY KEY (tenant, client, source, effective_from))");
+    const columns = (this.db.prepare("SELECT name FROM pragma_table_info('usage_markups')").all() as { name: string }[]).map(row => row.name);
+    if (columns.length && !columns.includes('source')) this.db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE usage_markups RENAME TO usage_markups_without_source;
+      ${markupTable}
+      INSERT INTO usage_markups(tenant,client,source,effective_from,basis_points,set_at,set_by) SELECT tenant,client,'all',effective_from,basis_points,set_at,set_by FROM usage_markups_without_source;
+      DROP TABLE usage_markups_without_source;
+      COMMIT;
+    `);
+    else this.db.exec(markupTable);
   }
 
   /** Every markup, by Tenant, Client, source and date. */

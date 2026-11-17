@@ -223,3 +223,15 @@ test('only an administrator sets a markup through Billing, and a change that rea
   const listed = await billingRoute(service, admin, 'GET', '/api/billing/usage-markups', new URLSearchParams(), async () => ({}));
   assert.equal((listed as { json: { markups: unknown[] } }).json.markups.length, 2);
 });
+
+test('markups stored before markups had a source keep applying to every source', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE usage_markups (tenant TEXT NOT NULL, client TEXT NOT NULL, effective_from TEXT NOT NULL, basis_points INTEGER NOT NULL, set_at TEXT NOT NULL, set_by TEXT NOT NULL, PRIMARY KEY (tenant, client, effective_from))');
+  db.prepare('INSERT INTO usage_markups VALUES (?,?,?,?,?,?)').run('acme', '', '2026-10-01', 1500, '2026-10-01T08:00:00.000Z', 'u-boss');
+  const markups = new UsageMarkupStore(db);
+  const oct20 = Date.parse('2026-10-20T00:00:00Z');
+  assert.deepEqual([markups.at({ tenant: 'acme' }, 'ploeg-run', oct20), markups.at({ tenant: 'acme' }, 'linked-session', oct20)], [1500, 1500]);
+  markups.set({ tenant: 'acme' }, 'ploeg-run', 500, '2026-10-01', '2026-10-01', 'u-boss', '2026-10-01T08:00:00.000Z');
+  assert.equal(markups.at({ tenant: 'acme' }, 'ploeg-run', oct20), 500, 'a source markup on the same day as an old one is its own row');
+  assert.equal(new UsageMarkupStore(db).all().length, 2, 'opening the store again changes nothing');
+});
