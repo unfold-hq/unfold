@@ -317,6 +317,9 @@ How people sign in.
 | `auth.oidc.roles.admin` | list of string (at most 20 entries) | `["unfold-admins"]` | Entries that make a person an administrator. |
 | `auth.oidc.roles.operator` | list of string (at most 20 entries) | `["unfold-operators"]` | Entries that make a person an operator. |
 | `auth.oidc.roles.viewer` | list of string (at most 20 entries) | `["unfold-viewers"]` | Entries that make a person a viewer. |
+| `auth.oidc.exchange` | object |  | Lets an editor trade a token from this issuer for an editor credential without a browser approval (RFC 8693). Off unless set. |
+| `auth.oidc.exchange.audiences` | list of string (1–20 entries) |  | Audiences a traded token's aud must name one of, such as the client id of the tool that already signs people in. |
+| `auth.oidc.exchange.match` | one of `subject`, `email` | `subject` | How a traded token finds its account: by sub, as browser sign-in does, or by verified email for a client whose sub differs. |
 
 ### `ploeg`
 

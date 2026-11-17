@@ -1,13 +1,21 @@
-import { spawn } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { credentialKey, credentialStore, dataDir, redacted, unfoldAddress } from './credentials.mjs';
 
-/** A stored credential is renewed this long before it expires: before Unfold's one-week warning starts. */
+/** A stored credential that rotation can no longer extend is renewed this long before it expires: before Unfold's one-week warning starts. */
 export const renewWithinMs = 8 * 24 * 3600_000;
+/** A stored credential is rotated once fewer than this many milliseconds of its thirty days are left: about once a week while it is used. */
+export const rotateWithinMs = 23 * 24 * 3600_000;
+/** After a silent rotation or exchange that did not work, hooks wait this long before they try it again. */
+export const silentRetryMs = 10 * 60_000;
+/** The longest a token command may run before the plugin gives up on it. */
+export const tokenCommandTimeoutMs = 5000;
+const tokenExchangeGrant = 'urn:ietf:params:oauth:grant-type:token-exchange';
+const jwtTokenType = 'urn:ietf:params:oauth:token-type:jwt';
 /** After a sign-in that was not approved, hooks wait this long before they open the browser again; `/unfold:login` does not wait. */
 export const retryAfterMs = 3600_000;
 const lockStaleMs = 30_000;
@@ -39,6 +47,100 @@ export function signInReason(credential, now = Date.now()) {
   if (!credential.token) return 'sign-in';
   const expires = Date.parse(credential.expiresAt);
   return Number.isFinite(expires) && expires - now <= renewWithinMs ? 'renew' : null;
+}
+
+/** Whether rotating `credential` now would extend it: a stored credential with less than `rotateWithinMs` left whose family ends later than it does. */
+export function rotationDue(credential, now = Date.now()) {
+  if (credential.source !== 'stored' || !credential.token) return false;
+  const expires = Date.parse(credential.expiresAt);
+  const family = Date.parse(credential.familyExpiresAt ?? '');
+  if (!Number.isFinite(expires) || expires - now > rotateWithinMs) return false;
+  return !Number.isFinite(family) || expires < family;
+}
+
+/** The identity-provider token `UNFOLD_IDP_TOKEN_COMMAND` prints on its first line, or empty when none is configured or it prints no JWT within `tokenCommandTimeoutMs`. */
+export function idpToken(env = process.env, run = execSync) {
+  const command = String(env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim();
+  if (!command) return '';
+  let printed;
+  try { printed = String(run(command, { encoding: 'utf8', timeout: tokenCommandTimeoutMs, maxBuffer: 65_536, stdio: ['ignore', 'pipe', 'ignore'], env })); } catch { return ''; }
+  const line = printed.split(/\r?\n/).map(part => part.trim()).find(Boolean) ?? '';
+  return line.length <= 16_384 && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(line) ? line : '';
+}
+
+/** Whether an identity-provider token may be sent to `base`: only over HTTPS, or plain HTTP to this machine. */
+export function mayCarryIdpToken(base) {
+  try {
+    const parsed = new URL(base);
+    return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname));
+  } catch { return false; }
+}
+
+function attempted(url, kind, env, now) {
+  const marker = `${signInFile(url, env)}.${kind}`;
+  let last = NaN;
+  try { last = statSync(marker).mtimeMs; } catch { last = NaN; }
+  if (Number.isFinite(last) && now - last < silentRetryMs) return false;
+  mkdirSync(dirname(marker), { recursive: true, mode: 0o700 });
+  writeFileSync(marker, '', { mode: 0o600 });
+  utimesSync(marker, new Date(now), new Date(now));
+  return true;
+}
+
+function storedEntry(answer, token, fallbackUser) {
+  return { token, expiresAt: String(answer.expiresAt ?? ''), user: String(answer.user?.name ?? fallbackUser ?? '').slice(0, 200), ...(typeof answer.familyExpiresAt === 'string' && answer.familyExpiresAt ? { familyExpiresAt: answer.familyExpiresAt } : {}) };
+}
+
+async function signOut(base, token, fetcher) {
+  await fetcher(`${base}/api/logout`, { method: 'POST', headers: { ...headers, authorization: `Bearer ${token}` }, body: '{}', signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
+}
+
+const none = { token: '', source: 'none', expiresAt: '', user: '' };
+
+/**
+ * Renews `credential` without the person: rotates it at Unfold when `rotationDue`, and otherwise, when it is missing or
+ * due for a browser renewal and `UNFOLD_IDP_TOKEN_COMMAND` is set, trades the identity-provider token that command
+ * prints for a new one. Each is tried at most once per `silentRetryMs` and only by one hook at a time. Resolves with
+ * the credential to use now: the new one, the old one when nothing changed, or none when Unfold refused the old one.
+ */
+export async function renewSilently({ url, credential, env = process.env, fetcher = fetch, now = Date.now(), timeoutMs = 3000, store = credentialStore(env), run = execSync, host = hostname().split('.')[0] }) {
+  const base = unfoldAddress(url);
+  const key = credentialKey(base);
+  if (!key || credential.source === 'env') return credential;
+  let current = credential;
+  if (rotationDue(current, now) && attempted(base, 'rotate', env, now)) {
+    const release = claim(`${signInFile(base, env)}.rotate`);
+    if (release) {
+      try {
+        const kept = store.read(key);
+        if (kept?.token && kept.token !== current.token) return { ...kept, source: 'stored' };
+        const response = await fetcher(`${base}/api/auth/editor/rotate`, { method: 'POST', headers: { ...headers, authorization: `Bearer ${current.token}` }, body: '{}', signal: AbortSignal.timeout(timeoutMs) }).catch(() => null);
+        if (response?.status === 401) {
+          if (store.read(key)?.token === current.token) store.forget(key);
+          current = none;
+        } else if (response?.ok) {
+          const answer = await response.json().catch(() => ({}));
+          if (typeof answer.token === 'string') {
+            const entry = storedEntry(answer, answer.token, current.user);
+            store.write(key, entry);
+            return { ...entry, source: 'stored' };
+          }
+        }
+      } finally { release(); }
+    }
+  }
+  const reason = signInReason(current, now);
+  if (!reason || !String(env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim() || !mayCarryIdpToken(base) || !attempted(base, 'exchange', env, now)) return current;
+  const subjectToken = idpToken(env, run);
+  if (!subjectToken) return current;
+  const response = await fetcher(`${base}/api/auth/editor/exchange`, { method: 'POST', headers, body: JSON.stringify({ grant_type: tokenExchangeGrant, subject_token: subjectToken, subject_token_type: jwtTokenType, client: 'claude-code', host }), signal: AbortSignal.timeout(timeoutMs) }).catch(() => null);
+  if (!response?.ok) return current;
+  const answer = await response.json().catch(() => ({}));
+  if (typeof answer.access_token !== 'string') return current;
+  const entry = storedEntry(answer, answer.access_token, current.user);
+  store.write(key, entry);
+  if (current.token && current.token !== entry.token) await signOut(base, current.token, fetcher);
+  return { ...entry, source: 'stored' };
 }
 
 /** Whether a hook may start a sign-in now, given the last one: not while one waits, and not within `retryAfterMs` of one that was not approved. */
@@ -135,10 +237,8 @@ export async function waitForApproval({ file, env = process.env, fetcher = fetch
     const answer = await polled.json().catch(() => ({}));
     if (polled.status === 200 && typeof answer.token === 'string') {
       const previous = store.read(key);
-      store.write(key, { token: answer.token, expiresAt: String(answer.expiresAt ?? ''), user: String(answer.user?.name ?? '') });
-      if (previous?.token && previous.token !== answer.token) {
-        await fetcher(`${base}/api/logout`, { method: 'POST', headers: { ...headers, authorization: `Bearer ${previous.token}` }, body: '{}', signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
-      }
+      store.write(key, storedEntry(answer, answer.token, ''));
+      if (previous?.token && previous.token !== answer.token) await signOut(base, previous.token, fetcher);
       return finish('approved', { user: String(answer.user?.name ?? '').slice(0, 200), credentialExpiresAt: String(answer.expiresAt ?? '') });
     }
     return finish(polled.status === 403 ? 'denied' : 'failed', { message: redacted(answer.error?.message ?? `Unfold answered ${polled.status}.`).slice(0, 300) });

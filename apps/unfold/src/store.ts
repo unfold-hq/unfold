@@ -10,7 +10,7 @@ import type { ActionRecord, ActionTarget } from './action-records.ts';
 import type { IssueState } from './tasks.ts';
 import type { FlagOverride } from './flags.ts';
 import type { RolloutSpec, Segment } from './flag-rollouts.ts';
-import { editorIdleDays } from './auth.ts';
+import { editorIdleDays, editorRotationGraceMs } from './auth.ts';
 import type { NowSnooze } from './now-snoozes.ts';
 import { storedMemberships, type Membership } from './tenancy.ts';
 
@@ -25,7 +25,12 @@ export type Login = { tokenHash: string; userId: string; expiresAt: string };
 /** A person's sign-in tokens, kept encrypted and bound to one browser login so Unfold can prove that person to Ploeg. */
 export type PersonGrant = { userId: string; subject: string; accessToken: string; accessExpiresAt: number; refreshToken?: string };
 /** A credential issued to one editor after its person approved the sign-in in a browser. The token itself is never stored. */
-export type EditorCredential = { id: string; tokenHash: string; userId: string; label: string; scope: 'editor'; createdAt: string; expiresAt: string; lastUsedAt?: string };
+/**
+ * An editor credential. `familyId` and `familyExpiresAt` name the approval it descends from through rotations and the
+ * moment no rotation reaches past; a credential approved before rotation existed is its own family. `rotatedAt` is set
+ * once a newer credential replaced it.
+ */
+export type EditorCredential = { id: string; tokenHash: string; userId: string; label: string; scope: 'editor'; createdAt: string; expiresAt: string; lastUsedAt?: string; familyId?: string; familyExpiresAt?: string; rotatedAt?: string };
 /** A note an administrator posts on the Status page while something affects the workbench. */
 export type StatusNote = { id: string; severity: 'info' | 'degraded' | 'outage'; text: string; author: string; createdAt: string; resolvedAt?: string; resolvedBy?: string };
 
@@ -154,8 +159,14 @@ export class Store {
       CREATE TABLE IF NOT EXISTS flag_segments (name TEXT PRIMARY KEY, spec TEXT NOT NULL, set_by TEXT NOT NULL, set_at TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS flag_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, flag_key TEXT NOT NULL, action TEXT NOT NULL, variant TEXT, reason TEXT NOT NULL, actor TEXT NOT NULL, at TEXT NOT NULL);
     `);
+    this.addEditorFamilyColumns();
     this.db.exec('PRAGMA optimize=0x10002');
     if (options.key && path !== ':memory:') this.adoptKey(keyPath, fileKey);
+  }
+
+  private addEditorFamilyColumns(): void {
+    const columns = new Set((this.db.prepare("SELECT name FROM pragma_table_info('editor_credentials')").all() as { name: string }[]).map(row => row.name));
+    for (const column of ['family_id', 'family_expires_at', 'rotated_at']) if (!columns.has(column)) this.db.exec(`ALTER TABLE editor_credentials ADD COLUMN ${column} TEXT`);
   }
 
   private adoptKey(keyPath: string, fileKey: Buffer | undefined): void {
@@ -548,17 +559,47 @@ export class Store {
   }
 
   createEditorCredential(credential: EditorCredential): void {
-    this.db.prepare('INSERT INTO editor_credentials(id,token_hash,user_id,label,scope,created_at,expires_at,last_used_at) VALUES(?,?,?,?,?,?,?,?)').run(credential.id, credential.tokenHash, credential.userId, credential.label, credential.scope, credential.createdAt, credential.expiresAt, credential.lastUsedAt ?? null);
+    this.db.prepare('INSERT INTO editor_credentials(id,token_hash,user_id,label,scope,created_at,expires_at,last_used_at,family_id,family_expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)').run(credential.id, credential.tokenHash, credential.userId, credential.label, credential.scope, credential.createdAt, credential.expiresAt, credential.lastUsedAt ?? null, credential.familyId ?? null, credential.familyExpiresAt ?? null);
   }
 
-  /** The live editor credential whose token hashes to `tokenHash`: unexpired, and used (or approved) within `editorIdleDays`. */
+  /**
+   * The live editor credential whose token hashes to `tokenHash`: unexpired, used (or approved) within `editorIdleDays`,
+   * and either not rotated or rotated less than `editorRotationGraceMs` ago.
+   */
   getEditorCredential(tokenHash: string): EditorCredential | undefined {
-    return this.editorCredential(this.db.prepare('SELECT * FROM editor_credentials WHERE token_hash=? AND expires_at>? AND COALESCE(last_used_at, created_at)>?').get(tokenHash, ...this.editorCutoffs()));
+    return this.editorCredential(this.db.prepare('SELECT * FROM editor_credentials WHERE token_hash=? AND expires_at>? AND COALESCE(last_used_at, created_at)>? AND (rotated_at IS NULL OR rotated_at>?)').get(tokenHash, ...this.editorCutoffs()));
   }
 
-  /** A person's live editor credentials, newest first. */
+  /** The editor credential whose token hashes to `tokenHash`, whatever its state, or undefined when Unfold holds none. */
+  anyEditorCredential(tokenHash: string): EditorCredential | undefined {
+    return this.editorCredential(this.db.prepare('SELECT * FROM editor_credentials WHERE token_hash=?').get(tokenHash));
+  }
+
+  /** A person's live editor credentials that no rotation replaced, newest first. */
   editorCredentials(userId: string): EditorCredential[] {
-    return (this.db.prepare('SELECT * FROM editor_credentials WHERE user_id=? AND expires_at>? AND COALESCE(last_used_at, created_at)>? ORDER BY created_at DESC, id').all(userId, ...this.editorCutoffs())).map(row => this.editorCredential(row)!);
+    const [now, idle] = this.editorCutoffs();
+    return (this.db.prepare('SELECT * FROM editor_credentials WHERE user_id=? AND expires_at>? AND COALESCE(last_used_at, created_at)>? AND rotated_at IS NULL ORDER BY created_at DESC, id').all(userId, now, idle)).map(row => this.editorCredential(row)!);
+  }
+
+  /** Marks `rotatedId` rotated at `at` and stores `next` in one transaction. False, storing nothing, when `rotatedId` was already rotated or is gone. */
+  rotateEditorCredential(rotatedId: string, at: string, next: EditorCredential): boolean {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const marked = Number(this.db.prepare('UPDATE editor_credentials SET rotated_at=? WHERE id=? AND rotated_at IS NULL').run(at, rotatedId).changes);
+      if (marked === 1) this.createEditorCredential(next);
+      this.db.exec('COMMIT');
+      return marked === 1;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Deletes every editor credential descended from the approval `familyId` names, rotated or not, and returns their token hashes. */
+  deleteEditorFamily(familyId: string): string[] {
+    const hashes = (this.db.prepare('SELECT token_hash FROM editor_credentials WHERE COALESCE(family_id, id)=?').all(familyId) as { token_hash: string }[]).map(row => row.token_hash);
+    this.db.prepare('DELETE FROM editor_credentials WHERE COALESCE(family_id, id)=?').run(familyId);
+    return hashes;
   }
 
   touchEditorCredential(id: string, at: string): void { this.db.prepare('UPDATE editor_credentials SET last_used_at=? WHERE id=?').run(at, id); }
@@ -566,9 +607,9 @@ export class Store {
   /** Records a use of the editor credential whose token hashes to `tokenHash`; does nothing for any other sign-in. */
   touchEditorSignIn(tokenHash: string, at: string): void { this.db.prepare('UPDATE editor_credentials SET last_used_at=? WHERE token_hash=?').run(at, tokenHash); }
 
-  private editorCutoffs(): [string, string] {
+  private editorCutoffs(): [string, string, string] {
     const now = Date.now();
-    return [new Date(now).toISOString(), new Date(now - editorIdleDays * 86_400_000).toISOString()];
+    return [new Date(now).toISOString(), new Date(now - editorIdleDays * 86_400_000).toISOString(), new Date(now - editorRotationGraceMs).toISOString()];
   }
 
   /** Deletes one of a person's editor credentials and returns it, or undefined when that person holds no such credential. */
@@ -598,7 +639,7 @@ export class Store {
   private editorCredential(row: unknown): EditorCredential | undefined {
     if (!row) return undefined;
     const value = row as Record<string, string | null>;
-    return { id: String(value.id), tokenHash: String(value.token_hash), userId: String(value.user_id), label: String(value.label), scope: 'editor', createdAt: String(value.created_at), expiresAt: String(value.expires_at), ...(value.last_used_at ? { lastUsedAt: value.last_used_at } : {}) };
+    return { id: String(value.id), tokenHash: String(value.token_hash), userId: String(value.user_id), label: String(value.label), scope: 'editor', createdAt: String(value.created_at), expiresAt: String(value.expires_at), ...(value.last_used_at ? { lastUsedAt: value.last_used_at } : {}), ...(value.family_id ? { familyId: value.family_id } : {}), ...(value.family_expires_at ? { familyExpiresAt: value.family_expires_at } : {}), ...(value.rotated_at ? { rotatedAt: value.rotated_at } : {}) };
   }
 
   setSecret(id: string, value: unknown): void {

@@ -45,6 +45,11 @@ Codes Ploeg sends that Unfold does not name here pass through with Ploeg's own m
 | `editor_login_unknown` | 404 | The editor sign-in is unknown or expired. | Start signing in again from your editor. |
 | `editor_login_decided` | 409 | Someone already approved or denied this editor sign-in. | Start signing in again from your editor if it is still not signed in. |
 | `editor_login_denied` | 403 | The editor sign-in was denied in the browser. | Start signing in again from your editor and approve it this time. |
+| `editor_credential_reused` | 401 | An editor presented a credential that was already replaced, so Unfold signed out every credential from the same approval. | Sign the editor in again. If you did not expect this, someone may hold a copy of the old credential: check Settings › Signed-in editors. |
+| `exchange_off` | 404 | This workbench does not let editors sign in with an identity-provider token. | Sign the editor in through the browser, or ask an administrator to set auth.oidc.exchange. |
+| `exchange_unknown_person` | 403 | The identity-provider token names nobody with an Unfold account. | Sign in to Unfold in the browser once, then try again. |
+| `unsupported_grant_type` | 400 | The token exchange asked for a grant Unfold does not offer. | Send grant_type urn:ietf:params:oauth:grant-type:token-exchange. |
+| `invalid_grant` | 400 | Unfold refused the identity-provider token: another issuer or audience, expired, too long-lived or not validly signed. | Get a fresh token from the identity provider Unfold uses, for an audience the administrator listed. |
 | `slow_down` | 429 | The editor asked whether its sign-in was approved too often. | Wait; the extension slows down by itself. Update it if this repeats. |
 | `oidc_unconfigured` | 404 | Single sign-on is not set up on this workbench. | Sign in with a name and password, or ask an administrator to set up single sign-on. |
 | `oidc_busy` | 429 | Too many sign-ins are waiting to finish at once. | Wait a few minutes, then sign in again. |

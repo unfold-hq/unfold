@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
-import { Auth, editorCredentialDays, editorIdleDays, editorLabel } from '../src/auth.ts';
+import { Auth, editorCredentialDays, editorFamilyDays, editorIdleDays, editorLabel, editorRotationGraceMs } from '../src/auth.ts';
 import { Store } from '../src/store.ts';
 import { configuration } from './api-support.ts';
 import type { User } from '../src/types.ts';
@@ -199,4 +199,115 @@ test('using an editor credential keeps it alive, written at most once a minute',
   assert.equal(store.getEditorCredential(signIn)!.lastUsedAt, touched);
   store.touchEditorSignIn(signIn, new Date(Date.now()).toISOString());
   assert.notEqual(store.getEditorCredential(signIn)!.lastUsedAt, touched);
+});
+
+function approvedToken(auth: Auth, user: User = person): string {
+  const started = auth.beginEditor('192.0.2.1', editorLabel('claude-code', 'ada-laptop'));
+  auth.claimEditor(started.code, user);
+  auth.decideEditor(started.code, user, 'approved');
+  const ready = auth.collectEditor(started.code, started.secret);
+  if (ready.status !== 'ready') throw new Error('no credential');
+  return ready.token;
+}
+
+const hashOf = (token: string) => createHash('sha256').update(token).digest('hex');
+
+test('a rotated credential gets thirty days within its family, keeps its name, and the old one works only for the grace period', t => {
+  const { auth, store, tick } = setup(t);
+  const approvedAt = Date.now();
+  const first = approvedToken(auth);
+  const familyEnds = new Date(approvedAt + editorFamilyDays * 86_400_000).toISOString();
+  assert.equal(store.getEditorCredential(hashOf(first))!.familyExpiresAt, familyEnds);
+  tick(7 * 86_400_000);
+  const rotated = auth.rotateEditor(first);
+  assert.match(rotated.token, /^vle_[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(rotated.token, first);
+  assert.deepEqual(rotated.user, person);
+  assert.equal(rotated.expiresAt, new Date(Date.now() + editorCredentialDays * 86_400_000).toISOString());
+  assert.equal(rotated.familyExpiresAt, familyEnds, 'rotation never moves the family deadline');
+  assert.deepEqual(auth.editorCredentials(person).map(item => [item.label, item.familyExpiresAt]), [['Claude Code on ada-laptop', familyEnds]], 'the list shows the new credential only');
+  assert.deepEqual(auth.user(withBearer(first)), person, 'a request already on its way with the old token still succeeds');
+  tick(editorRotationGraceMs + 1);
+  assert.equal(store.liveSignIn(hashOf(first)), false, 'after the grace period the old token is no sign-in');
+  assert.deepEqual(auth.user(withBearer(rotated.token)), person);
+});
+
+test('rotating every week never reaches past ninety days from the approval', t => {
+  const { auth, tick } = setup(t);
+  const approvedAt = Date.now();
+  const familyEnds = approvedAt + editorFamilyDays * 86_400_000;
+  let token = approvedToken(auth);
+  let expiresAt = '';
+  for (let week = 1; week <= 12; week++) {
+    tick(7 * 86_400_000);
+    const rotated = auth.rotateEditor(token);
+    assert.equal(rotated.familyExpiresAt, new Date(familyEnds).toISOString(), `week ${week}`);
+    assert.ok(Date.parse(rotated.expiresAt) <= familyEnds, `week ${week} ends ${rotated.expiresAt}, after the family`);
+    token = rotated.token;
+    expiresAt = rotated.expiresAt;
+  }
+  assert.equal(expiresAt, new Date(familyEnds).toISOString());
+  tick(familyEnds - Date.now());
+  assert.equal(auth.user(withBearer(token)), undefined, 'the family ends on its deadline');
+  assert.throws(() => auth.rotateEditor(token), error => code(error) === 'unauthenticated');
+});
+
+test('presenting a credential that was already rotated signs out its whole family and ends what it issued', t => {
+  const { auth, store, tick } = setup(t);
+  const revoked: string[][] = [];
+  auth.onFamilyRevoked = hashes => revoked.push(hashes);
+  const first = approvedToken(auth);
+  const unrelated = approvedToken(auth);
+  tick(86_400_000);
+  const second = auth.rotateEditor(first);
+  assert.throws(() => auth.rotateEditor(first), error => code(error) === 'editor_credential_reused');
+  assert.equal(auth.user(withBearer(second.token)), undefined, 'the credential the thief or the holder got is gone too');
+  assert.equal(store.anyEditorCredential(hashOf(first)), undefined);
+  assert.deepEqual(revoked.map(hashes => hashes.sort()), [[hashOf(first), hashOf(second.token)].sort()]);
+  assert.deepEqual(auth.user(withBearer(unrelated)), person, 'another approval of the same person is not touched');
+});
+
+test('using a rotated credential after its grace period revokes the family, and within it does not', t => {
+  const { auth, tick } = setup(t);
+  const first = approvedToken(auth);
+  const second = auth.rotateEditor(first);
+  tick(editorRotationGraceMs - 1000);
+  assert.deepEqual(auth.user(withBearer(first)), person);
+  assert.deepEqual(auth.user(withBearer(second.token)), person);
+  tick(2000);
+  assert.equal(auth.user(withBearer(first)), undefined);
+  assert.equal(auth.user(withBearer(second.token)), undefined, 'a copy used after the holder moved on ends the family');
+});
+
+test(`rotation does not revive a credential left unused for ${editorIdleDays} days, nor an unknown or revoked one`, t => {
+  const { auth, store, tick } = setup(t);
+  const idle = approvedToken(auth);
+  tick(editorIdleDays * 86_400_000 + 1);
+  assert.throws(() => auth.rotateEditor(idle), error => code(error) === 'unauthenticated');
+  assert.throws(() => auth.rotateEditor(`vle_${'z'.repeat(43)}`), error => code(error) === 'unauthenticated');
+  assert.throws(() => auth.rotateEditor(undefined), error => code(error) === 'unauthenticated');
+  const revoked = approvedToken(auth);
+  auth.revokeEditorCredential(person, store.getEditorCredential(hashOf(revoked))!.id);
+  assert.throws(() => auth.rotateEditor(revoked), error => code(error) === 'unauthenticated');
+});
+
+test('a credential approved before rotation existed is its own family, ending ninety days after its approval', t => {
+  const { auth, store, tick } = setup(t);
+  const token = `vle_${'l'.repeat(43)}`;
+  const approvedAt = Date.now();
+  store.createEditorCredential({ id: 'a'.repeat(24), tokenHash: hashOf(token), userId: person.id, label: 'Claude Code', scope: 'editor', createdAt: new Date(approvedAt).toISOString(), expiresAt: new Date(approvedAt + editorCredentialDays * 86_400_000).toISOString() });
+  tick(86_400_000);
+  const rotated = auth.rotateEditor(token);
+  assert.equal(rotated.familyExpiresAt, new Date(approvedAt + editorFamilyDays * 86_400_000).toISOString());
+  assert.throws(() => auth.rotateEditor(token), error => code(error) === 'editor_credential_reused');
+  assert.equal(auth.user(withBearer(rotated.token)), undefined);
+});
+
+test('an exchanged credential is a new family of an existing account, and nobody without an account gets one', t => {
+  const { auth, store } = setup(t);
+  const issued = auth.exchangeEditor(person.id, editorLabel('claude-code', 'ada-laptop'));
+  assert.deepEqual(auth.user(withBearer(issued.token)), person);
+  assert.equal(issued.familyExpiresAt, new Date(Date.now() + editorFamilyDays * 86_400_000).toISOString());
+  assert.equal(store.getEditorCredential(hashOf(issued.token))!.label, 'Claude Code on ada-laptop');
+  assert.throws(() => auth.exchangeEditor('oidc-unknown', 'Claude Code'), error => code(error) === 'exchange_unknown_person');
 });

@@ -214,6 +214,83 @@ paths:
                   url: { type: string, format: uri }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/auth/editor/exchange:
+    post:
+      tags: [Identity]
+      operationId: exchangeEditorCredential
+      summary: 'Trade an identity-provider token for an editor credential'
+      description: |
+        OAuth 2.0 Token Exchange (RFC 8693) for editors, served only when `auth.oidc.exchange` is configured
+        (otherwise 404 `exchange_off`). `subject_token` is a JWT from the configured `auth.oidc.issuer`, signed by one
+        of its keys, whose `aud` names one of `auth.oidc.exchange.audiences`, unexpired, with `iat` and a lifetime of at
+        most 24 hours; any other token answers 400 `invalid_grant`. The token must name an existing, enabled single
+        sign-on account (by `sub`, or by verified `email` when `match` is `email`), else 403 `exchange_unknown_person`;
+        it never creates one. The credential starts a new rotation family of 90 days and is named like an editor
+        sign-in from `client` and `host`. Takes JSON or `application/x-www-form-urlencoded`. Exempt from the
+        mutation header and origin checks; counts against the per-address sign-in limit.
+      x-unfold-requires: [oidc]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EditorTokenExchange' }
+          application/x-www-form-urlencoded:
+            schema: { $ref: '#/components/schemas/EditorTokenExchange' }
+      responses:
+        '200':
+          description: 'The editor credential, in RFC 8693 form, with when it and its family end.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token, issued_token_type, token_type, expires_in, expiresAt, familyExpiresAt, user]
+                properties:
+                  access_token: { type: string, pattern: '^vle_[A-Za-z0-9_-]{43}$' }
+                  issued_token_type: { const: 'urn:ietf:params:oauth:token-type:access_token' }
+                  token_type: { const: Bearer }
+                  expires_in: { type: integer }
+                  expiresAt: { type: string, format: date-time }
+                  familyExpiresAt: { type: string, format: date-time }
+                  user: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+  /api/auth/editor/rotate:
+    post:
+      tags: [Identity]
+      operationId: rotateEditorCredential
+      summary: 'Replace an editor credential with a new one of the same family'
+      x-unfold-role: viewer
+      description: |
+        With a live editor credential as bearer token, returns a new credential for the same person and name and
+        retires the presented one, which keeps working for two minutes. The new credential lasts 30 days but never
+        past its family's end, 90 days after the approval or exchange it descends from; the idle limit still applies.
+        Presenting a credential that was already rotated answers 401 `editor_credential_reused` and signs out every
+        credential of its family; so does using one for anything after its two minutes. An unknown, expired, idle or
+        revoked credential answers 401 `unauthenticated`. Counts against the per-address sign-in limit.
+      security:
+        - editorBearer: []
+          unfoldRequest: []
+      responses:
+        '200':
+          description: 'The new editor credential.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, expiresAt, familyExpiresAt, user]
+                properties:
+                  token: { type: string, pattern: '^vle_[A-Za-z0-9_-]{43}$' }
+                  expiresAt: { type: string, format: date-time }
+                  familyExpiresAt: { type: string, format: date-time }
+                  user: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/auth/editor/{code}:
     parameters:
       - $ref: '#/components/parameters/EditorCode'
@@ -222,7 +299,7 @@ paths:
       operationId: collectEditorCredential
       summary: 'Poll for the editor credential'
       description: |
-        202 `{status:"pending"}` until the person approves; 200 `{status:"ready", token, expiresAt, user}` once after
+        202 `{status:"pending"}` until the person approves; 200 `{status:"ready", token, expiresAt, familyExpiresAt, user}` once after
         approval; 403 `editor_login_denied` once after a denial; 404 for an unknown, expired, consumed or wrong-secret
         poll (five wrong secrets end the ticket); 429 `slow_down` for a poll within one second of the last. Exempt from
         the mutation header and origin checks.
@@ -247,6 +324,7 @@ paths:
                   status: { const: ready }
                   token: { type: string, pattern: '^vle_[A-Za-z0-9_-]{43}$' }
                   expiresAt: { type: string, format: date-time }
+                  familyExpiresAt: { type: string, format: date-time, description: 'When rotation stops extending this credential: 90 days after approval.' }
                   user: { $ref: '#/components/schemas/User' }
         '202':
           description: 'The person has not approved yet.'
@@ -8097,6 +8175,15 @@ components:
         createdAt: { type: string, format: date-time }
         resolvedAt: { type: string, format: date-time }
         resolvedBy: { type: string }
+    EditorTokenExchange:
+      type: object
+      required: [grant_type, subject_token, subject_token_type]
+      properties:
+        grant_type: { const: 'urn:ietf:params:oauth:grant-type:token-exchange' }
+        subject_token: { type: string, maxLength: 16384, description: 'An ID token or JWT access token from the configured issuer.' }
+        subject_token_type: { type: string, enum: ['urn:ietf:params:oauth:token-type:id_token', 'urn:ietf:params:oauth:token-type:access_token', 'urn:ietf:params:oauth:token-type:jwt'] }
+        client: { type: string, enum: [vscode, mcp, acp, claude-code] }
+        host: { type: string, maxLength: 63 }
     EditorRequest:
       type: object
       properties:

@@ -10,7 +10,7 @@ import { pushAgentTrace } from './push-agent-trace.mjs';
 import { awaitRemoteAnswer, waitSettings } from './permission.mjs';
 import { recordEvidence } from './evidence.mjs';
 import { credentialKey, credentialStore, redacted, resolveCredential, unfoldAddress } from './credentials.mjs';
-import { signInNotice } from './sign-in.mjs';
+import { renewSilently, signInNotice } from './sign-in.mjs';
 
 const unfoldUrl = unfoldAddress(process.env.UNFOLD_URL);
 let token = '';
@@ -254,10 +254,12 @@ async function main() {
   if (input.hook_event_name === 'PostToolUseFailure') return;
   if (!unfoldUrl) return;
   const event = input.hook_event_name;
-  const credential = resolveCredential(unfoldUrl);
-  token = credential.token;
   const asking = event === 'SessionStart' || event === 'UserPromptSubmit';
+  const silently = async current => { try { return await renewSilently({ url: unfoldUrl, credential: current, timeoutMs }); } catch (error) { debug(error.message); return current; } };
   const notify = async current => { try { return await signInNotice({ url: unfoldUrl, credential: current, event, timeoutMs }); } catch (error) { debug(error.message); return null; } };
+  const found = resolveCredential(unfoldUrl);
+  const credential = asking ? await silently(found) : found;
+  token = credential.token;
   let notice = asking ? await notify(credential) : null;
   let output = {};
   if (token) {
@@ -267,7 +269,10 @@ async function main() {
       debug(error.message);
       if (error.status === 401 && credential.source === 'stored') {
         forgetRefused(credential.token);
-        if (asking && !notice) notice = await notify({ ...credential, token: '', source: 'none' });
+        if (asking && !notice) {
+          const fresh = await silently({ ...credential, token: '', source: 'none' });
+          if (!fresh.token) notice = await notify(fresh);
+        }
       }
     }
   }
