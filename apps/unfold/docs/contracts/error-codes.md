@@ -148,6 +148,7 @@ Codes Ploeg sends that Unfold does not name here pass through with Ploeg's own m
 | `ploeg_facts_invalid` | 502 | Ploeg sent delivery facts this Unfold cannot read. | An administrator should check that Unfold and Ploeg are versions that work together. |
 | `ploeg_transcript_invalid` | 502 | Ploeg sent a Run transcript this Unfold cannot read. | An administrator should check that Unfold and Ploeg are versions that work together. |
 | `ploeg_unsupported` | 501 | The connected Ploeg version does not offer this yet. | Ask an administrator to update Ploeg. |
+| `ploeg_step_unavailable` | 503 | The connected Ploeg does not serve this onboarding step yet, so Unfold sent it nothing. The message names the Ploeg release or record that adds it. | Use the configuration entry the Connections page shows for the step, or ask whoever installed Ploeg to upgrade it. |
 | `ploeg_admission_unsupported` | 501 | The connected Ploeg version cannot take Work Items from Unfold. | Ask an administrator to update Ploeg. |
 | `ploeg_notes_unsupported` | 501 | The connected Ploeg version cannot take notes for running work. | Ask an administrator to update Ploeg. |
 | `ploeg_answers_unsupported` | 501 | The connected Ploeg version cannot store answers to questions. | Ask an administrator to update Ploeg. |

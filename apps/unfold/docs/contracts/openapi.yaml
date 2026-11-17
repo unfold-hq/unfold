@@ -457,7 +457,7 @@ paths:
       tags: [Workbench]
       operationId: getBootstrap
       summary: 'What the browser needs to start'
-      description: 'The current user, mode, repositories, task sources, the trackers the registry knows, Teams (also as the deprecated `crews`), models, runtimes, placements, limits, report target, product-event switch and the browser-visible flag values.'
+      description: 'The current user, mode, whether to land on the onboarding checklist, repositories, task sources, the trackers the registry knows, Teams (also as the deprecated `crews`), models, runtimes, placements, limits, report target, product-event switch and the browser-visible flag values.'
       x-unfold-role: viewer
       responses:
         '200':
@@ -477,6 +477,10 @@ paths:
                   gatewayPolicy: { type: [object, 'null'] }
                   observability: { type: [object, 'null'] }
                   insight: { type: object, properties: { events: { type: boolean } } }
+                  onboarding:
+                    type: object
+                    description: '`land` is true for an Admin of a Tenant that has no task source and no repository, configured or stored; the browser then opens Settings → Connections instead of Now, and Unfold records `onboarding.started` once per Tenant.'
+                    properties: { land: { type: boolean } }
                   reports: { type: object }
                   repositories: { type: array, items: { type: object } }
                   taskSources: { type: array, items: { type: object } }
@@ -4073,6 +4077,54 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding:
+    get:
+      tags: [Ploeg]
+      operationId: getOnboardingChecklist
+      summary: 'The onboarding checklist of Settings → Connections'
+      description: 'One line per onboarding stage, computed from Ploeg''s connections and Teams reads and from whether this Ploeg serves each later step (its read route, or the pinned bundle where the step has none). It changes nothing in Ploeg. A person who does not manage the Tenant gets the same lines with "Ask an administrator" in place of each action and no install values. `connections` is the `GET /api/ploeg/connections` answer, null when it could not be read, with the reason in `reads`.'
+      x-unfold-role: viewer
+      parameters:
+        - $ref: '#/components/parameters/Refresh'
+      responses:
+        '200':
+          description: '`{demo, manage, onboarding, pinnedBundle, stages, installValues, connections, reads, fetchedAt}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [demo, manage, onboarding, pinnedBundle, stages, installValues, connections, reads, fetchedAt]
+                properties:
+                  demo: { type: boolean }
+                  manage: { type: boolean }
+                  onboarding: { type: boolean }
+                  pinnedBundle: { type: string }
+                  stages:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, stage, title, status, text]
+                      properties:
+                        id: { type: string }
+                        stage: { type: integer }
+                        title: { type: string }
+                        status: { type: string, enum: [ok, problem, warning, unknown, pending, unavailable] }
+                        text: { type: string }
+                        fix: { type: string }
+                        install: { type: string }
+                        reason: { type: string }
+                        configured: { type: boolean }
+                        configEntry: { type: string }
+                        waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } }
+                        action: { type: object, properties: { label: { type: string }, href: { type: string }, kind: { type: string, enum: [link, refresh, install-values, config-entry] } } }
+                        checks: { type: array, items: { type: object } }
+                  installValues: { type: array, items: { type: object, properties: { prerequisite: { type: string }, value: { type: string }, read: { type: string } } } }
+                  connections: { type: [object, 'null'] }
+                  reads: { type: object, properties: { connections: { type: [string, 'null'] }, teams: { type: [string, 'null'] } } }
+                  fetchedAt: { type: string }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/ploeg/connections:
     get:
