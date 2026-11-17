@@ -49,7 +49,7 @@ test('unfold-mcp tells a client what waits, why, and what to do, from the demo w
   assert.equal(await server.handle({ jsonrpc: '2.0', method: 'notifications/initialized' }), undefined);
 
   const listed = await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-  assert.deepEqual(listed?.result.tools.map((tool: { name: string }) => tool.name), ['unfold_now', 'unfold_find_work', 'unfold_get_work', 'unfold_sessions', 'unfold_linked_sessions', 'unfold_link_session', 'unfold_spend', 'unfold_digest', 'unfold_ask', 'unfold_hand_off', 'unfold_approve_work', 'unfold_reject_work', 'unfold_stop_work', 'unfold_retry_work', 'unfold_answer_question', 'unfold_add_note', 'unfold_take_over', 'unfold_hand_back', 'unfold_steer_session', 'unfold_message_session', 'unfold_permission_requests', 'unfold_answer_permission']);
+  assert.deepEqual(listed?.result.tools.map((tool: { name: string }) => tool.name), ['unfold_now', 'unfold_find_work', 'unfold_get_work', 'unfold_sessions', 'unfold_linked_sessions', 'unfold_link_session', 'unfold_spend', 'unfold_my_usage', 'unfold_digest', 'unfold_ask', 'unfold_hand_off', 'unfold_approve_work', 'unfold_reject_work', 'unfold_stop_work', 'unfold_retry_work', 'unfold_answer_question', 'unfold_add_note', 'unfold_take_over', 'unfold_hand_back', 'unfold_steer_session', 'unfold_message_session', 'unfold_permission_requests', 'unfold_answer_permission']);
   for (const tool of listed?.result.tools ?? []) {
     const acts = tool.name === 'unfold_ask' || tool.name === 'unfold_link_session' || /^unfold_(hand_off|approve_work|reject_work|stop_work|retry_work|answer_question|add_note|take_over|hand_back|steer_session|message_session|answer_permission)$/.test(tool.name);
     assert.equal(tool.annotations.readOnlyHint, !acts, tool.name);
@@ -91,6 +91,11 @@ test('unfold-mcp tells a client what waits, why, and what to do, from the demo w
   assert.equal(demoSpend.structuredContent.demo, true);
   assert.equal(demoSpend.structuredContent.summary, 'This is the illustrative demo: nothing ran and nothing was spent.');
   assert.equal((await call(server, 'unfold_spend', { window: '1y' })).isError, true);
+  const usage = await call(server, 'unfold_my_usage');
+  assert.equal(usage.isError, undefined, JSON.stringify(usage));
+  assert.match(usage.structuredContent.summary, /^Your usage this month: \$0\.00 spent through Unfold .*Work handed to Ploeg is not attributed to you yet\.$/);
+  assert.equal(usage.structuredContent.usage.period, 'month');
+  assert.equal((await call(server, 'unfold_my_usage', { period: '1y' })).isError, true);
 
   const missing = await call(server, 'unfold_get_work', { id: 'not a link' });
   assert.equal(missing.isError, true);
@@ -175,7 +180,7 @@ test('unfold-mcp speaks newline-delimited JSON-RPC on stdio and answers bad line
   assert.deepEqual(lines.map(line => line.id ?? null), [1, null, null, 3]);
   assert.equal(lines[1].error.code, -32700);
   assert.equal(lines[2].error.code, -32600);
-  assert.equal(lines[3].result.tools.length, 22);
+  assert.equal(lines[3].result.tools.length, 23);
 });
 
 test('unfold_now counts a pull request whose CI did not pass as needing a decision, with the CI reason, not as awaiting review', async t => {
@@ -320,7 +325,7 @@ test('unfold-mcp serves 2026-07-28 requests without a handshake: server/discover
 
   const listed = await server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: modernMeta() } });
   assert.equal(listed?.result.resultType, 'complete');
-  assert.equal(listed?.result.tools.length, 22);
+  assert.equal(listed?.result.tools.length, 23);
   assert.equal(typeof listed?.result.ttlMs, 'number');
 
   const legacy = await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' });

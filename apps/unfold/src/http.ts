@@ -63,6 +63,7 @@ import { McpEvents } from './mcp-events.ts';
 import { entitledRole } from './oidc.ts';
 import { LinkedSessions, parseLinkedEvent } from './linked-sessions.ts';
 import { LinkedHandoff, handoffRoute as serveLinkedHandoff, isHandoffRoute } from './linked-handoff.ts';
+import { MyUsageService, UsageError } from './my-usage.ts';
 import { TakeOver, isTakeOverRoute, takeOverRoute } from './take-over.ts';
 import { LinkedInbox } from './linked-inbox.ts';
 import { LinkedConversation, conversationRoute } from './linked-conversation.ts';
@@ -273,6 +274,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const tenants = new TenantScope(config);
   const linked = new LinkedSessions(store.db, config, ploeg);
   const linkedHandoff = new LinkedHandoff(linked, ploeg, store, config);
+  const usage = new MyUsageService({ asksBetween: (...args) => store.asksBetween(...args), sessionSpendSince: (...args) => store.sessionSpendSince(...args), linkedOwned: (ownerId, limit) => linked.store.owned(ownerId, limit) }, config);
   const takeOver = new TakeOver(ploeg);
   const inbox = new LinkedInbox(store.db, linked.store, ploeg);
   const conversation = new LinkedConversation(linked.store);
@@ -994,6 +996,11 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
             return;
           }
           return json(res, 200, sanitize({ session: await linked.view(user, id, base, url.searchParams.get('telemetry') === '1') }));
+        }
+        if (path === '/api/me/usage') {
+          if (method !== 'GET') fault(405, 'method', 'Read your usage with GET.');
+          try { return json(res, 200, sanitize({ usage: await usage.read(user, url.searchParams.get('period') ?? 'month') })); }
+          catch (error) { if (error instanceof UsageError) return json(res, error.status, { error: { code: error.code, message: error.message } }); throw error; }
         }
         if (path === '/api/asks') {
           if (method !== 'GET') fault(405, 'method', 'List your Asks with GET.');
