@@ -332,6 +332,13 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   agentHost?.useChat(new ChatService(chatAuthority, chatTools, { demo: config.mode === 'demo', gatewayUrl: config.litellm?.baseUrl, secrets }));
   const flags = new FeatureFlags({ registry: loadRegistry(), settings: config.flags ?? { document: {}, unknown: [] }, store });
   flags.watch();
+  const storedRepositories = async (): Promise<boolean> => {
+    const on = await flags.getBooleanValue('repositories.stored', false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode });
+    trackerConnections.joinStoredRepositories(on);
+    return on;
+  };
+  const storedRepositoryWrites = async (): Promise<void> => { if (!await storedRepositories()) fault(404, 'repositories_off', 'Adding repositories from the screen is off: turn on the repositories.stored flag.'); };
+  void storedRepositories();
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
@@ -819,15 +826,15 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           fault(405, 'method', 'Change a task source with PATCH or remove it with DELETE.');
         }
         if (path === '/api/repositories') {
-          if (method === 'GET') return json(res, 200, sanitize({ repositories: trackerConnections.repositories.list(user), manageTenants: trackerConnections.managedTenants(user) }));
-          if (method === 'POST') { const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); return json(res, 201, sanitize({ repository })); }
+          if (method === 'GET') { await storedRepositories(); return json(res, 200, sanitize({ repositories: trackerConnections.repositories.list(user), manageTenants: trackerConnections.managedTenants(user) })); }
+          if (method === 'POST') { await storedRepositoryWrites(); const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); return json(res, 201, sanitize({ repository })); }
           fault(405, 'method', 'List stored repositories with GET and add one with POST.');
         }
         const repositoryRoute = path.match(/^\/api\/repositories\/([a-z0-9][a-z0-9-]{0,63})$/);
         if (repositoryRoute) {
           const repositoryId = repositoryRoute[1];
-          if (method === 'PATCH') { const repository = trackerConnections.repositories.update(user, repositoryId, await body(req)); trackerConnections.sync(); return json(res, 200, sanitize({ repository })); }
-          if (method === 'DELETE') { trackerConnections.repositories.remove(user, repositoryId, id => trackerConnections.sources().filter(source => source.repositoryId === id).map(source => source.name)); trackerConnections.sync(); return json(res, 200, { removed: repositoryId }); }
+          if (method === 'PATCH') { await storedRepositoryWrites(); const repository = trackerConnections.repositories.update(user, repositoryId, await body(req)); trackerConnections.sync(); return json(res, 200, sanitize({ repository })); }
+          if (method === 'DELETE') { await storedRepositoryWrites(); trackerConnections.repositories.remove(user, repositoryId, id => trackerConnections.sources().filter(source => source.repositoryId === id).map(source => source.name)); trackerConnections.sync(); return json(res, 200, { removed: repositoryId }); }
           fault(405, 'method', 'Change a stored repository with PATCH or remove it with DELETE.');
         }
         if (method === 'GET' && path === '/api/client-projects') {

@@ -8,7 +8,7 @@ import { canHandOff, validateTaskSources, type TaskSourceConfig, type TaskTarget
 import { setupTarget } from './task-setup.ts';
 import { defaultTenant, validTenancyId } from './tenancy.ts';
 import { reaches } from './tenant-scope.ts';
-import { ClientProjects, ensureIntegrationSchema } from './integration-store.ts';
+import { ClientProjects, ensureIntegrationSchema, mirrorTrackerConnection, unmirrorTrackerConnection } from './integration-store.ts';
 import { StoredRepositories } from './stored-repositories.ts';
 
 /** A tracker account Unfold acts as on one tracker origin for one Tenant: an ADR-0048 Integration Account with role `tracker`. Its token is kept apart, encrypted. */
@@ -63,7 +63,8 @@ export class TrackerConnections {
     this.store = store;
     this.config = config;
     this.options = options;
-    ensureIntegrationSchema(store.db, this.now());
+    const reconciled = ensureIntegrationSchema(store.db, this.now());
+    if (reconciled.toIntegrationAccounts || reconciled.toTrackerConnections || reconciled.refreshed) this.log('tracker_connections.reconciled', reconciled);
     this.projects = new ClientProjects(store.db, config);
     this.repositories = new StoredRepositories(store.db, config, this.projects, { enforced: options.enforced, manages: (user, tenant) => this.manages(user, tenant), sees: (user, tenant) => this.sees(user, tenant), now: () => this.now(), log: (event, fields) => this.log(event, fields) });
   }
@@ -126,6 +127,9 @@ export class TrackerConnections {
     if (this.shadowing(source, connection)) return 'shadowed';
     return this.config.repositories.some(repository => repository.id === source.repositoryId) ? 'active' : 'repository_missing';
   }
+
+  /** Lets stored repositories join `config.repositories`, or takes them out, and syncs when that changes. */
+  joinStoredRepositories(on: boolean): void { if (this.repositories.join(on)) this.sync(); }
 
   /** Reads Ploeg's static routes with `read` from now on, so {@link TrackerConnections.refreshRoutes} can give saved sources their Ploeg target. */
   useRoutes(read: () => Promise<PloegRoute[]>): void { this.readRoutes = read; }
@@ -228,6 +232,7 @@ export class TrackerConnections {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) VALUES(?,?,'tracker',?,?,'',?,?)").run(connection.id, tenant, connection.provider, root, at, JSON.stringify(connection));
+      mirrorTrackerConnection(this.db, connection, JSON.stringify(connection));
       this.store.setSecret(secretId(connection.id), credential);
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -241,7 +246,12 @@ export class TrackerConnections {
     const { credential, account } = await this.verify(connection.provider, connection.baseUrl, input.token);
     const at = this.now();
     const updated: TrackerConnection = { ...connection, ...(account ? { account } : {}), tokenSetAt: at, updatedAt: at, updatedBy: user.name };
-    this.db.prepare('UPDATE integration_accounts SET body=? WHERE id=?').run(JSON.stringify(updated), id);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('UPDATE integration_accounts SET body=? WHERE id=?').run(JSON.stringify(updated), id);
+      mirrorTrackerConnection(this.db, updated, JSON.stringify(updated));
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     this.store.setSecret(secretId(id), credential);
     for (const listener of this.listeners) listener(credential.token);
     this.sync();
@@ -255,6 +265,7 @@ export class TrackerConnections {
     if (using.length) throw new TaskError(409, 'connection_in_use', `Remove ${using.map(source => source.name).join(', ')} first; ${using.length === 1 ? 'it reads' : 'they read'} with this connection.`);
     this.store.deleteSecret(secretId(id));
     this.db.prepare('DELETE FROM integration_accounts WHERE id=?').run(id);
+    unmirrorTrackerConnection(this.db, id);
   }
 
   /** Checks the connection's own token with one cheap read and changes nothing. A refusal is a `problem`, not an error. */

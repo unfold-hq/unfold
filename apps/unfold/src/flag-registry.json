@@ -149,6 +149,20 @@
         "labs": true
       }
     },
+    "repositories.stored": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "permission",
+        "owner": "Ryan Grippeling",
+        "created": "2026-11-17",
+        "title": "Repositories added from the screen",
+        "description": "Lets administrators add, change and remove repositories with POST, PATCH and DELETE /api/repositories, and lets those stored repositories join the repositories the workbench uses: task sources, hand-off, sessions and the Tenant checks. While it is off, those routes answer 404 repositories_off, stored repositories stay in the database marked off and nothing uses them. Evaluated for the default Tenant at start-up and on each request to /api/repositories.",
+        "client": false,
+        "labs": false
+      }
+    },
     "cards.health.judge": {
       "state": "ENABLED",
       "variants": { "on": true, "off": false },
