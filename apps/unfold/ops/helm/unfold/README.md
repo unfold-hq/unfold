@@ -48,6 +48,23 @@ All of these apply to the workbench pod only and are empty by default. Agent wor
 | `podLabels`, `podAnnotations` | Add metadata that other tools act on, such as a policy engine or Reloader. They are added to the chart's own labels and its config checksum, never replacing them. |
 | `extraEnv` | Add environment variables, for example a credential read from a Secret other than `credentialsSecret`. Entries take the Kubernetes `env` form and come after the chart's own. |
 
+## Smoke test
+
+The chart ships a Helm test hook, the pod `<release>-smoke-test`, which `helm test` and Flux's `spec.test.enable` run after an install or upgrade. It runs `node` in the workbench image, so no other image is pulled, and calls the workbench through its Service at `http://<release>.<namespace>.svc:<service.port>`:
+
+1. `GET /readyz` answers 200 and reports the chart's `appVersion` as its `version`. Another version fails at once: the workbench runs an image this chart release did not install.
+2. `GET /healthz` reports `ploegContract.state: compatible`. `incompatible` fails with Unfold's own message naming the missing contract; `unchecked` is retried. Without a Ploeg connection (the demo, or no `config.ploeg`) `/healthz` carries no `ploegContract` and the check is skipped, not failed.
+3. `GET /api/auth/methods` answers 200 without credentials and offers name and password or single sign-on, so the sign-in page can load.
+
+Each check prints `PASS`, `SKIP` or `FAIL` with its reason. No answer, a status other than 200 from `/readyz` or `/healthz`, and a 5xx or 429 from the sign-in methods are retried once a second, for at most 90 seconds across all three checks, and the pod's `activeDeadlineSeconds` is 110, so a test never runs longer than two minutes. The pod runs as uid 1000 with a read-only root filesystem, no capabilities, no service account token and the `RuntimeDefault` seccomp profile, and takes `imagePullSecrets`, `nodeSelector` and `tolerations` from the workbench. A passed test pod is deleted; a failed one stays for `kubectl logs` until the next test run replaces it.
+
+| Value | Default | Sets |
+| --- | --- | --- |
+| `tests.enabled` | `true` | Renders the test hook. `false` renders nothing for `helm test`. |
+| `tests.podLabels` | `{}` | Extra labels on the test pod, for a NetworkPolicy or admission policy of your own. The chart's labels (`app.kubernetes.io/name: unfold-smoke-test`, the release's `app.kubernetes.io/instance`, `app.kubernetes.io/component: test`) win over a label of the same name; they never match the workbench Service, so the Service never sends traffic to the test pod. |
+| `tests.networkPolicy.enabled` | `false` | Adds the NetworkPolicy `<release>-smoke-test`, created before the pod and removed with it, which admits the test pod to the workbench pods' `http` port. The chart renders no NetworkPolicy for the workbench itself, so turn this on only where a policy of your own already isolates the workbench pods: on a workbench no policy selects, this one would isolate it and refuse every other caller while the test runs. A namespace that also denies egress must allow the test pod DNS and the workbench port. |
+| `tests.resources` | 10m/64Mi requests, 500m/128Mi limits | The test container. |
+
 ## Product events and export
 
 Unfold records product events from the browser in its own database ([RFC-0001](../../../../../docs/design/rfc-0001-product-events-and-confusion-signals.md)). Recording is on by default and nothing leaves the install until you name a collector.

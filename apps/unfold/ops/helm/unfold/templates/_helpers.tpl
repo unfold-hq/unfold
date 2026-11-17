@@ -12,6 +12,11 @@
 app.kubernetes.io/name: unfold
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+{{- define "unfold.smokeTestLabels" -}}
+app.kubernetes.io/name: unfold-smoke-test
+app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: test
+{{- end -}}
 {{- define "unfold.workspaceImage" -}}
 {{- if .Values.workspaceImage -}}
 {{- .Values.workspaceImage -}}

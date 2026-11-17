@@ -235,6 +235,22 @@ ingress:
   className: ""
   host: ""
   tlsSecret: ""
+# The Helm test hook `helm test` and Flux spec.test.enable run after an install or upgrade: one pod in the
+# workbench image checks /readyz and its version, /healthz's Ploeg contract and /api/auth/methods through the
+# Service (README.md#smoke-test). networkPolicy.enabled adds a NetworkPolicy, only while the test runs, that
+# admits the test pod to the workbench; enable it only where a policy already isolates the workbench pods.
+tests:
+  enabled: true
+  podLabels: {}
+  networkPolicy:
+    enabled: false
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 128Mi
 ploeg:
   enabled: true
   # Ploeg's object names. Empty would be the release name, which Unfold's own

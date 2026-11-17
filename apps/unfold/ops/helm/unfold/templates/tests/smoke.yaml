@@ -1,0 +1,119 @@
+{{- $tests := default (dict) .Values.tests -}}
+{{- if get $tests "enabled" }}
+{{- $networkPolicy := default (dict) (get $tests "networkPolicy") }}
+{{- if get $networkPolicy "enabled" }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "unfold.name" . }}-smoke-test
+  labels: {{- include "unfold.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels: {{- include "unfold.labels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "unfold.smokeTestLabels" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: http
+---
+{{- end }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "unfold.name" . }}-smoke-test
+  labels: {{- merge (fromYaml (include "unfold.smokeTestLabels" .)) (default (dict) (get $tests "podLabels")) | toYaml | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  activeDeadlineSeconds: 110
+  automountServiceAccountToken: false
+  enableServiceLinks: false
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.nodeSelector }}
+  nodeSelector: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.tolerations }}
+  tolerations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: smoke
+      image: {{ include "unfold.image" . | quote }}
+      imagePullPolicy: {{ .Values.image.pullPolicy }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]
+      resources: {{- toYaml (get $tests "resources") | nindent 8 }}
+      env:
+        - name: UNFOLD_SMOKE_URL
+          value: {{ printf "http://%s.%s.svc:%v" (include "unfold.name" .) .Release.Namespace .Values.service.port | quote }}
+        - name: UNFOLD_SMOKE_VERSION
+          value: {{ .Chart.AppVersion | quote }}
+        - name: UNFOLD_SMOKE_DEADLINE_SECONDS
+          value: "90"
+      command:
+        - node
+        - --input-type=module
+        - --eval
+        - |
+          const base = process.env.UNFOLD_SMOKE_URL;
+          const expected = process.env.UNFOLD_SMOKE_VERSION;
+          const seconds = Number(process.env.UNFOLD_SMOKE_DEADLINE_SECONDS);
+          const deadline = Date.now() + seconds * 1000;
+          const explain = error => [error.message, error.cause?.code ?? error.cause?.message].filter(Boolean).join(': ');
+          const read = async path => {
+            const response = await fetch(new URL(path, base), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(5000) });
+            const text = await response.text();
+            try { return { status: response.status, body: JSON.parse(text) }; } catch { return { status: response.status, body: undefined }; }
+          };
+          const check = async (path, judge) => {
+            for (;;) {
+              let verdict;
+              try { verdict = judge(await read(path)); } catch (error) { verdict = { retry: `no answer from ${base}${path} (${explain(error)})` }; }
+              if (verdict.pass) { console.log(`PASS ${path}: ${verdict.pass}`); return; }
+              if (verdict.skip) { console.log(`SKIP ${path}: ${verdict.skip}`); return; }
+              if (verdict.fail) { console.error(`FAIL ${path}: ${verdict.fail}`); process.exit(1); }
+              if (Date.now() >= deadline) { console.error(`FAIL ${path}: ${verdict.retry}, still after ${seconds} seconds`); process.exit(1); }
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          };
+          await check('/readyz', ({ status, body }) => {
+            if (status !== 200) return { retry: `answered ${status}, not 200` };
+            if (body?.version !== expected) return { fail: `Unfold reports version ${body?.version ?? '(none)'}, but this chart release installs ${expected}` };
+            return { pass: `ready, version ${expected}` };
+          });
+          await check('/healthz', ({ status, body }) => {
+            if (status !== 200) return { retry: `answered ${status}, not 200` };
+            const contract = body?.ploegContract;
+            if (!contract) return { skip: 'this Unfold has no Ploeg configured, so there is no Ploeg contract to check' };
+            if (contract.state === 'compatible') return { pass: `Ploeg ${contract.ploeg ?? '(version not reported)'} serves every contract this Unfold requires` };
+            if (contract.state === 'incompatible') return { fail: contract.message ?? 'Ploeg does not serve a contract this Unfold requires' };
+            return { retry: `Unfold has not yet read which contracts Ploeg serves (state ${contract.state})` };
+          });
+          await check('/api/auth/methods', ({ status, body }) => {
+            if (status >= 500 || status === 429) return { retry: `answered ${status}` };
+            if (status !== 200 || typeof body?.local !== 'boolean') return { fail: `answered ${status} without credentials, so the sign-in page cannot list its methods` };
+            const methods = [body.local ? 'name and password' : '', body.oidc ? `single sign-on (${body.oidc.name})` : ''].filter(Boolean);
+            if (!methods.length) return { fail: 'sign-in offers neither name and password nor single sign-on, so nobody can sign in' };
+            return { pass: `sign-in offers ${methods.join(' and ')}` };
+          });
+{{- end }}
