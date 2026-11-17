@@ -139,3 +139,26 @@ test('cancel while first-start lookup is pending prevents any admission or runti
   f.state.lookupGate.resolve();
   const result = await starting; assert.equal(result.status, 409); assert.equal(f.state.admissions.length, 0); assert.equal(f.state.prepared, 0); assert.equal(f.server.app.store.getSession(session.id)!.status, 'cancelled');
 });
+
+test('a ClickUp List saved from the screen takes the target of the static Ploeg route that covers it and imports into shared execution', async t => {
+  const f = await fixture(t, 'clickup', { saved: { routed: true } });
+  const sources = await request(f.server.url, '/api/task-sources', { cookie: f.admin.cookie });
+  assert.deepEqual(sources.body.find((source: { id: string }) => source.id === 'board')?.ploeg, { target });
+  const preview = await f.preview();
+  assert.equal(preview.ploegUnavailable, undefined, JSON.stringify(preview.ploegUnavailable));
+  assert.equal(preview.ploeg.workItemId, itemId);
+  const imported = await f.importTask(preview);
+  assert.equal(imported.status, 201, imported.text);
+});
+
+test('a ClickUp List saved from the screen that no Ploeg route covers is refused with the reason', async t => {
+  const f = await fixture(t, 'clickup', { saved: { routed: false } });
+  const preview = await f.preview();
+  assert.equal(preview.ploeg, undefined);
+  assert.equal(preview.ploegUnavailable.code, 'task_binding_unconfigured');
+  assert.match(preview.ploegUnavailable.message, /No Ploeg route covers/);
+  const refused = await f.importTask(preview);
+  assert.equal(refused.status, 409, refused.text);
+  assert.equal(refused.body.error.code, 'task_binding_unconfigured');
+  assert.equal(f.state.lookups, 0);
+});

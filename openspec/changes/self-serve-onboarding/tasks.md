@@ -26,8 +26,8 @@ output pasted in the pull request.
 
 ## 2. S2 Saved sources get their Ploeg target
 
-- [ ] 2.1 `sync()` sets `ploeg.target` on a saved source from the static route that covers its List
-- [ ] 2.2 Test: import from a saved source no longer answers `task_binding_unconfigured` (fails without the fix)
+- [x] 2.1 `sync()` sets `ploeg.target` on a saved source from the static route that covers its List
+- [x] 2.2 Test: import from a saved source no longer answers `task_binding_unconfigured` (fails without the fix)
 
 ## 3. S3 Repositories and Own work in Unfold's store
 

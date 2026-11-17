@@ -17,6 +17,7 @@ export async function lookupTaskBinding(config: AppConfig, task: TaskSnapshot, c
   if (refusal) throw refusal;
   const source = config.taskSources?.find(source => source.id === task.sourceId);
   const repository = config.repositories.find(repository => repository.id === task.repositoryId);
+  if (config.execution && source?.connection && !source.ploeg && source.executionOwner === 'ploeg') throw new PloegError(409, 'task_binding_unconfigured', 'No Ploeg route covers this List yet, so Ploeg would not take its tasks. An administrator routes the List to this source\'s repository in Ploeg, then saves the source again.');
   if (!config.execution || !source?.ploeg || source.executionOwner !== 'ploeg' || !canHandOff(source.provider) || !repository || source.repositoryId !== repository.id) throw new PloegError(409, 'task_binding_unconfigured', 'This task connection needs a registered Ploeg tracker target before it can be imported into shared execution.');
   if (task.provider !== source.provider || task.status !== 'open' || !task.nativeRevision || task.scope !== source.project) throw mismatch();
   const token = config.ploeg?.tokenEnv ? process.env[config.ploeg.tokenEnv] : undefined;

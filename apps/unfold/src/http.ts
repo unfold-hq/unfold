@@ -262,6 +262,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const audit = new AuditTrail({ store, jobs, settings: config.audit, config, owner: path => trackerConnections.ownerOf(path), exportEnabled: tenant => flags.getBooleanValue('audit.export', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), schedule: true });
   const auth = new Auth(store, config);
   const ploeg = new PloegClient(config, ploegCompatibility);
+  if (config.ploeg && !ploeg.isDemo) { trackerConnections.useRoutes(() => ploeg.routes()); void trackerConnections.refreshRoutes(); }
   const cards = config.ploeg && !config.ploeg.demo ? new CardService(ploeg, new CardStore(store.db), { settings: config.cards?.rules ?? {}, publish: config.cards?.publishPullRequestComment === true }) : undefined;
   if (cards) ploeg.useCards(cards);
   const attribution = new PloegAttribution();
@@ -804,13 +805,13 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           if (!part && method === 'DELETE') { trackerConnections.remove(user, connectionId); return json(res, 200, { removed: connectionId }); }
           if (part === 'token' && method === 'PUT') return json(res, 200, sanitize({ connection: await trackerConnections.replaceToken(user, connectionId, await body(req)) }));
           if (part === 'check' && method === 'GET') return json(res, 200, sanitize(await trackerConnections.check(user, connectionId)));
-          if (part === 'sources' && method === 'POST') return json(res, 201, sanitize({ source: trackerConnections.addSource(user, connectionId, await body(req)) }));
+          if (part === 'sources' && method === 'POST') { const source = trackerConnections.addSource(user, connectionId, await body(req)); await trackerConnections.refreshRoutes(); return json(res, 201, sanitize({ source })); }
           fault(405, 'method', 'This address does not take that method. The API reference at /api/openapi.yaml lists the methods it takes.');
         }
         const connectionSourceRoute = path.match(/^\/api\/tracker-connections\/(tc-[a-f0-9]{12})\/sources\/([a-z0-9][a-z0-9-]{0,63})$/);
         if (connectionSourceRoute) {
           const [, connectionId, sourceId] = connectionSourceRoute;
-          if (method === 'PATCH') return json(res, 200, sanitize({ source: trackerConnections.updateSource(user, connectionId, sourceId, await body(req)) }));
+          if (method === 'PATCH') { const source = trackerConnections.updateSource(user, connectionId, sourceId, await body(req)); await trackerConnections.refreshRoutes(); return json(res, 200, sanitize({ source })); }
           if (method === 'DELETE') { trackerConnections.removeSource(user, connectionId, sourceId); return json(res, 200, { removed: sourceId }); }
           fault(405, 'method', 'Change a task source with PATCH or remove it with DELETE.');
         }

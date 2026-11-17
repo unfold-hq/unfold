@@ -269,7 +269,7 @@ const rows: Record<ErrorArea, readonly Row[]> = {
     ['task_binding_conflict', [409], 'The Ploeg Work Item for this task changed, is taken, or already ran.', 'Open the Work Item before you start a new session.'],
     ['task_binding_missing', [409], 'Ploeg has no Work Item for this task in this connection\'s scope.', 'Check the task\'s assignment in the tracker.'],
     ['task_binding_unavailable', [503], 'Ploeg could not confirm the task\'s Work Item.', 'Reload, then try again.'],
-    ['task_binding_unconfigured', [409], 'This task connection has no registered Ploeg tracker target.', admin],
+    ['task_binding_unconfigured', [409], 'This task connection has no registered Ploeg tracker target; for a source saved from the screen, no Ploeg route covers its project.', admin],
     ['handoff_active', [409], 'The task is already handed to a Team.', 'Take it back from that Team first, or follow its work.'],
     ['handoff_started', [409], 'Ploeg already started on the task.', 'Cancel it from the Work Item page instead.'],
     ['handoff_team', [404], 'You cannot hand the task to that Team.', 'Choose a Team the Tasks page offers.'],

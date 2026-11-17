@@ -112,6 +112,8 @@ For a tracker whose adapter offers it, ClickUp today, an administrator adds sour
 
 **Next to the configuration.** Saved sources run alongside the configured ones, which win: a configured source with the same id, or reading the same project at the same API root, hides the saved one, and the page marks it as not in use. A configured source cannot be changed or removed from the screen (`source_read_only`). `GET /api/task-sources` says where each source is kept in `managedBy`. Saving does not configure Ploeg: Ploeg starts work only on projects its own tracker configuration routes to a Team, which [Diagnose a connection](#diagnose-a-connection) shows.
 
+**Its Ploeg target.** A saved source that Ploeg executes takes its [import target](#import-the-existing-ploeg-work-item) from Ploeg's static route for its project: the routed repository whose owner, name and base branch match the source's repository. Unfold reads the routes from Ploeg's connections read at start-up and each time a source is saved or changed. When no route covers the project, the source has no target and an import is refused with `task_binding_unconfigured`, saying so; route the project in Ploeg's configuration, then save the source again.
+
 **Tenant export.** The connections and their sources are exported with their Tenant as `tracker-connections` and `tracker-connection-sources`; their tokens are not. After an import an administrator pastes each token again; until then the connection says its token is missing.
 
 ## Provider recipes
