@@ -279,7 +279,7 @@ Each counter is asked for under both of the namings a metrics store may keep, in
 
 No recording rule or relabelling is needed in the store.
 
-Unfold records what each read says, so the figure survives the metrics store's retention ([ADR 0069](../adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md), proposed). A reading is kept when it has tokens and adds to the last one; a lower reading keeps the higher figure. Three minutes after a Claude Code session reports `idle` or `end`, the durable job `linked.usage` reads the session's cost and tokens with the two queries `GET /api/linked-sessions/digest` uses and records them; it retries while the metrics store cannot be read. `recordedUsage` is the newest reading, `{costUsd, tokens, observedAt, source: "telemetry-estimate", costStatus: "estimate"}`, shown for the same people as `telemetry`.
+Unfold records what each read says, so the figure survives the metrics store's retention ([ADR 0069](../adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md), proposed). A reading is kept when it has a cost or tokens and adds to the last one; a lower reading keeps the higher figure. Three minutes after a Claude Code session reports `idle` or `end`, the durable job `linked.usage` reads the session's cost and tokens with the two queries `GET /api/linked-sessions/digest` uses and records them; it retries while the metrics store cannot be read. `recordedUsage` is the newest reading, `{costUsd, tokens, observedAt, source: "telemetry-estimate", costStatus: "estimate"}`, shown for the same people as `telemetry`.
 
 ## Your usage
 
