@@ -8,7 +8,8 @@ The ClickUp connect step SHALL explain why Unfold needs its own ClickUp member
 and how to create it, and SHALL take that member's token once in a write-only
 field. Unfold MUST check the token's shape and that ClickUp accepts it before
 relaying it to Ploeg, MUST refuse a token that belongs to the signed-in
-Admin's own linked ClickUp account, and MUST never show, log or export it. Ploeg's routes are owned by Ploeg ADR-0184 and ADR-0186; Unfold restates none of them.
+Admin's own linked ClickUp account, and MUST never show, log or export it.
+The paste rests on the proposed amendment of Ploeg ADR-0184 rule 1.
 
 #### Scenario: The member's token is pasted
 
@@ -33,7 +34,10 @@ Admin's own linked ClickUp account, and MUST never show, log or export it. Ploeg
 Unfold SHALL bind a saved List by running Ploeg's dry run first, showing each
 check, and creating the binding only when every check passes. The binding's
 destinations MUST be registered Work Targets granted to the source's Client
-Project. A retried create with the same body MUST leave one binding.
+Project that Ploeg reports as ready; Unfold MUST NOT ask Ploeg to bind a List
+to a target that is not ready. A retried create with the same body MUST leave
+one binding. The List's step SHALL count as done only when Ploeg reports the
+binding `active`.
 
 #### Scenario: Binding a List
 
@@ -41,6 +45,20 @@ Project. A retried create with the same body MUST leave one binding.
   and the dry run passes
 - **THEN** Ploeg holds one active binding, the saved source records its id,
   and the List's line is green
+
+#### Scenario: A repository waiting for its readiness pull request
+
+- **WHEN** the only repository granted to Own work is registered but not
+  ready
+- **THEN** the map step offers no repository, says the readiness pull request
+  must be merged first, and Unfold sends no binding request
+
+#### Scenario: The binding waits for a webhook
+
+- **WHEN** Ploeg creates the binding as `awaiting_webhook`
+- **THEN** the List's line stays amber with Ploeg's reason and **Check
+  again**, because Ploeg does not poll ClickUp and the binding receives no
+  Assignment until a webhook delivers
 
 #### Scenario: A lost response is retried
 

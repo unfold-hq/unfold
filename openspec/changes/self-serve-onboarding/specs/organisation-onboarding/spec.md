@@ -7,14 +7,22 @@
 Settings → Connections SHALL show one line per onboarding stage and one line
 per board and repository, each with a state computed from live Ploeg and
 vendor reads, and every line that is not green MUST name what failed and
-offer the action that fixes it. An Admin of a Tenant with no Integration
-Account SHALL land on it after signing in.
+offer the action that fixes it. An Admin SHALL land on it after signing in
+only while the Tenant has no source and no repository at all, stored or
+configured.
 
 #### Scenario: A new Admin signs in
 
-- **WHEN** an Admin signs in to a Tenant that has no Integration Account
+- **WHEN** an Admin signs in to a Tenant that has no source and no
+  repository, stored or configured
 - **THEN** Unfold opens Settings → Connections with every stage grey and the
   first stage's action offered
+
+#### Scenario: A configured installation signs in
+
+- **WHEN** an Admin signs in to a Tenant whose configuration names a task
+  source or a repository
+- **THEN** Unfold opens Now as before and records no `onboarding.started`
 
 #### Scenario: A check fails
 
@@ -33,8 +41,9 @@ Account SHALL land on it after signing in.
 
 Creating, replacing or removing an Integration Account, registering a
 repository, saving or binding a List, and starting a readiness Work Item MUST
-require an administrator, and while `tenancy.enforce` is on an Admin
-membership of the Tenant. Others SHALL see the lines read-only. An object of a
+require an administrator, and under `tenancy.enforce` an Admin membership of
+the Tenant. Others SHALL see the lines read-only with "Ask an administrator",
+without the Admins listed. An object of a
 Tenant the person does not reach MUST answer the same 404 as a missing one,
 before any request to Ploeg or a vendor.
 
@@ -81,26 +90,57 @@ deleted. Unfold MUST NOT rewrite the configuration.
 - **THEN** the configured entry is used, the stored one is marked `shadowed`
   and the line offers "Remove the runtime entry"
 
-### Requirement: No paid step without a hard Budget
+### Requirement: No onboarding spend without a Team spend cap
 
-Unfold MUST refuse to start a readiness Work Item or hand off a task while the
-Team's enforced Budget read from Ploeg is absent or zero, and SHALL show the
-enforced cap for an Admin to confirm before the first paid step.
+Unfold MUST refuse to start a readiness Work Item, and MUST refuse to bind a
+List during onboarding to a Team, while Ploeg's Teams read reports that Team's
+`spendCap` as null, and SHALL show the cap for an Admin to confirm before the
+first paid step. The gate MUST NOT refuse hand-off or import on an
+installation whose sources or bindings were configured, or bound, outside
+onboarding.
 
 #### Scenario: No cap
 
-- **WHEN** Ploeg reports no enforced Budget for the Team and an Admin starts a
+- **WHEN** Ploeg reports `spendCap: null` for the Team and an Admin starts a
   readiness Work Item
 - **THEN** Unfold answers 409 `budget_missing`, sends nothing to Ploeg, and the
-  Budget line names who sets it
+  installation line names the Team's spend cap as the value the installer sets
+
+#### Scenario: A configured installation without a cap
+
+- **WHEN** a Team has no spend cap and a person hands off a task from a
+  configured source
+- **THEN** the hand-off proceeds as before this change
+
+### Requirement: The installation prerequisites are checked first
+
+The checklist SHALL show each one-time install value of design.md section 1
+as a line, read from Ploeg where Ploeg reports it. Unfold MUST treat a
+`422 registration_not_accepted` or `422 bindings_not_accepted` from a dry run
+as "the installation has not opted in", naming the install value, and not as
+a Ploeg that does not serve the step.
+
+#### Scenario: No Team
+
+- **WHEN** Ploeg's Teams read lists no Team
+- **THEN** the installation line is red, says that Teams are set by the person
+  installing Ploeg, and the repository and List steps explain that they need
+  a Team
+
+#### Scenario: Bindings not accepted
+
+- **WHEN** Ploeg answers a binding dry run with `422 bindings_not_accepted`
+- **THEN** Unfold creates nothing, and the installation line names
+  `teams.<team>.trackerBindings.connections` and the connection to list
 
 ### Requirement: A step Ploeg does not serve is refused with its reason
 
 When the pinned Ploeg does not serve the route a step needs, Unfold MUST
 refuse the step before sending any request, with `503 ploeg_step_unavailable`
 naming the Ploeg release that adds it, and SHALL offer the equivalent
-configuration entry. Unfold MUST detect this from Ploeg's version answer or
-from the step's read route, never by sending a write.
+configuration entry. Unfold MUST detect this from the step's read route, or
+from the pinned Ploeg bundle version where the step has no route, never by
+sending a write.
 
 #### Scenario: Ploeg without runtime bindings
 
@@ -114,18 +154,29 @@ from the step's read route, never by sending a write.
 - **WHEN** the same Unfold later reads a Ploeg that serves the route
 - **THEN** the step becomes available without an Unfold restart or release
 
-### Requirement: Time to first pull request is measured
+### Requirement: Two clocks are measured
 
-Unfold SHALL record the product events `onboarding.started`,
-`onboarding.step_completed`, `onboarding.step_failed`,
-`onboarding.step_refused` and `onboarding.first_pr_opened` with a
-pseudonymous actor, the Tenant and no screen text, and MUST record
-`onboarding.first_pr_opened` once per Tenant with the seconds since
-`onboarding.started` and whether a readiness or a task Work Item opened it.
+Unfold SHALL record the `onboarding.*` product events of design.md section 9
+with a pseudonymous actor, the Tenant and no screen text. `started`,
+`first_agent_pr_opened` (any kind, with its kind) and `first_task_pr_opened`
+(with whether a readiness pull request came first) MUST each be recorded at
+most once per Tenant, the last two with the seconds since `started`.
 
-#### Scenario: The first pull request opens
+#### Scenario: A readiness pull request opens first
 
-- **WHEN** a Run opens the Tenant's first agent pull request on a registered
-  repository
-- **THEN** one `onboarding.first_pr_opened` event is stored with the elapsed
-  seconds and its kind, and a second pull request records none
+- **WHEN** a readiness Run opens the Tenant's first agent pull request
+- **THEN** one `onboarding.first_agent_pr_opened` event with kind `readiness`
+  is stored and no `onboarding.first_task_pr_opened`
+
+#### Scenario: The first task pull request opens later
+
+- **WHEN** a task Run later opens the Tenant's first task pull request
+- **THEN** one `onboarding.first_task_pr_opened` event is stored marked as
+  following a readiness pull request, and no second
+  `onboarding.first_agent_pr_opened`
+
+#### Scenario: The Admin signs in again
+
+- **WHEN** a second Admin of the same Tenant signs in before onboarding is
+  done
+- **THEN** no second `onboarding.started` is recorded
