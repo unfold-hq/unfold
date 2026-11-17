@@ -144,6 +144,7 @@ export const excludedTables: readonly ExcludedTable[] = [
   { table: 'outbound_cursors', reason: 'Operational: how far outbound webhooks have read each source.' },
   { table: 'mcp_event_subscriptions', reason: 'Operational: the MCP key, lifetime and delivery status of subscriptions MCP clients made. The client owns its subscriptions and subscribes again at the destination; the subscription rows are exported as outbound-subscriptions.' },
   { table: 'mcp_event_verifications', reason: 'Operational: which callback URLs a person proved to receive MCP events, kept 24 hours.' },
+  { table: 'tracker_connections', reason: 'Duplicate: the copy of the tracker Integration Accounts that an Unfold image from before them reads after a rollback. The same rows are exported as integration-accounts.' },
   { table: 'outbound_sign_off_changes', reason: 'Operational: Client Sign-off changes waiting to become webhook events. The sign-offs are exported as client-sign-offs.' },
 ];
 

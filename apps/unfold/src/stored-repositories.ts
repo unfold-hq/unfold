@@ -6,8 +6,8 @@ import type { ClientProject, ClientProjects } from './integration-store.ts';
 
 /** A repository an Admin added from the screen (system ADR-0048): owned by the Tenant, keyed by forge host and `owner/name`. */
 export type StoredRepository = { id: string; key: string; url: string; name: string; description: string; baseBranch: string; tenant: string; integrationAccount?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
-/** Whether a stored repository is in use, or hidden by a configured one with the same key or id. */
-export type RepositoryState = 'active' | 'shadowed';
+/** Whether a stored repository is in use, hidden by a configured one with the same key or id, or unused while the `repositories.stored` flag is off. */
+export type RepositoryState = 'active' | 'shadowed' | 'off';
 /** A Client Project's permission to route work to a repository. */
 export type RepositoryGrant = { clientProject: string; name: string; grantedAt: string; grantedBy: string };
 /** A stored repository as people see it. */
@@ -53,6 +53,7 @@ export class StoredRepositories {
   private readonly projects: ClientProjects;
   private readonly access: Access;
   private readonly listeners: ((change: GrantChange) => void)[] = [];
+  private joined = false;
 
   constructor(db: DatabaseSync, config: AppConfig, projects: ClientProjects, access: Access) {
     this.db = db;
@@ -82,13 +83,22 @@ export class StoredRepositories {
 
   /** Whether `repository` is in use: `shadowed` when a configured repository has its key or its id. */
   state(repository: StoredRepository): RepositoryState {
+    if (!this.joined) return 'off';
     return this.configured().some(entry => entry.id === repository.id || repositoryKey(entry.url) === repository.key) ? 'shadowed' : 'active';
   }
 
-  /** Puts the stored repositories into `config.repositories` after the configured ones, replacing what an earlier sync put there. */
+  /** Whether stored repositories join `config.repositories`: only while the `repositories.stored` flag is on. Answers whether that changed. */
+  join(on: boolean): boolean {
+    if (this.joined === on) return false;
+    this.joined = on;
+    return true;
+  }
+
+  /** Puts the stored repositories into `config.repositories` after the configured ones, replacing what an earlier sync put there. While they may not join, it only takes them out. */
   sync(): void {
     const list = this.config.repositories;
     for (let index = list.length - 1; index >= 0; index--) if (list[index].stored) list.splice(index, 1);
+    if (!this.joined) return;
     for (const repository of this.repositories()) {
       if (this.state(repository) !== 'active') { this.access.log('repositories.shadowed', { repository: repository.id, key: repository.key }); continue; }
       list.push({ id: repository.id, name: repository.name, description: repository.description, url: repository.url, baseBranch: repository.baseBranch, verify: [], tenant: repository.tenant, stored: true });

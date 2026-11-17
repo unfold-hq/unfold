@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { application, login, request } from './api-support.ts';
+import { flagSettings, loadRegistry } from '../src/flags.ts';
 import { Auth } from '../src/auth.ts';
 import { Store } from '../src/store.ts';
 import { TrackerConnections } from '../src/tracker-connections.ts';
@@ -34,7 +35,7 @@ function configFor(dataDir: string): AppConfig {
   } as unknown as AppConfig;
 }
 
-test('a store written by the schema before Integration Accounts migrates without losing a row, and every token still opens under its id', async t => {
+test('a store written by the schema before Integration Accounts is copied without losing a row, keeps its old table, and every token still opens under its id', async t => {
   const dir = await mkdtemp(join(tmpdir(), 'unfold-migration-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const path = join(dir, 'unfold.sqlite');
@@ -56,8 +57,10 @@ test('a store written by the schema before Integration Accounts migrates without
   const config = configFor(dir);
   const migrated = new TrackerConnections(store, config, { enforced: true, now: () => new Date('2026-11-17T00:00:00.000Z') });
   const tables = (store.db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all() as { name: string }[]).map(row => row.name);
-  assert.ok(!tables.includes('tracker_connections') && !tables.some(name => name.endsWith('_before')), 'the old table and the copy are gone');
-  for (const table of ['integration_accounts', 'tracker_connection_sources', 'client_projects', 'repositories', 'repository_grants']) assert.ok(tables.includes(table), `${table} exists`);
+  assert.ok(!tables.some(name => name.endsWith('_before')), 'the copy made while reshaping is gone');
+  assert.equal(count(store, 'SELECT count(*) AS n FROM tracker_connections'), connections.length, 'the old table stays for a rollback');
+  assert.deepEqual(store.db.prepare('PRAGMA foreign_key_list(tracker_connection_sources)').all().map((key: any) => key.from), ['client_project_id'], 'a source refers to its Client Project, and its connection id is checked by Unfold, so every image can add one');
+  for (const table of ['tracker_connections', 'integration_accounts', 'tracker_connection_sources', 'client_projects', 'repositories', 'repository_grants']) assert.ok(tables.includes(table), `${table} exists`);
   assert.ok((store.db.prepare("SELECT name FROM sqlite_schema WHERE type='index' AND tbl_name='tracker_connection_sources'").all() as { name: string }[]).some(row => row.name === 'tracker_connection_sources_connection'), 'the source index is on the new table');
 
   const byId = [...connections].sort((left, right) => left.id.localeCompare(right.id));
@@ -86,6 +89,8 @@ test('a store written by the schema before Integration Accounts migrates without
   assert.deepEqual(again.connections().map(entry => entry.id), byId.map(entry => entry.id), 'forge accounts are not tracker connections');
 });
 
+const storedRepositoriesOn = (config: AppConfig) => { config.flags = flagSettings({ flags: { 'repositories.stored': { defaultVariant: 'on' } } }, loadRegistry(), {}); };
+
 async function signIn(app: Awaited<ReturnType<typeof application>>, id: string, role: User['role'], memberships?: Membership[]) {
   if (!app.app.store.getUser(id)) app.app.store.addUser({ id, name: id, role, passwordHash: '', ...(memberships ? { memberships } : {}) });
   return new Auth(app.app.store, app.config).issue({ id, name: id, role }).cookie.split(';')[0];
@@ -97,7 +102,7 @@ const auditEntities = (app: Awaited<ReturnType<typeof application>>, types: stri
   .map(entry => `${entry.tenant} ${entry.event.entity.type} ${entry.event.activity_name} ${entry.event.status}`);
 
 test('an administrator adds a repository from the screen: Own work is made on first use, holds a grant, and the repository joins the configured ones', async t => {
-  const app = await application('live');
+  const app = await application('live', storedRepositoriesOn);
   t.after(() => app.close());
   const { cookie } = await login(app.url);
 
@@ -163,7 +168,7 @@ test('an administrator adds a repository from the screen: Own work is made on fi
 });
 
 test('a repository added to the configuration later wins, and the stored one is shadowed and kept', async t => {
-  const app = await application('live');
+  const app = await application('live', storedRepositoriesOn);
   t.after(() => app.close());
   const { cookie } = await login(app.url);
   assert.equal((await request(app.url, '/api/repositories', { method: 'POST', cookie, body: { url: 'https://forge.example.test/acme/shop' } })).status, 201);
@@ -178,7 +183,7 @@ test('a repository added to the configuration later wins, and the stored one is 
 });
 
 test('only an Admin of the Tenant adds or changes its repositories; another Tenant cannot tell they exist; projects show once the Tenant has a Client', async t => {
-  const app = await application('live', config => { config.tenancy = { enforce: true }; });
+  const app = await application('live', config => { storedRepositoriesOn(config); config.tenancy = { enforce: true }; });
   t.after(() => app.close());
   const owner = await signIn(app, 'olga', 'admin', [{ kind: 'tenant', tenant: 'agency', role: 'admin' }]);
   const outsider = await signIn(app, 'otto', 'admin', [{ kind: 'tenant', tenant: 'other', role: 'admin' }]);

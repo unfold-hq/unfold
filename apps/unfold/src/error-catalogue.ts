@@ -303,6 +303,7 @@ const rows: Record<ErrorArea, readonly Row[]> = {
     ['repository_exists', [409], 'Unfold already has a repository with this forge host and owner/name.', 'Use the repository that is there, or remove it first.'],
     ['repository_not_found', [404], 'There is no such repository, or it is outside what your account may see.', 'Reload the page to see the repositories there are.'],
     ['repository_read_only', [409], 'This repository is in the server configuration, so it cannot be changed or removed from the screen.', 'Ask an administrator to change the server configuration.'],
+    ['repositories_off', [404], 'Adding and changing repositories from the screen is off on this workbench.', 'An administrator turns it on with the repositories.stored flag.'],
     ['repository_in_use', [409], 'Task sources added from the screen still use this repository, so it cannot be removed.', 'Point the task sources the message names at another repository or remove them first, then remove the repository.'],
     ['task_timeout', [504], 'The tracker did not answer in time.', 'Try again in a minute.'],
     ['task_unreachable', [502], 'The tracker could not be reached.', 'Try again in a minute. If it keeps failing, an administrator must check its address.'],
