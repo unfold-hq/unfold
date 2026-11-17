@@ -54,7 +54,7 @@ jobs:
           echo "created=$created" >> "$GITHUB_OUTPUT"
 
   unfold-release-build:
-    name: Unfold - Build each image on its own platform (GHCR, per-platform tag)
+    name: Unfold - Build each image on its own platform (GHCR, per-platform build tag)
     needs: [parse-release-tag]
     if: github.repository == 'unfold-hq/unfold' && needs.parse-release-tag.outputs.version != ''
     runs-on: ${{ matrix.runner }}
@@ -114,7 +114,7 @@ jobs:
           printf '%s' "$current" | jq '.features["containerd-snapshotter"] = true' | sudo tee "$config" > /dev/null
           sudo systemctl restart docker
           docker info --format '{{ json .DriverStatus }}' | grep -q io.containerd.snapshotter.v1 || { echo "Docker did not switch to the containerd image store." >&2; exit 1; }
-      - name: Build and push this platform under its platform tag (GHCR)
+      - name: Build and push this platform under its build tag (GHCR)
         id: build
         if: steps.probe.outputs.exists != 'true'
         env:
@@ -138,7 +138,7 @@ jobs:
             --label org.opencontainers.image.url="$SOURCE" \
             --provenance=mode=max \
             --metadata-file "${RUNNER_TEMP}/build.json" \
-            --output "type=image,name=${IMAGE}:${VERSION}-${ARCH},push=true" \
+            --output "type=image,name=${IMAGE}:build-${VERSION}-${ARCH},push=true" \
             "$CONTEXT"
           digest="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/build.json")"
           [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo "no digest pushed for $IMAGE on $ARCH" >&2; exit 1; }
