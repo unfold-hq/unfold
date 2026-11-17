@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner, operator, integrator]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Written with the implementation on branch feat/focus-cost-export, Parquet added on feat/focus-parquet-export: src/focus-export.ts, the /api/ploeg/cost-export route in src/http.ts and the Insights button in public/ploeg-activity.js. test/focus-export.test.ts checks every exported file against the FOCUS 1.4 Cost and Usage column table and rules, read on 2026-10-30 from tag v1.4 (commit f1eeb30, 2026-06-05) of github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec and from focus.finops.org/docs/specification/v1-4/. The Parquet tests read every written file back with hyparquet and compare it with the CSV; a written file was also read with pyarrow and DuckDB by hand on 2026-10-30. Not loaded into a FinOps tool, and not run through the FinOps Foundation's focus-validator."
+last_verified: 2026-11-17
+verified_by: "Written with the implementation on branch feat/focus-cost-export, Parquet added on feat/focus-parquet-export: src/focus-export.ts, the /api/ploeg/cost-export route in src/http.ts and the Insights button in public/ploeg-activity.js. test/focus-export.test.ts checks every exported file against the FOCUS 1.4 Cost and Usage column table and rules, read on 2026-10-30 from tag v1.4 (commit f1eeb30, 2026-06-05) of github.com/FinOps-Open-Cost-and-Usage-Spec/FOCUS_Spec and from focus.finops.org/docs/specification/v1-4/. The Parquet tests read every written file back with hyparquet and compare it with the CSV; a written file was also read with pyarrow and DuckDB by hand on 2026-10-30. Not loaded into a FinOps tool, and not run through the FinOps Foundation's focus-validator. The billing system section was written with src/cost-export-readers.ts on 2026-11-17 and checked by test/cost-export-readers.test.ts against a fake API server; no real TokenReview was made."
 ---
 
 # Export AI cost per Client (FinOps FOCUS)
@@ -14,7 +14,7 @@ The export is figures, not a charge. Unfold sends nothing anywhere: you download
 
 ## Who can export
 
-Operators and administrators. A viewer gets 403. The rows cover only the Teams your account reaches in Ploeg, and, while `tenancy.enforce` is on, only the Tenants and Clients your memberships reach, the same as the Deliveries ledger on Insights. In demo mode the export has no rows: the demo makes no model calls, so it has no cost. The file says so in the `X-Unfold-Demo: true` header.
+Operators and administrators, and the billing systems configured as cost export readers ([below](#read-the-export-from-a-billing-system)). A viewer gets 403. The rows cover only the Teams your account reaches in Ploeg, and, while `tenancy.enforce` is on, only the Tenants and Clients your memberships reach, the same as the Deliveries ledger on Insights. In demo mode the export has no rows: the demo makes no model calls, so it has no cost. The file says so in the `X-Unfold-Demo: true` header.
 
 ## Download it from Insights
 
@@ -51,6 +51,76 @@ The response headers say what the file leaves out:
 | `X-Unfold-Unowned-Work-Items` | Work Items whose repository is registered to more than one owner. They have no row |
 | `X-Unfold-Truncated` | `true` when Unfold stopped after 1000 Work Items with activity since the period began, or, with `linkedSessions=include`, after 2000 Linked Sessions or 500 of their Work Items. Export a shorter period |
 | `X-Unfold-Linked-Session-Rows` | With `linkedSessions=include`: how many Linked Session rows the file has |
+
+## Read the export from a billing system
+
+A billing job that runs in the same Kubernetes cluster as Unfold can fetch the export as itself, without a person's sign-in and without a secret anyone has to create ([ADR 0071](../adrs/0071-a-billing-system-reads-the-cost-export-with-its-own-service-account-token.md), proposed). The job presents a projected service account token; Unfold asks the API server who it belongs to with a TokenReview.
+
+1. Give the job its own service account, such as `focus-reader` in namespace `billing`.
+2. List it in the configuration (with the Helm chart, under `config`):
+
+    ```yaml
+    costExportReaders:
+      - id: billing
+        serviceAccount: billing/focus-reader
+        audience: unfold-cost-export
+        tenant: default
+        teams: [delivery]
+    ```
+
+    `audience` is a name you choose; the job's token must carry it, and no other reader's token does. `tenant` is the one Tenant whose cost the job reads, and `teams` the Ploeg Teams. With this list set, the chart lets the workbench's service account create TokenReviews (a ClusterRole and ClusterRoleBinding named `<namespace>-<release>-reader-tokens`). The [configuration reference](configuration.md#costexportreaders) lists every key.
+
+3. Mount a projected token for that audience in the job's Pod and send it as a bearer token:
+
+    ```yaml
+    apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: focus-export
+      namespace: billing
+    spec:
+      schedule: "0 3 2 * *"
+      jobTemplate:
+        spec:
+          template:
+            spec:
+              serviceAccountName: focus-reader
+              automountServiceAccountToken: false
+              restartPolicy: OnFailure
+              containers:
+                - name: fetch
+                  image: curlimages/curl:8.11.1
+                  args:
+                    - sh
+                    - -c
+                    - >-
+                      curl -fsS -H "Authorization: Bearer $(cat /var/run/secrets/unfold/token)"
+                      "http://unfold.unfold.svc:4080/api/ploeg/cost-export?month=$BILLING_MONTH&format=parquet"
+                      -o /tmp/unfold-focus.parquet
+                  env:
+                    - { name: BILLING_MONTH, value: "2026-10" }
+                  volumeMounts:
+                    - { name: unfold-token, mountPath: /var/run/secrets/unfold, readOnly: true }
+              volumes:
+                - name: unfold-token
+                  projected:
+                    sources:
+                      - serviceAccountToken:
+                          audience: unfold-cost-export
+                          expirationSeconds: 600
+                          path: token
+    ```
+
+    Replace the address with your workbench Service (`<release>.<namespace>.svc` on the chart's port) and `BILLING_MONTH` with the month you bill, or leave `month` out for the current one; the parameters are those of [the API](#fetch-it-from-the-api). Where a NetworkPolicy isolates the workbench, admit the job's namespace to its port. The snippet only fetches the file; your job loads it into the billing system from there.
+
+What the reader gets:
+
+- Only `GET /api/ploeg/cost-export`. Any other API route answers 403 `reader_route`; it never changes anything.
+- Only the rows of its `teams` whose Work Item belongs to its `tenant`, also while `tenancy.enforce` is off. `tenant` and `client` parameters can narrow that, never widen it.
+- 401 `unauthenticated` for a token the API server does not accept for that audience and that exact service account: another audience, another service account, an expired token or none.
+- The `export` rate limit, counted for the reader, and an audit record of each download with the actor `reader:<id>`, never a person.
+
+A billing system outside the cluster cannot use this; it needs a person's credential as before.
 
 ## How Unfold fills the FOCUS columns
 
@@ -133,5 +203,6 @@ FOCUS asks a data generator to state its delivery mechanism. Unfold's is **Overw
 - `unknown` as a provider name is a placeholder, which the FOCUS null-handling rules discourage. Pass `provider` when you know it.
 - The settled cost is what the model gateway recorded with its price table. Whether it equals the provider's invoice is not checked.
 - `BillingAccountId` is the Tenant id, which is unique within one Unfold installation, not across installations.
+- A billing system reading the export with its service account token is tested against a fake API server only; no real cluster's TokenReview has accepted one yet.
 
 The FOCUS specification is copyright Joint Development Foundation Projects, LLC, FinOps Open Cost and Usage Specification (FOCUS) Series and its contributors, and published under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).

@@ -42,6 +42,7 @@ Codes Ploeg sends that Unfold does not name here pass through with Ploeg's own m
 | `invalid_credentials` | 401 | The name or password is not right. | Type them again. Ask an administrator to reset the password if you forgot it. |
 | `local_login_off` | 404 | Signing in with a name and password is turned off on this workbench. | Use the single sign-on button instead. |
 | `browser_only` | 403 | This can only be done in Unfold in a browser, not from an editor or a token. | Open the workbench in your browser and do it there. |
+| `reader_route` | 403 | A cost export reader's service account token reaches only GET /api/ploeg/cost-export, and this request asked for something else. | Call GET /api/ploeg/cost-export with the reader's token, or sign in as a person for anything else. |
 | `editor_login_unknown` | 404 | The editor sign-in is unknown or expired. | Start signing in again from your editor. |
 | `editor_login_decided` | 409 | Someone already approved or denied this editor sign-in. | Start signing in again from your editor if it is still not signed in. |
 | `editor_login_denied` | 403 | The editor sign-in was denied in the browser. | Start signing in again from your editor and approve it this time. |

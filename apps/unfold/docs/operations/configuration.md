@@ -726,3 +726,15 @@ SCIM provisioning and the Shared Signals receiver; both need auth.oidc.
 | `identity.sharedSignals.transmitters[].jwksUri` | string |  | Its signing keys; https except on loopback. |
 | `identity.sharedSignals.transmitters[].audience` | string |  | Audience its tokens name, when not the receiver's. |
 | `identity.sharedSignals.transmitters[].authorizationEnv` | string |  | UNFOLD_ environment variable holding the Authorization value it pushes with. |
+
+### `costExportReaders`
+
+Machines that read the FOCUS cost export (GET /api/ploeg/cost-export) with their own projected Kubernetes service account token instead of a person's sign-in (ADR 0071). A reader reaches only that route, and only its own Tenant and Teams. Needs live mode and a real Ploeg connection; the Helm chart then lets the workbench create TokenReviews. Default: `[]`.
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `costExportReaders[].id` | string |  | Unique name of the reader; the audit names it as reader: followed by this id. |
+| `costExportReaders[].serviceAccount` | string |  | The reader's Kubernetes service account as namespace/name, such as billing/focus-reader; unique across readers. |
+| `costExportReaders[].audience` | string |  | The audience the reader's projected token must carry, such as unfold-cost-export; never unfold-relay, the warm pool's. |
+| `costExportReaders[].tenant` | string |  | The one Tenant whose cost the reader reads. |
+| `costExportReaders[].teams` | list of string (1–50 entries) |  | The Ploeg Teams whose cost the reader reads; within ploeg.teams when that is set. |

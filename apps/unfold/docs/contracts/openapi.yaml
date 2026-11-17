@@ -3945,8 +3945,12 @@ paths:
       tags: [Ploeg]
       operationId: getPloegCostExport
       summary: 'Model cost as a FinOps FOCUS 1.4 Cost and Usage file, per Tenant and Client'
-      description: 'One row per settled Run (or per Work Item and day), read like the Delivery ledger within the caller''s Teams and Tenant and Client reach. Costs are US$ unless `currency=EUR` with the rate in `usdToEur`. Unsettled spend is left out, or with `unsettled=include` written at cost 0 with its observed amount in `x_UnfoldObservedCost`. The demo answers a file without rows and `X-Unfold-Demo: true`. 400 `cost_export_filter` for a query it cannot export.'
+      description: 'One row per settled Run (or per Work Item and day), read like the Delivery ledger within the caller''s Teams and Tenant and Client reach. Costs are US$ unless `currency=EUR` with the rate in `usdToEur`. Unsettled spend is left out, or with `unsettled=include` written at cost 0 with its observed amount in `x_UnfoldObservedCost`. The demo answers a file without rows and `X-Unfold-Demo: true`. 400 `cost_export_filter` for a query it cannot export. A configured cost export reader (ADR 0071, proposed) calls it with its projected service account token instead of a person''s sign-in and gets only its own Tenant and Teams; a token the API server does not accept for that reader''s audience and service account answers 401.'
       x-unfold-role: operator
+      security:
+        - sessionCookie: []
+        - editorBearer: []
+        - costExportReader: []
       parameters:
         - { name: month, in: query, required: false, schema: { type: string, pattern: '^\d{4}-\d{2}$' }, description: 'A UTC calendar month; the current month when neither month nor from and to are given.' }
         - { name: from, in: query, required: false, schema: { type: string, format: date }, description: 'Inclusive UTC start date, with `to`.' }
@@ -7795,6 +7799,11 @@ components:
       type: http
       scheme: bearer
       description: 'A Kubernetes service account token of a pooled worker pod.'
+    costExportReader:
+      type: http
+      scheme: bearer
+      bearerFormat: a projected Kubernetes service account token (JWT)
+      description: 'The projected service account token of a configured cost export reader (`costExportReaders`, ADR 0071), for the reader''s own audience. The workbench checks it by TokenReview and accepts it only for that exact service account. It reaches only the operations that list it; any other API route answers 403 `reader_route`.'
   parameters:
     SessionId:
       name: sessionId

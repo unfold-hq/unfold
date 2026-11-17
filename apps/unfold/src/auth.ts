@@ -173,6 +173,8 @@ export class Auth {
   }
   user(req: IncomingMessage): User | undefined {
     if (this.config.mode === 'demo') return { id: 'demo-operator', name: 'Demo operator', role: 'admin', memberships: defaultMemberships('admin') };
+    const reader = this.readers?.principal(req);
+    if (reader) return reader;
     if (this.bearer(req) !== undefined) return this.editorUser(req);
     const token = this.token(req);
     if (!token || token.length > 200) return undefined;
@@ -181,6 +183,9 @@ export class Auth {
     const user = this.account(login.userId);
     return user ? signedInUser(user) : undefined;
   }
+  private readers?: { principal(req: IncomingMessage): User | undefined };
+  /** Lets `user` answer the cost export reader a request proved before it reached the handler (ADR 0071). */
+  useReaders(readers: { principal(req: IncomingMessage): User | undefined }): void { this.readers = readers; }
   private account(id: string) {
     const user = this.store.getUser(id);
     return user && (user.passwordHash === '' || localLoginEnabled(this.config)) && !accountDisabled(this.store.db, id) ? user : undefined;
