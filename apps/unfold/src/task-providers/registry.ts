@@ -129,6 +129,8 @@ export interface TaskProviderAdapter {
   readonly descriptionFormat: 'html' | 'markdown';
   /** The reference people write for a task. `ploegDefault` marks the tracker Ploeg means by an empty provider. */
   readonly reference?: ReferenceFormat;
+  /** What the tracker's own git integration writes before a native task id in branch names and commit messages, such as `CU-`. Absent when it has no such convention. */
+  readonly markPrefix?: string;
   /** The mark the tracker shows before a native task id that is not a number, such as `#` in `#86c0abc12`. Absent when it shows the id bare. */
   readonly idMark?: string;
   /** The tracker's priority words by the number it stores (index 0 unused), and whether 1 is the highest. Absent when the tracker has no named priorities. */
@@ -158,7 +160,27 @@ export interface TaskProviderAdapter {
   details(source: TaskSourceConfig, value: Record<string, unknown>, read: DetailReaders): TaskDetails;
   list(source: TaskSourceConfig, page: number, reading: TaskReading): Promise<TaskPage>;
   read(source: TaskSourceConfig, id: string, truncate: boolean, reading: TaskReading): Promise<{ task: TaskSnapshot; value: Record<string, unknown> }>;
+  /**
+   * The task of `source` that `candidate` names, or undefined when it names none there. `webHost` is the lowercase host of
+   * the source's web root, or empty when unknown. `request` reads the tracker with the source's credential, for a
+   * reference only the tracker can resolve, such as a ClickUp custom task id. Absent when people write no reference
+   * Unfold recognises for this tracker.
+   */
+  resolveReference?(source: TaskSourceConfig, candidate: TaskCandidate, webHost: string, request: TaskRequest): Promise<ResolvedTask | undefined>;
 }
+
+/**
+ * An id-shaped mention of a tracker task, never surrounding text: an uppercase key such as `OPS-12`, a native id written
+ * with a tracker mark such as `#86c1abcde`, an issue of a repository such as `acme/shop#12` (from an issue address too,
+ * with its host), or another task address split into host and path.
+ */
+export type TaskCandidate =
+  | { kind: 'key'; key: string }
+  | { kind: 'mark'; id: string }
+  | { kind: 'issue'; path: string; number: string; host?: string }
+  | { kind: 'url'; host: string; path: string };
+/** The native task a candidate names in one source, and the `owner/repo` its Work Items must target when the reference names a repository. */
+export type ResolvedTask = { externalId: string; repository?: string };
 
 const adapters = new Map<string, TaskProviderAdapter>();
 
