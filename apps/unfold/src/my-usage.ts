@@ -136,7 +136,7 @@ export class MyUsageService {
       linkedSessions: {
         count: facts.active, claudeCode: facts.ids.length, uncosted: facts.uncosted,
         estimateUsd: telemetry.costUsd, costStatus: 'estimate', tokens: telemetry.tokens,
-        telemetry: !this.config.observability?.metricsUrl ? 'not_configured' : telemetry.reason ? 'unreadable' : 'connected',
+        telemetry: !this.config.observability?.metricsUrl ? 'not_configured' : telemetry.read ? 'connected' : 'unreadable',
         reason: telemetry.reason, truncated: linked.length >= digestReadLimit || facts.ids.length > digestSessionLimit,
       },
       notAttributed,
