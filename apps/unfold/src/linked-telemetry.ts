@@ -29,17 +29,39 @@ type Observability = AppConfig['observability'];
 export function quoted(value: string): string { return JSON.stringify(value); }
 
 /**
+ * The metric names Claude Code's counters carry in a metrics store, as regexes on `__name__`: a store that converts
+ * OpenTelemetry names to Prometheus names (`claude_code_cost_usage_USD_total`), Claude Code's own Prometheus exporter
+ * (`claude_code_cost_usage_total`), and a store that keeps OTLP names as received (`claude_code.cost.usage`).
+ */
+export const claudeCodeMetrics = {
+  cost: 'claude_code[._]cost[._]usage(_USD)?(_total)?',
+  tokens: 'claude_code[._]token[._]usage(_tokens)?(_total)?',
+  active: 'claude_code[._]active[._]time(_seconds)?[._]total',
+} as const;
+
+/** The session label under each naming: `session_id` once converted, `session.id` as received, quoted the way Prometheus 3 and VictoriaMetrics read a UTF-8 label name. */
+export const sessionLabels = ['session_id', '"session.id"'] as const;
+
+/**
+ * One aggregate over the highest value a counter reached in `range`, asked once per naming and joined with `or`, so a
+ * store answers with the converted naming when it has it and with the received naming otherwise, never both summed.
+ */
+export function eitherNaming(aggregate: string, metric: string, sessionMatcher: (label: string) => string, range: string): string {
+  return sessionLabels.map(label => `${aggregate} (max_over_time({__name__=~${quoted(metric)}, ${sessionMatcher(label)}}[${range}]))`).join(' or ');
+}
+
+/**
  * The PromQL queries for one session's totals over `range`, such as `86400s`: the highest value each of its cumulative
  * counters reached, summed over its series (model, query source). Claude Code may export a short session's counter
  * once, which `increase()` reads as almost nothing; a counter that restarted when a session was resumed counts only its
- * larger part.
+ * larger part. A session with no series answers nothing, which reads as unknown, never as zero.
  */
 export function metricQueries(sessionId: string, range: string): { cost: string; tokens: string; active: string } {
-  const session = `session_id=${quoted(sessionId)}`;
+  const session = (label: string) => `${label}=${quoted(sessionId)}`;
   return {
-    cost: `sum(max_over_time(claude_code_cost_usage_USD_total{${session}}[${range}]))`,
-    tokens: `sum by (type) (max_over_time(claude_code_token_usage_tokens_total{${session}}[${range}]))`,
-    active: `sum(max_over_time(claude_code_active_time_seconds_total{${session}}[${range}]))`,
+    cost: eitherNaming('sum', claudeCodeMetrics.cost, session, range),
+    tokens: eitherNaming('sum by (type)', claudeCodeMetrics.tokens, session, range),
+    active: eitherNaming('sum', claudeCodeMetrics.active, session, range),
   };
 }
 
@@ -92,6 +114,12 @@ async function logsQuery(logsUrl: string, query: string, fetcher: typeof fetch):
 }
 
 const whole = (value: number) => Math.max(0, Math.round(value));
+const dollars = (result: { value: number }[]) => result.length ? Math.round(result[0].value * 10_000) / 10_000 : null;
+function tokenCounts(result: { labels: Record<string, string>; value: number }[]): TokenCounts | null {
+  if (!result.length) return null;
+  const byType = (type: string) => whole(result.find(entry => entry.labels.type === type)?.value ?? 0);
+  return { input: byType('input'), output: byType('output'), cacheRead: byType('cacheRead'), cacheCreation: byType('cacheCreation') };
+}
 const identifier = (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value) ? value : '';
 
 /**
@@ -112,22 +140,23 @@ export async function readSessionTelemetry(observability: Observability, session
   const metrics = observability.metricsUrl ? (async () => {
     const queries = metricQueries(sessionId, `${seconds}s`);
     const [cost, tokens, active] = await Promise.all([promQuery(observability.metricsUrl!, queries.cost, fetcher), promQuery(observability.metricsUrl!, queries.tokens, fetcher), promQuery(observability.metricsUrl!, queries.active, fetcher)]);
-    const byType = (type: string) => whole(tokens.find(entry => entry.labels.type === type)?.value ?? 0);
-    out.costUsd = cost.length ? Math.round(cost[0].value * 10_000) / 10_000 : 0;
-    out.tokens = { input: byType('input'), output: byType('output'), cacheRead: byType('cacheRead'), cacheCreation: byType('cacheCreation') };
-    out.activeSeconds = active.length ? whole(active[0].value) : 0;
+    out.costUsd = dollars(cost);
+    out.tokens = tokenCounts(tokens);
+    out.activeSeconds = active.length ? whole(active[0].value) : null;
+    if (out.costUsd === null && out.tokens === null && out.activeSeconds === null) reasons.push('The metrics store has no Claude Code metrics for this session yet.');
   })().catch((error: Error) => { reasons.push(`The metrics store ${error.name === 'TimeoutError' ? 'did not answer in time' : error.message.startsWith('answered') ? error.message : 'could not be read'}.`); }) : Promise.resolve(reasons.push('No metrics store is configured, so cost and tokens are unknown.'));
   const logs = observability.logsUrl ? (async () => {
     const queries = logQueries(sessionId);
     const [events, tools, account] = await Promise.all([logsQuery(observability.logsUrl!, queries.events, fetcher), logsQuery(observability.logsUrl!, queries.tools, fetcher), logsQuery(observability.logsUrl!, queries.account, fetcher)]);
     const count = (name: string) => whole(Number(events.find(row => row.event_name === name)?.hits ?? 0));
-    out.events = { prompts: count('user_prompt'), toolResults: count('tool_result'), apiRequests: count('api_request'), apiErrors: count('api_error') };
+    out.events = events.length ? { prompts: count('user_prompt'), toolResults: count('tool_result'), apiRequests: count('api_request'), apiErrors: count('api_error') } : null;
+    if (!events.length) reasons.push('The log store has no Claude Code events for this session yet.');
     out.tools = tools.map(row => ({ name: String(row.tool_name ?? '').replace(/[^\w.:-]/g, '').slice(0, 80), count: whole(Number(row.hits ?? 0)) })).filter(row => row.name && row.count);
     const uuid = identifier(account[0]?.['attributes.user.account_uuid']);
     out.account = uuid ? { uuid, organization: identifier(account[0]?.['attributes.organization.id']) } : null;
   })().catch((error: Error) => { reasons.push(`The log store ${error.name === 'TimeoutError' ? 'did not answer in time' : error.message.startsWith('answered') ? error.message : 'could not be read'}.`); }) : Promise.resolve(reasons.push('No log store is configured, so prompts and tools are unknown.'));
   await Promise.all([metrics, logs]);
-  out.available = out.costUsd !== null || out.events !== null;
+  out.available = out.costUsd !== null || out.tokens !== null || out.activeSeconds !== null || out.events !== null;
   out.reason = reasons.length ? reasons.join(' ') : null;
   return out;
 }
@@ -137,21 +166,23 @@ export const digestSessionLimit = 100;
 
 /**
  * The PromQL query for the summed cost of several sessions over `range`: the highest value each session's cumulative
- * cost counter reached, through one regex matcher on `session_id`. Only ids of the shape Unfold accepts are kept, so no
- * id can widen the matcher.
+ * cost counter reached, through one regex matcher on the session label under either naming. Only ids of the shape
+ * Unfold accepts are kept, so no id can widen the matcher.
  */
 export function digestCostQuery(sessionIds: string[], range: string): string {
-  return `sum(max_over_time(claude_code_cost_usage_USD_total{${sessionMatcher(sessionIds)}}[${range}]))`;
+  return eitherNaming('sum', claudeCodeMetrics.cost, sessionMatcher(sessionIds), range);
 }
 
 /** The PromQL query for the summed tokens of several sessions over `range`, by token type, through the same matcher as {@link digestCostQuery}. */
 export function digestTokensQuery(sessionIds: string[], range: string): string {
-  return `sum by (type) (max_over_time(claude_code_token_usage_tokens_total{${sessionMatcher(sessionIds)}}[${range}]))`;
+  return eitherNaming('sum by (type)', claudeCodeMetrics.tokens, sessionMatcher(sessionIds), range);
 }
 
-function sessionMatcher(sessionIds: string[]): string {
-  const ids = [...new Set(sessionIds.filter(id => /^[A-Za-z0-9_-]{8,128}$/.test(id)))].slice(0, digestSessionLimit);
-  return `session_id=~${quoted(ids.join('|'))}`;
+const askable = (sessionIds: string[]) => [...new Set(sessionIds.filter(id => /^[A-Za-z0-9_-]{8,128}$/.test(id)))].slice(0, digestSessionLimit);
+
+function sessionMatcher(sessionIds: string[]): (label: string) => string {
+  const ids = askable(sessionIds);
+  return label => `${label}=~${quoted(ids.join('|'))}`;
 }
 
 /** Tokens by type, as Claude Code counts them. */
@@ -159,33 +190,40 @@ export type TokenCounts = { input: number; output: number; cacheRead: number; ca
 
 const unreadable = (error: Error, store: string) => `The ${store} ${error.name === 'TimeoutError' ? 'did not answer in time' : error.message.startsWith('answered') ? error.message : 'could not be read'}.`;
 
+const unseen = 'Claude Code has reported no metrics for these sessions yet.';
+
 /**
  * Reads the summed API-price estimate and tokens of several sessions from `observability.metricsUrl`, one query each.
- * Both are null with a reason when no metrics store is configured or it could not be read; no sessions read as zero.
+ * Both are null with a reason when no metrics store is configured, it could not be read (`read` false), or it holds no
+ * series for those sessions; only no sessions at all reads as zero.
  */
-export async function readSessionsUsage(observability: Observability, sessionIds: string[], range: string, options: { fetch?: typeof fetch } = {}): Promise<{ costUsd: number | null; tokens: TokenCounts | null; reason: string | null }> {
-  if (!sessionIds.length) return { costUsd: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }, reason: null };
-  if (!observability?.metricsUrl) return { costUsd: null, tokens: null, reason: 'No metrics store is configured, so the cost and tokens are unknown.' };
+export async function readSessionsUsage(observability: Observability, sessionIds: string[], range: string, options: { fetch?: typeof fetch } = {}): Promise<{ costUsd: number | null; tokens: TokenCounts | null; reason: string | null; read: boolean }> {
+  if (!sessionIds.length) return { costUsd: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }, reason: null, read: true };
+  if (!observability?.metricsUrl) return { costUsd: null, tokens: null, reason: 'No metrics store is configured, so the cost and tokens are unknown.', read: false };
+  if (!askable(sessionIds).length) return { costUsd: null, tokens: null, reason: unseen, read: true };
   const fetcher = options.fetch ?? fetch;
   try {
     const [cost, tokens] = await Promise.all([promQuery(observability.metricsUrl, digestCostQuery(sessionIds, range), fetcher), promQuery(observability.metricsUrl, digestTokensQuery(sessionIds, range), fetcher)]);
-    const byType = (type: string) => whole(tokens.find(entry => entry.labels.type === type)?.value ?? 0);
-    return { costUsd: cost.length ? Math.round(cost[0].value * 10_000) / 10_000 : 0, tokens: { input: byType('input'), output: byType('output'), cacheRead: byType('cacheRead'), cacheCreation: byType('cacheCreation') }, reason: null };
+    const costUsd = dollars(cost);
+    const counts = tokenCounts(tokens);
+    return { costUsd, tokens: counts, reason: costUsd === null && counts === null ? unseen : null, read: true };
   } catch (error) {
-    return { costUsd: null, tokens: null, reason: unreadable(error as Error, 'metrics store') };
+    return { costUsd: null, tokens: null, reason: unreadable(error as Error, 'metrics store'), read: false };
   }
 }
 
 /**
  * Reads the summed API-price estimate of several sessions from `observability.metricsUrl` in one query. Answers null
- * with a reason when no metrics store is configured, it could not be read, or there are no sessions to ask about.
+ * with a reason when no metrics store is configured, it could not be read, or it holds no cost for those sessions;
+ * no sessions at all reads as zero.
  */
 export async function readSessionsCost(observability: Observability, sessionIds: string[], range: string, options: { fetch?: typeof fetch } = {}): Promise<{ costUsd: number | null; reason: string | null }> {
   if (!sessionIds.length) return { costUsd: 0, reason: null };
   if (!observability?.metricsUrl) return { costUsd: null, reason: 'No metrics store is configured, so the cost is unknown.' };
+  if (!askable(sessionIds).length) return { costUsd: null, reason: unseen };
   try {
-    const result = await promQuery(observability.metricsUrl, digestCostQuery(sessionIds, range), options.fetch ?? fetch);
-    return { costUsd: result.length ? Math.round(result[0].value * 10_000) / 10_000 : 0, reason: null };
+    const costUsd = dollars(await promQuery(observability.metricsUrl, digestCostQuery(sessionIds, range), options.fetch ?? fetch));
+    return { costUsd, reason: costUsd === null ? unseen : null };
   } catch (error) {
     return { costUsd: null, reason: unreadable(error as Error, 'metrics store') };
   }

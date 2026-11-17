@@ -52,6 +52,9 @@ survey:
   - name: Linux Foundation press
     kind: page
     url: https://www.linuxfoundation.org/press
+  - name: ClickUp changelog
+    kind: page
+    url: https://feedback.clickup.com/changelog
 standards:
 - id: mcp
   name: Model Context Protocol

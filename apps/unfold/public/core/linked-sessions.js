@@ -75,7 +75,7 @@ function telemetryTiles(telemetry) {
   if (!telemetry.available) return callout({ tone: 'neutral', icon: 'info', title: 'No telemetry for this session', body: `<p>${escape(telemetry.reason || 'Claude Code sent no telemetry for this session to the stores this workbench reads.')}</p>` });
   const tokens = telemetry.tokens;
   const tiles = [
-    telemetry.costUsd !== null ? stat({ label: 'API-price estimate', value: money(telemetry.costUsd), detail: 'What Claude Code estimates at API prices. A Claude plan is not billed this.', icon: 'coins' }) : '',
+    telemetry.costUsd !== null ? stat({ label: 'API-price estimate', value: money(telemetry.costUsd), detail: 'What Claude Code estimates at API prices. A Claude plan is not billed this.', icon: 'coins' }) : stat({ label: 'API-price estimate', value: 'Not known yet', detail: 'Claude Code has reported no cost for this session to the metrics store.', icon: 'coins', quiet: true }),
     tokens ? stat({ label: 'Tokens', value: compactCount(tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreation), detail: `${compactCount(tokens.output)} out · ${compactCount(tokens.cacheRead)} from cache`, icon: 'layers' }) : '',
     telemetry.activeSeconds !== null ? stat({ label: 'Active time', value: duration(telemetry.activeSeconds), icon: 'clock' }) : '',
     telemetry.events ? stat({ label: 'Prompts', value: compactCount(telemetry.events.prompts), detail: `${compactCount(telemetry.events.toolResults)} tool calls${telemetry.events.apiErrors ? ` · ${plural(telemetry.events.apiErrors, 'API error')}` : ''}`, icon: 'send' }) : '',
