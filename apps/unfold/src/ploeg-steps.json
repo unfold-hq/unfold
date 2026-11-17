@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "pinnedBundle": "0.2.0-rc.108",
   "pair": {
     "forge": "github",
     "forgeName": "GitHub",

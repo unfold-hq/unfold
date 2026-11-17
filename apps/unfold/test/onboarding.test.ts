@@ -11,7 +11,7 @@ import type { AppConfig, User } from '../src/types.ts';
 import { Store } from '../src/store.ts';
 import { InsightService } from '../src/insight.ts';
 import { PloegClient, PloegError, type PloegConnections, type PloegTeam } from '../src/ploeg.ts';
-import { Onboarding, compareReleases, ploegSteps, type ChecklistLine, type StoredEntries } from '../src/onboarding.ts';
+import { Onboarding, compareReleases, pinnedRelease, ploegSteps, type ChecklistLine, type StoredEntries } from '../src/onboarding.ts';
 import { application, configuration, request } from './api-support.ts';
 
 const admin: User = { id: 'admin-1', name: 'Admin', role: 'admin' };
@@ -224,9 +224,10 @@ test('releases compare by version, a release after its candidates', () => {
   assert.equal(compareReleases('0.2.0-rc.108', '0.2.0-rc.108'), 0);
 });
 
-test('the step record names the pinned Ploeg bundle and the ADR-0192 release for the second-forge gate', () => {
+test('the pinned Ploeg bundle comes from ploeg-release.json, and the step record names the ADR-0192 release for the second-forge gate', () => {
   const pinned = JSON.parse(readFileSync(new URL('../ploeg-release.json', import.meta.url), 'utf8')).contract as string;
-  assert.equal(ploegSteps.pinnedBundle, /:([^@]+)@/.exec(pinned)![1], 'src/ploeg-steps.json names the bundle ploeg-release.json pins; move both together');
+  assert.equal(pinnedRelease(), /:([^@]+)@/.exec(pinned)![1]);
+  assert.equal(pinnedRelease(new URL('./no-such-file.json', import.meta.url)), 'unknown');
   assert.equal(ploegSteps.secondForge.record, 'Ploeg ADR-0192');
   assert('release' in ploegSteps.secondForge);
   for (const step of ploegSteps.steps) assert(step.read === null || /^[a-z][a-z-]+$/.test(step.read), `${step.id} names an operator read route`);

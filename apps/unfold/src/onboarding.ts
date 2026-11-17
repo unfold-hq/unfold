@@ -7,10 +7,15 @@ import type { AppConfig, InsightEvent, User } from './types.ts';
 export type PloegStep = { id: StepId; stage: number; record: string; read: string | null; release: string | null };
 export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'prepare-repository' | 'bind-lists';
 /** `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding checklist that need a Ploeg route, and the release that ships Ploeg ADR-0192 for the second-forge gate. */
-export type PloegSteps = { schemaVersion: 1; pinnedBundle: string; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null } };
+export type PloegSteps = { schemaVersion: 1; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null } };
 
 export const ploegStepsUrl = new URL('./ploeg-steps.json', import.meta.url);
 export const ploegSteps = JSON.parse(readFileSync(ploegStepsUrl, 'utf8')) as PloegSteps;
+/** The Ploeg contract bundle release this Unfold is built against, from `ploeg-release.json`; `unknown` when the file is not there. */
+export function pinnedRelease(url = new URL('../ploeg-release.json', import.meta.url)): string {
+  try { return /:([^:@]+)@sha256:/.exec(String((JSON.parse(readFileSync(url, 'utf8')) as { contract?: unknown }).contract))?.[1] ?? 'unknown'; }
+  catch { return 'unknown'; }
+}
 
 /** The answers of a Ploeg dry run that mean the installation has not opted in to a step, with the install value that opts it in. */
 export const optInRefusals = {
@@ -61,7 +66,7 @@ type PloegReads = {
 /** What Unfold's own store holds for the Tenant: repositories Admins added from the screen with their state, and how many saved task sources. */
 export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off' }[]; sources(): number };
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
-type Options = { store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries };
+type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries };
 
 const stateId = (tenant: string) => `onboarding:${tenant}`;
 const askAdmin = 'Ask an administrator to connect this.';
@@ -96,11 +101,13 @@ export class Onboarding {
   private readonly now: () => Date;
   private readonly steps: PloegSteps;
   private readonly stored: StoredEntries;
+  private readonly pinned: string;
 
   constructor(options: Options) {
     this.store = options.store; this.ploeg = options.ploeg; this.config = options.config; this.insight = options.insight;
     this.now = options.now ?? (() => new Date()); this.steps = options.steps ?? ploegSteps;
     this.stored = options.stored ?? { repositories: () => [], sources: () => 0 };
+    this.pinned = options.pinned ?? pinnedRelease();
   }
 
   /** Whether `user` connects accounts and adds repositories and Lists: an administrator, and under `tenancy.enforce` an Admin of the Tenant. */
@@ -133,7 +140,7 @@ export class Onboarding {
     const step = this.steps.steps.find(entry => entry.id === id);
     if (!step) throw new Error(`Unknown onboarding step ${id}`);
     if (step.read) return { step, served: await this.ploeg.serves(user, step.read, fresh) };
-    return { step, served: step.release !== null && compareReleases(this.steps.pinnedBundle, step.release) >= 0 };
+    return { step, served: step.release !== null && this.pinned !== 'unknown' && compareReleases(this.pinned, step.release) >= 0 };
   }
 
   /**
@@ -147,7 +154,7 @@ export class Onboarding {
     if (served === true) return;
     if (served === null) throw new PloegError(503, 'ploeg_unavailable', 'Ploeg could not be reached to check this step. Try again in a minute.');
     this.refused(user, step.id, step.release ?? 'unreleased', 'not_served');
-    throw new PloegError(503, 'ploeg_step_unavailable', `${unavailableText(step, this.steps.pinnedBundle)} Use the configuration entry for this step instead.`);
+    throw new PloegError(503, 'ploeg_step_unavailable', `${unavailableText(step, this.pinned)} Use the configuration entry for this step instead.`);
   }
 
   /**
@@ -158,7 +165,7 @@ export class Onboarding {
   notOptedIn(user: User, step: StepId, code: OptInRefusal): void {
     const state = this.read();
     if (!state.optIn.includes(code)) { state.optIn.push(code); this.write(state); }
-    this.refused(user, step, this.steps.pinnedBundle, code);
+    this.refused(user, step, this.pinned, code);
   }
 
   /** Records the Tenant's first agent pull request and its first task pull request, each at most once, with the seconds since onboarding started. */
@@ -189,7 +196,7 @@ export class Onboarding {
     const storedRepositories = this.stored.repositories();
     const stages = this.stages({ connections, teams, served, state, manage, storedRepositories });
     this.track(user, state, stages);
-    return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.steps.pinnedBundle, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString() };
+    return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.pinned, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString() };
   }
 
   private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']> }): ChecklistLine[] {
@@ -207,7 +214,7 @@ export class Onboarding {
       const record = step(id);
       const known = served[id];
       if (known === null) return { id, stage: record.stage, title, status: 'unknown', text: `Ploeg could not be asked whether it serves this step.${extra}`, fix: manage ? 'Check again in a minute.' : askAdmin, action: action({ label: 'Check again', kind: 'refresh' }) };
-      const text = known ? `This Ploeg serves the step; Unfold adds its screen in a later release.${extra}` : `${unavailableText(record, this.steps.pinnedBundle)}${extra}`;
+      const text = known ? `This Ploeg serves the step; Unfold adds its screen in a later release.${extra}` : `${unavailableText(record, this.pinned)}${extra}`;
       return { id, stage: record.stage, title, status: 'unavailable', text, reason: known ? 'unfold_step_pending' : 'ploeg_step_unavailable', waitsFor: { record: known ? 'a later Unfold release' : record.record, release: known ? null : record.release }, configEntry, fix: manage ? 'Until then, add it to the configuration the person who installed Ploeg and Unfold keeps.' : askAdmin, action: action({ label: 'Show the configuration entry', kind: 'config-entry' }) };
     };
 
