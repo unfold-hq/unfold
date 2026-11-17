@@ -171,7 +171,7 @@ test('the pull request gate waits for every job except the advisory ones, and pa
 test('the release train versions Unfold and the site from a checked development head, with the repository\'s own toolchain', () => {
   assert.deepEqual(Object.keys(train.on).sort(), ['schedule', 'workflow_dispatch', 'workflow_run']);
   assert.match(train.on.schedule[0].cron, /^\d+ \* \* \* \*$/);
-  assert.deepEqual(train.on.workflow_run, { workflows: [workflows['on_source_change.yml'].name], types: ['completed'], branches: ['development'] });
+  assert.deepEqual(train.on.workflow_run, { workflows: [workflows['on_source_change.yml'].name.replace(/[[\]*?+!]/g, '\\$&')], types: ['completed'], branches: ['development'] });
   assert.deepEqual(train.concurrency, { group: 'release-train', 'cancel-in-progress': false });
   assert.deepEqual(Object.keys(train.jobs).sort(), ['build-contexts', 'checks', 'checks-unfold', 'pending', 'ploeg-pin', 'release', 'site-release']);
   for (const ref_name of ['development', 'main', 'topic']) {
