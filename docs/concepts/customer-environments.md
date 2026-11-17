@@ -61,7 +61,7 @@ Proposed, for the owner to decide. They follow the order the owner chose on 2026
 
 Unfold already does OIDC with discovery, PKCE and a JWKS check (`apps/unfold/src/oidc.ts`). Every installation signs people in through it, and `auth.localLogin: false` removes the password form, the `POST /api/login` route and the bootstrap administrator. The chart already refuses `false` without `config.auth.oidc`. Cloudflare Access stays in front of staging as a second wall, with the same identity provider, so a person signs in once and both layers see the same session.
 
-Staging moves to the broker of direction 2 directly, with the owner's organisation as its first Tenant (decided 2026-11-17). The interim step chosen on 2026-11-01, signing in to staging with Google Workspace directly, is skipped, so no Google OAuth client is made for it. Until the broker runs, staging keeps Cloudflare Access with a one-time PIN and its local Unfold account. An installation that does use Google directly can: `auth.oidc.roles` accepts `email:<address>` for a verified address and `hd:<domain>` for a Workspace domain besides group names (`entitledRole` in `apps/unfold/src/oidc.ts`).
+Staging moves to the broker of direction 2 directly, with the owner's organisation as its first Tenant (decided 2026-11-17). The interim step chosen on 2026-11-01, signing in to staging with Google Workspace directly, is skipped, so no Google OAuth client is made for it. Until the broker runs, the owner's staff sign in to staging through the owner's staging cluster Authentik, the same way as on the owner's own Unfold, from a browser on that cluster's network; local login goes off once that works. An installation that does use Google directly can: `auth.oidc.roles` accepts `email:<address>` for a verified address and `hd:<domain>` for a Workspace domain besides group names (`entitledRole` in `apps/unfold/src/oidc.ts`).
 
 ### 2. One customer identity broker, with an organisation per Tenant
 
@@ -144,4 +144,4 @@ Each is the owner's to decide. The owner answered 1, 3, 4 and 5 on 2026-11-01, a
 3. ~~Self-hosted or managed.~~ Self-hosted on the production cluster.
 4. ~~Where the reconciler runs.~~ A `Tenant` custom resource and operator, with the `Tenant` files in Git.
 5. ~~Self sign-up.~~ Every customer starts with one of the owner's operators, for now.
-6. ~~Local login on staging before the broker.~~ It stays on until staging moves to the broker. Unfold can map a verified email or Workspace domain to a role since 2026-11-01, but staging does not use Google directly.
+6. ~~Local login on staging before the broker.~~ It goes off once a staff member has signed in to staging through the owner's staging cluster Authentik, the interim sign-in chosen on 2026-11-17.

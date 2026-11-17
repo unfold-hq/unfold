@@ -42,7 +42,7 @@ Chosen option: "Zitadel on the production cluster, with an organisation per Tena
 * **The Agency's own sign-in.** An Agency admin links their Google Workspace or Entra ID to their organisation and verifies their email domain. From then on anyone with that domain lands in that organisation. Small Agencies and Clients' people sign in with a passkey, or with an emailed link, on an invitation.
 * **The token Unfold reads.** A Zitadel Action writes the person's organisation roles into the groups claim as `unfold/<tenant>/<role>` and `unfold/<tenant>/client/<client>`. Unfold's `auth.oidc` points at the broker, with `groupsClaim: groups`.
 * **The owner's staff.** The owner's own organisation in the broker links Google Workspace, so staff keep one Google sign-in and the security-key check of the owner's cluster ADR.
-* **Staging.** Staging moves to the broker directly, with the owner's organisation as its first Tenant. The interim step of signing in to staging with Google Workspace directly is skipped (decided 2026-11-17). Until the broker runs, staging keeps Cloudflare Access with a one-time PIN and its local Unfold account.
+* **Staging.** Staging moves to the broker directly, with the owner's organisation as its first Tenant. The interim step of signing in to staging with Google Workspace directly is skipped (decided 2026-11-17). Until the broker runs, the owner's staff sign in to staging through the owner's staging cluster Authentik, as on the owner's own Unfold, from a browser on that cluster's network (decided the same day).
 * **Cloudflare Access** stays in front of staging and the operators' consoles only, never in front of customers or previews.
 
 Not implemented yet. The order is in [customer environments](../concepts/customer-environments.md#order).
@@ -55,7 +55,7 @@ Not implemented yet. The order is in [customer environments](../concepts/custome
 * Good, because Unfold's sign-in, tenancy and SCIM code stays as it is.
 * Bad, because the broker is a new system to run, upgrade and back up, and customer sign-in fails when it is down. It needs at least two replicas, a backed-up database and an alert before the first customer.
 * Bad, because Zitadel is AGPL-3.0 since version 3. Running it unmodified and calling its API creates no obligation, per Zitadel's licence FAQ. Modifying Zitadel itself would.
-* Bad, because staging has no single sign-on until the broker runs.
+* Bad, because until the broker runs, staging's sign-in depends on the owner's staging cluster and works only from its network.
 
 ### Confirmation
 
@@ -95,4 +95,4 @@ Not built yet. Once it is, these hold:
 
 * Technical story: [Customer environments](../concepts/customer-environments.md), direction 2
 * Supported by [ADR-0009](adr-0009-one-tenant-per-agency.md) and [ADR-0017](adr-0017-a-tenant-sits-above-teams-and-bounds-what-users-sources-and-budgets-reach.md)
-* 2026-11-17 — accepted: the owner chose Zitadel over Authentik moved to the production cluster, and chose to move staging to the broker directly instead of signing in with Google Workspace first
+* 2026-11-17 — accepted: the owner chose Zitadel over Authentik moved to the production cluster, and chose to move staging to the broker directly instead of signing in with Google Workspace first; until then staging signs in through the owner's staging cluster Authentik
