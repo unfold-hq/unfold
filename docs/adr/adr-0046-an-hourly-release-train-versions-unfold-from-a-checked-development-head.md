@@ -116,6 +116,25 @@ From 2026-10-28 the train failed at `merge-pin` whenever a pin was waiting: Forg
 * [scripts/workflow-policy.test.cjs](../../scripts/workflow-policy.test.cjs) fails when `merge-pin` passes any token but `secrets.PLOEG_RELEASE_TOKEN`, or when any other job names `PLOEG_RELEASE_TOKEN`.
 * In operation: the first train with a waiting green pin shows a green `merge-pin`, and the merge commit names `ploeg-release`.
 
+## Amendment 2026-11-17: a green push check on `development` also starts the train, because GitHub drops scheduled runs
+
+On GitHub Actions the hourly schedule is no reliable start. Between the workflow's creation on 2026-11-11 and 2026-11-17 10:00 UTC, GitHub started three scheduled runs of `on_release_train.yml`: 2026-11-16 at 13:34, at 23:20, and 2026-11-17 at 07:46 UTC, none at minute 7. GitHub documents that scheduled runs can be delayed or dropped under load. `UNFOLD_RELEASES_ENABLED` turned `true` on 2026-11-16 at 19:31 UTC, so about fifteen hourly slots passed with releases enabled and two trains ran. Pull requests #53 and #54, merged at 08:00 and 08:46 UTC, waited in no candidate until the owner dispatched the train by hand. The owner chose on 2026-11-17 to start the train after each green push check as well, over keeping the schedule alone and dispatching by hand.
+
+1. **`on_release_train.yml`** also runs on `workflow_run` when `[Workflow] On Source Change` completes on `development`. The schedule and the manual dispatch stay.
+2. **`pending`** runs for a `workflow_run` start only when that push run concluded `success`. A push run that failed or was cancelled by a newer push starts nothing; the newer push's run starts the train when it passes.
+3. Nothing else changes. `pending` still reads the branch head when it starts, the train's own checks still run on that head, `release` still versions only a head that did not move, and the `release-train` group still runs one train at a time. GitHub keeps at most one pending run per concurrency group and cancels the older pending one, so merges in a row queue one train, not one per merge.
+
+### Consequences of the 2026-11-17 amendment
+
+* Good, because an Unfold candidate follows a merge after the push check and the train's own checks, without waiting for a schedule GitHub may not run.
+* Bad, because every green push to `development` with unreleased application commits runs the checks a second time in the train. GitHub-hosted runners on this public repository cost no money; the cost is runner time.
+* Neutral: a merge made with `GITHUB_TOKEN`, such as a Ploeg pin merged by `on_ploeg_pin.yml`, starts no push run and so no train; the schedule, the next merge or a dispatch picks it up.
+
+### Confirmation of the 2026-11-17 amendment
+
+* [scripts/github-workflow-policy.test.cjs](../../scripts/github-workflow-policy.test.cjs), run by `mise run release-check-github`, fails when the train loses the `workflow_run` trigger on `[Workflow] On Source Change` for `development`, its schedule or its dispatch, or when `pending` starts after a push run that failed or was cancelled.
+* In operation: after a merge to `development` whose push check passes, the Actions list shows an `On Release Train` run with event `workflow_run`, and a new `unfold-v` tag follows when the head did not move.
+
 ## Pros and Cons of the Options
 
 ### Keep releasing from each push, with `cancel-in-progress: true`
@@ -138,3 +157,4 @@ From 2026-10-28 the train failed at `merge-pin` whenever a pin was waiting: Forg
 * 2026-10-24: amended. The train merges the newest green Ploeg pin pull request first, after the owner's decision D14 that Ploeg's pins stop merging themselves.
 * 2026-10-25: amended. Releases are tags only, so `pending` and `current` are computed from tags, not release commits.
 * 2026-11-02: amended. The release jobs run `webgrip-release --no-align --layout trains` from `harbor.webgrip.dev/webgrip/semantic-release` 2.5.1 instead of the `semantic-release-monorepo` composite of `webgrip/workflows`, which [homelab ADR-0089](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/docs/techdocs/docs/adr/adr-0089-tooling-repositories-release-in-layers.md) retires. Point 3 of the outcome holds with that command in place of the composite.
+* 2026-11-17: amended. A green push check on `development` also starts the train, because GitHub dropped most scheduled runs.

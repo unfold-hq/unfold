@@ -169,8 +169,9 @@ test('the pull request gate waits for every job except the advisory ones, and pa
 });
 
 test('the release train versions Unfold and the site from a checked development head, with the repository\'s own toolchain', () => {
-  assert.deepEqual(Object.keys(train.on).sort(), ['schedule', 'workflow_dispatch']);
+  assert.deepEqual(Object.keys(train.on).sort(), ['schedule', 'workflow_dispatch', 'workflow_run']);
   assert.match(train.on.schedule[0].cron, /^\d+ \* \* \* \*$/);
+  assert.deepEqual(train.on.workflow_run, { workflows: [workflows['on_source_change.yml'].name], types: ['completed'], branches: ['development'] });
   assert.deepEqual(train.concurrency, { group: 'release-train', 'cancel-in-progress': false });
   assert.deepEqual(Object.keys(train.jobs).sort(), ['build-contexts', 'checks', 'checks-unfold', 'pending', 'ploeg-pin', 'release', 'site-release']);
   for (const ref_name of ['development', 'main', 'topic']) {
@@ -178,6 +179,10 @@ test('the release train versions Unfold and the site from a checked development 
       const context = { github: { ref_name }, vars: { UNFOLD_RELEASES_ENABLED: gate } };
       for (const name of ['pending', 'release', 'site-release']) assert.equal(evaluate(train.jobs[name].if, context), ref_name === 'development' && gate === 'true', `${name} ${ref_name} ${gate}`);
     }
+  }
+  for (const [event_name, conclusion, starts] of [['schedule', undefined, true], ['workflow_dispatch', undefined, true], ['workflow_run', 'success', true], ['workflow_run', 'failure', false], ['workflow_run', 'cancelled', false]]) {
+    const context = { github: { ref_name: 'development', event_name, event: { workflow_run: { conclusion } } }, vars: { UNFOLD_RELEASES_ENABLED: 'true' } };
+    assert.equal(evaluate(train.jobs.pending.if, context), starts, `${event_name} ${conclusion}`);
   }
   for (const name of ['checks', 'checks-unfold', 'build-contexts', 'ploeg-pin']) {
     assert.deepEqual(train.jobs[name].needs, ['pending']);
