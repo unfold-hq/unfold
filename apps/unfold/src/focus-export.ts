@@ -2,6 +2,7 @@ import { parquetWriteBuffer, type ColumnSource, type SchemaElement } from 'hypar
 import type { FactsRun, WorkItemFacts } from './cards/facts.ts';
 import { readWindowFacts, runSpend, type FactsReach, type FactsSource } from './delivery-economics.ts';
 import type { Ownership } from './tenancy.ts';
+import { costBasis, fromMicros, markedUp, markupPercent, type CostSource, type LinkedCharge } from './linked-usage.ts';
 
 /** The FinOps FOCUS release the export follows: the Cost and Usage dataset of FOCUS 1.4. */
 export const focusVersion = '1.4';
@@ -23,6 +24,7 @@ export const focusColumns = [
 export const focusCustomColumns = [
   'x_UnfoldSpendStatus', 'x_UnfoldObservedCost', 'x_UnfoldExchangeRate', 'x_UnfoldWorkItemId', 'x_UnfoldExternalReference', 'x_UnfoldRunId', 'x_UnfoldRunCount',
   'x_UnfoldInputTokens', 'x_UnfoldOutputTokens', 'x_UnfoldCacheReadInputTokens', 'x_UnfoldCacheCreationInputTokens',
+  'x_UnfoldCostSource', 'x_UnfoldCostBasis', 'x_UnfoldEstimatedCost', 'x_UnfoldMarkupPercent', 'x_UnfoldBillableCost', 'x_UnfoldLinkedSessionCount',
 ] as const;
 /** Every column of a row, FOCUS columns first. */
 export const focusExportColumns = [...focusColumns, ...focusCustomColumns] as const;
@@ -32,7 +34,7 @@ export type FocusColumn = (typeof focusExportColumns)[number];
 export const focusColumnTypes: Record<FocusColumn, 'String' | 'Decimal' | 'Date/Time' | 'JSON'> = Object.fromEntries(focusExportColumns.map(column => [column,
   column === 'Tags' ? 'JSON'
     : /^(?:BillingPeriod|ChargePeriod)(?:Start|End)$/.test(column) ? 'Date/Time'
-      : /(?:Cost|Quantity|ExchangeRate|RunCount|Tokens)$/.test(column) ? 'Decimal'
+      : /(?:Cost|Quantity|ExchangeRate|Count|Tokens|Percent)$/.test(column) ? 'Decimal'
         : 'String',
 ])) as Record<FocusColumn, 'String' | 'Decimal' | 'Date/Time' | 'JSON'>;
 /** A decimal kept as its exact text, so CSV, JSONL and Parquet write the same digits and never scientific notation. */
@@ -45,12 +47,16 @@ export type FocusCurrency = { code: 'USD' } | { code: 'EUR'; perUsd: number };
 /** What one export covers and how it writes it. `from` is inclusive and `to` exclusive, both UTC midnights. */
 export type FocusExportQuery = {
   from: number; to: number; format: 'csv' | 'jsonl' | 'parquet'; granularity: 'run' | 'work-item'; unsettled: 'exclude' | 'include';
-  currency: FocusCurrency; tenant?: string; client?: string; provider: string;
+  currency: FocusCurrency; tenant?: string; client?: string; provider: string; linkedSessions: 'exclude' | 'include';
 };
 /** What the export left out of its rows, and whether a page bound cut the facts. */
-export type FocusCounts = { settledRuns: number; unsettledRuns: number; unreportedRuns: number; unownedWorkItems: number; truncated: boolean };
+export type FocusCounts = { settledRuns: number; unsettledRuns: number; unreportedRuns: number; unownedWorkItems: number; truncated: boolean; linkedSessionRows: number };
+/** One Work Item's share of its Linked Sessions' recorded estimate on one UTC day, with the Work Item and its owner. */
+export type LinkedFocusCharge = LinkedCharge & { item: { id: string; title: string; team: string; target: { owner: string; repo: string } | null; externalRef: string }; owner: Ownership };
 /** The rows of one export and what it left out. */
 export type FocusExport = { rows: FocusRow[]; counts: FocusCounts };
+/** The markup in basis points on one cost source for an owner on one UTC day. */
+export type FocusMarkup = (owner: Ownership, source: CostSource, dayStart: number) => number;
 /** Who owns a Work Item, from its target repository; undefined when no single owner does. */
 export type FocusOwner = (facts: WorkItemFacts) => Ownership | undefined;
 
@@ -84,7 +90,7 @@ export class FocusQueryError extends Error {}
  */
 export function focusExportQuery(params: URLSearchParams, now = Date.now()): FocusExportQuery {
   const startKey = `from`, endKey = `to`;
-  const known = new Set(['month', startKey, endKey, 'format', 'granularity', 'unsettled', 'currency', 'usdToEur', 'tenant', 'client', 'provider', 'refresh']);
+  const known = new Set(['month', startKey, endKey, 'format', 'granularity', 'unsettled', 'currency', 'usdToEur', 'tenant', 'client', 'provider', 'linkedSessions', 'refresh']);
   for (const key of params.keys()) if (!known.has(key)) throw new FocusQueryError(`Unknown parameter ${key}.`);
   const month = params.get('month');
   let from: number, to: number;
@@ -108,6 +114,7 @@ export function focusExportQuery(params: URLSearchParams, now = Date.now()): Foc
   const format = pick('format', ['csv', 'jsonl', 'parquet'] as const);
   const granularity = pick('granularity', ['run', 'work-item'] as const);
   const unsettled = pick('unsettled', ['exclude', 'include'] as const);
+  const linkedSessions = pick('linkedSessions', ['exclude', 'include'] as const);
   const code = pick('currency', ['USD', 'EUR'] as const);
   const rate = params.get('usdToEur');
   let currency: FocusCurrency = { code: 'USD' };
@@ -120,7 +127,7 @@ export function focusExportQuery(params: URLSearchParams, now = Date.now()): Foc
   const tenant = slug('tenant'), client = slug('client');
   const provider = (params.get('provider') ?? 'unknown').trim();
   if (!provider || provider.length > 100 || /[\u0000-\u001f\u007f]/.test(provider)) throw new FocusQueryError('provider must be a name of at most 100 characters.');
-  return { from, to, format, granularity, unsettled, currency, provider, ...(tenant ? { tenant } : {}), ...(client ? { client } : {}) };
+  return { from, to, format, granularity, unsettled, currency, provider, linkedSessions, ...(tenant ? { tenant } : {}), ...(client ? { client } : {}) };
 }
 
 type Usage = { input: number | null; output: number | null; cacheRead: number | null; cacheCreation: number | null };
@@ -148,8 +155,8 @@ const sum = (values: (number | null)[]): number | null => values.some(value => v
  * what was observed so far in `x_UnfoldObservedCost`, because FOCUS allows only invoiced amounts in BilledCost. Runs that
  * finished without a cost and Work Items no single owner reaches are only counted.
  */
-export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { owner, now = Date.now(), truncated = false }: { owner: FocusOwner; now?: number; truncated?: boolean }): FocusExport {
-  const counts: FocusCounts = { settledRuns: 0, unsettledRuns: 0, unreportedRuns: 0, unownedWorkItems: 0, truncated };
+export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { owner, now = Date.now(), truncated = false, linked = [], markup = () => 0 }: { owner: FocusOwner; now?: number; truncated?: boolean; linked?: LinkedFocusCharge[]; markup?: FocusMarkup }): FocusExport {
+  const counts: FocusCounts = { settledRuns: 0, unsettledRuns: 0, unreportedRuns: 0, unownedWorkItems: 0, truncated, linkedSessionRows: 0 };
   const charges: Charge[] = [];
   const seen = new Set<string>();
   for (const item of facts) {
@@ -181,12 +188,17 @@ export function focusExport(facts: WorkItemFacts[], query: FocusExportQuery, { o
     const key = query.granularity === 'run' ? `run:${charge.run.id}` : `${charge.facts.workItem.id}:${charge.dayStart}:${charge.status}`;
     groups.set(key, [...(groups.get(key) ?? []), charge]);
   }
-  const rows = [...groups.values()].map(group => focusRow(group, query));
+  const rows = [...groups.values()].map(group => focusRow(group, query, markup));
+  if (query.linkedSessions === 'include') {
+    const inside = linked.filter(charge => charge.dayStart >= query.from && charge.dayStart < query.to && (!query.tenant || charge.owner.tenant === query.tenant) && (!query.client || charge.owner.client === query.client));
+    for (const charge of inside) rows.push(linkedFocusRow(charge, query));
+    counts.linkedSessionRows = inside.length;
+  }
   rows.sort((a, b) => String(a.ChargePeriodStart).localeCompare(String(b.ChargePeriodStart)) || String(a.ResourceId).localeCompare(String(b.ResourceId)));
   return { rows, counts };
 }
 
-function focusRow(group: Charge[], query: FocusExportQuery): FocusRow {
+function focusRow(group: Charge[], query: FocusExportQuery, markup: FocusMarkup): FocusRow {
   const first = group[0]!;
   const { facts, owner, status, dayStart } = first;
   const item = facts.workItem;
@@ -196,6 +208,7 @@ function focusRow(group: Charge[], query: FocusExportQuery): FocusRow {
   const inBilling = (value: number) => focusDecimal(rate === null ? value : value * rate);
   const settled = status === 'Settled';
   const billed = settled ? inBilling(usd!) : focusDecimal(0);
+  const basisPoints = settled ? markup(owner, 'ploeg-run', dayStart) : null;
   const usage = { input: sum(group.map(charge => charge.usage.input)), output: sum(group.map(charge => charge.usage.output)), cacheRead: sum(group.map(charge => charge.usage.cacheRead)), cacheCreation: sum(group.map(charge => charge.usage.cacheCreation)) };
   const count = (value: number | null) => value === null ? null : focusDecimal(value);
   const reference = item.externalRef || `Work Item ${item.id}`;
@@ -218,6 +231,40 @@ function focusRow(group: Charge[], query: FocusExportQuery): FocusRow {
     x_UnfoldSpendStatus: status, x_UnfoldObservedCost: settled || usd === null ? null : inBilling(usd), x_UnfoldExchangeRate: rate === null ? null : focusDecimal(rate),
     x_UnfoldWorkItemId: item.id, x_UnfoldExternalReference: item.externalRef || null, x_UnfoldRunId: perRun ? first.run.id : null, x_UnfoldRunCount: focusDecimal(group.length),
     x_UnfoldInputTokens: count(usage.input), x_UnfoldOutputTokens: count(usage.output), x_UnfoldCacheReadInputTokens: count(usage.cacheRead), x_UnfoldCacheCreationInputTokens: count(usage.cacheCreation),
+    x_UnfoldCostSource: 'ploeg-run', x_UnfoldCostBasis: costBasis['ploeg-run'], x_UnfoldEstimatedCost: null,
+    x_UnfoldMarkupPercent: basisPoints === null ? null : focusDecimal(Number(markupPercent(basisPoints))), x_UnfoldBillableCost: basisPoints === null ? null : inBilling(markedUp(usd!, basisPoints)), x_UnfoldLinkedSessionCount: null,
+  };
+}
+
+/**
+ * The FOCUS row of one Work Item's Linked Session estimate on one UTC day. Nobody invoiced it, so BilledCost and the
+ * other paid costs are 0 and ListCost holds the estimate at API list prices. `x_UnfoldEstimatedCost` repeats the
+ * estimate as recorded and `x_UnfoldBillableCost` adds the owner's markup of that day; the markup never changes the estimate.
+ * The row names no session or person, only how many sessions it adds.
+ */
+export function linkedFocusRow(charge: LinkedFocusCharge, query: FocusExportQuery): FocusRow {
+  const rate = query.currency.code === 'EUR' ? query.currency.perUsd : null;
+  const inBilling = (micros: number) => focusDecimal(rate === null ? fromMicros(micros) : fromMicros(micros) * rate);
+  const zero = focusDecimal(0);
+  const { item, owner } = charge;
+  const reference = item.externalRef || `Work Item ${item.id}`;
+  const subAccount = owner.client ?? owner.tenant;
+  const tags: Record<string, string> = { 'unfold/workItem': item.id, 'unfold/team': item.team, ...(item.target ? { 'unfold/repository': `${item.target.owner}/${item.target.repo}` } : {}), 'unfold/tenant': owner.tenant, ...(owner.client ? { 'unfold/client': owner.client } : {}), 'unfold/costSource': 'linked-session' };
+  return {
+    BilledCost: zero, BillingAccountId: owner.tenant, BillingAccountName: owner.tenant, BillingCurrency: query.currency.code,
+    BillingPeriodEnd: focusTime(nextMonth(charge.dayStart)), BillingPeriodStart: focusTime(monthStart(charge.dayStart)),
+    ChargeCategory: 'Usage', ChargeClass: null, ChargeDescription: `Estimated Claude Code usage of ${charge.sessions === 1 ? '1 linked session' : `${charge.sessions} linked sessions`} on ${reference}`, ChargeFrequency: 'Usage-Based',
+    ChargePeriodEnd: focusTime(charge.dayStart + day), ChargePeriodStart: focusTime(charge.dayStart),
+    ConsumedQuantity: null, ConsumedUnit: null, ContractedCost: zero, EffectiveCost: zero,
+    HostProviderName: 'Anthropic', InvoiceIssuerName: 'Anthropic', ListCost: inBilling(charge.costMicros),
+    PricingCurrency: 'USD', PricingCurrencyEffectiveCost: zero, PricingQuantity: null, PricingUnit: null,
+    ResourceId: `unfold:work-item:${item.id}:linked-sessions`, ResourceName: item.title || null, ResourceType: 'Linked sessions',
+    ServiceCategory: 'AI and Machine Learning', ServiceName: 'Claude Code', ServiceProviderName: 'Anthropic', ServiceSubcategory: 'Generative AI',
+    SubAccountId: subAccount, SubAccountName: subAccount, SubAccountType: owner.client ? 'Client' : 'Tenant', Tags: JSON.stringify(tags),
+    x_UnfoldSpendStatus: 'Estimate', x_UnfoldObservedCost: null, x_UnfoldExchangeRate: rate === null ? null : focusDecimal(rate),
+    x_UnfoldWorkItemId: item.id, x_UnfoldExternalReference: item.externalRef || null, x_UnfoldRunId: null, x_UnfoldRunCount: null,
+    x_UnfoldInputTokens: focusDecimal(charge.tokens.input), x_UnfoldOutputTokens: focusDecimal(charge.tokens.output), x_UnfoldCacheReadInputTokens: focusDecimal(charge.tokens.cacheRead), x_UnfoldCacheCreationInputTokens: focusDecimal(charge.tokens.cacheCreation),
+    x_UnfoldCostSource: 'linked-session', x_UnfoldCostBasis: costBasis['linked-session'], x_UnfoldEstimatedCost: inBilling(charge.costMicros), x_UnfoldMarkupPercent: focusDecimal(Number(markupPercent(charge.basisPoints))), x_UnfoldBillableCost: inBilling(charge.billableMicros), x_UnfoldLinkedSessionCount: focusDecimal(charge.sessions),
   };
 }
 
@@ -302,12 +349,16 @@ export function focusFile(result: FocusExport | null, query: FocusExportQuery): 
   else Object.assign(headers, {
     'X-Unfold-Truncated': String(result.counts.truncated), 'X-Unfold-Unsettled-Runs': String(result.counts.unsettledRuns),
     'X-Unfold-Unreported-Runs': String(result.counts.unreportedRuns), 'X-Unfold-Unowned-Work-Items': String(result.counts.unownedWorkItems),
+    ...(query.linkedSessions === 'include' ? { 'X-Unfold-Linked-Session-Rows': String(result.counts.linkedSessionRows) } : {}),
   });
   return { body, contentType: kind.contentType, filename: `unfold-focus-cost-${result ? '' : 'demo-'}${period}.${kind.extension}`, headers };
 }
 
 /** Reads the facts of every Work Item with activity since the period started within `teams` that `reaches` accepts, and exports them. */
-export async function readFocusExport(source: FactsSource, query: FocusExportQuery, { teams, reaches, owner, now = Date.now(), fresh = false, maxPages = focusPageBound }: { teams: readonly string[]; reaches?: FactsReach; owner: FocusOwner; now?: number; fresh?: boolean; maxPages?: number }): Promise<FocusExport> {
+export async function readFocusExport(source: FactsSource, query: FocusExportQuery, { teams, reaches, owner, now = Date.now(), fresh = false, maxPages = focusPageBound, linked, markup }: { teams: readonly string[]; reaches?: FactsReach; owner: FocusOwner; now?: number; fresh?: boolean; maxPages?: number; linked?: () => Promise<{ charges: LinkedFocusCharge[]; unowned: number; truncated: boolean }>; markup?: FocusMarkup }): Promise<FocusExport> {
   const { facts, truncated } = await readWindowFacts(source, { since: query.from, teams, reaches, fresh, maxPages });
-  return focusExport(facts, query, { owner, now, truncated });
+  const sessions = query.linkedSessions === 'include' && linked ? await linked() : { charges: [], unowned: 0, truncated: false };
+  const result = focusExport(facts, query, { owner, now, truncated: truncated || sessions.truncated, linked: sessions.charges, markup });
+  result.counts.unownedWorkItems += sessions.unowned;
+  return result;
 }

@@ -49,8 +49,8 @@ const event = (fields: Record<string, unknown>) => parseLinkedEvent({ harness: '
 
 test('a report keeps only well-formed tracker references and Work Item ids among its mentions', () => {
   const parsed = event({ event: 'prompt', mentions: { refs: ['VIK-2190', 'vik-2190', 'UTF-8', 'ABC-1', 'VIK-0', 42], workItems: ['184', '0', 'x', '184', 7] } });
-  assert.deepEqual(parsed.mentions, { refs: [{ provider: 'vikunja', externalId: '2190', ref: 'VIK-2190' }], workItems: ['184'] });
-  assert.deepEqual(event({}).mentions, { refs: [], workItems: [] });
+  assert.deepEqual(parsed.mentions, { refs: [{ provider: 'vikunja', externalId: '2190', ref: 'VIK-2190' }], workItems: ['184'], tasks: [] });
+  assert.deepEqual(event({}).mentions, { refs: [], workItems: [], tasks: [] });
   assert.deepEqual(trackerReferences('VIK-1'), []);
 });
 
@@ -114,7 +114,7 @@ test('a session started with a credential that expires within a week is told so 
 
 test('the plugin finds task references for the prefixes Unfold named, Unfold Work Item links and named Work Items', () => {
   assert.deepEqual(mentionsIn('Fix VIK-2051, see https://u.example/#work/184 and Work Item #77; not UTF-8, vik-0 or VIK-12x', ['VIK'], 'https://u.example'), { refs: ['VIK-2051'], workItems: ['184', '77'] });
-  assert.equal(mentionsIn('VIK-2051 https://other.example/#work/184', [], 'https://u.example'), null);
+  assert.deepEqual(mentionsIn('VIK-2051 https://other.example/#work/184', [], 'https://u.example'), { refs: [], workItems: [], tasks: ['VIK-2051'] }, 'without the prefixes, a key still leaves as a task candidate');
   assert.equal(mentionsIn('nothing here', ['VIK'], 'https://u.example'), null);
 });
 
@@ -154,6 +154,9 @@ test('the hook sends the ids a prompt and a commit message name, never their tex
   const prompt = received.find(entry => entry.body.event === 'prompt');
   assert.deepEqual(prompt?.body.mentions, { refs: ['VIK-2051'], workItems: ['184'] });
   assert.equal(JSON.stringify(received).includes('secret plan'), false, 'the prompt text never leaves the machine');
+  await run({ hook_event_name: 'UserPromptSubmit', prompt: 'Pick up CU-86c1abcde and acme/shop#12 after commit 86c1abcde — secret plan inside' });
+  assert.deepEqual(received.filter(entry => entry.body.event === 'prompt').at(-1)?.body.mentions, { refs: [], workItems: [], tasks: ['#86c1abcde', 'acme/shop#12'] });
+  assert.equal(JSON.stringify(received).includes('secret plan'), false, 'a prompt with task references leaves only the references');
   gitIn('commit', '-q', '--allow-empty', '-m', 'fix: login\n\nVIK-2190');
   await run({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'git commit' }, tool_response: {} });
   const commit = received.find(entry => entry.body.event === 'commit');

@@ -62,6 +62,9 @@ import { taskKeyRing } from './mcp-tasks.ts';
 import { McpEvents } from './mcp-events.ts';
 import { entitledRole } from './oidc.ts';
 import { LinkedSessions, parseLinkedEvent } from './linked-sessions.ts';
+import { TaskReferenceResolver } from './linked-references.ts';
+import { LinkedUsage, linkedWorkCharges, ploegRunUsage } from './linked-usage.ts';
+import { ploegTrackerReference } from './task-providers/index.ts';
 import { LinkedHandoff, handoffRoute as serveLinkedHandoff, isHandoffRoute } from './linked-handoff.ts';
 import { MyUsageService, UsageError } from './my-usage.ts';
 import { TakeOver, isTakeOverRoute, takeOverRoute } from './take-over.ts';
@@ -272,9 +275,16 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   void delivery.reconcileAll().catch(() => undefined);
   const handoff = new TaskHandoff(config, ploeg);
   const tenants = new TenantScope(config);
-  const linked = new LinkedSessions(store.db, config, ploeg);
+  const references = new TaskReferenceResolver(async user => (await Promise.all(tenants.sources(user).map(async source => {
+    const provider = sourceLinkProvider(source);
+    if (!provider) return source;
+    const token = links ? await links.token(user.id, provider).catch(() => undefined) : undefined;
+    return token ? withLinkedToken(source, token) : undefined;
+  }))).filter(source => source !== undefined));
+  const linkedUsage = new LinkedUsage(store.db, config, { jobs });
+  const linked = new LinkedSessions(store.db, config, ploeg, { resolveTasks: references.resolve, usage: linkedUsage });
   const linkedHandoff = new LinkedHandoff(linked, ploeg, store, config);
-  const usage = new MyUsageService({ asksBetween: (...args) => store.asksBetween(...args), sessionSpendSince: (...args) => store.sessionSpendSince(...args), linkedOwned: (ownerId, limit) => linked.store.owned(ownerId, limit) }, config);
+  const usage = new MyUsageService({ asksBetween: (...args) => store.asksBetween(...args), sessionSpendSince: (...args) => store.sessionSpendSince(...args), linkedOwned: (ownerId, limit) => linked.store.owned(ownerId, limit), recordedUsage: id => linkedUsage.recorded(id) }, config);
   const takeOver = new TakeOver(ploeg);
   const inbox = new LinkedInbox(store.db, linked.store, ploeg);
   const conversation = new LinkedConversation(linked.store);
@@ -365,7 +375,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const billing = new BillingService(new BillingStore(store.db), {
     ...(config.billing && billingDefinition ? { settings: config.billing, definition: billingDefinition, exporter: billingDefinition.create(config.billing.options, { fetch, env: process.env, dataDir: config.dataDir, timeoutMs: 20_000 }) } : {}),
     ...(config.ploeg && !ploeg.isDemo ? { facts: ploeg } : {}),
-    tenants, calendar: config.acceptanceCalendar, demo: config.mode === 'demo',
+    tenants, calendar: config.acceptanceCalendar, demo: config.mode === 'demo', markups: linkedUsage.markups,
     enabled: tenant => flags.getBooleanValue('billing.export', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }),
   });
   jobs.start();
@@ -961,7 +971,14 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           if (path === '/api/linked-sessions') {
             if (method !== 'GET') fault(405, 'method', 'List Linked Sessions with GET.');
             const workItem = url.searchParams.get('workItemId');
-            return json(res, 200, sanitize({ sessions: workItem ? await linked.forWorkItem(user, workItem, base, url.searchParams.get('telemetry') === '1') : linked.mine(user, base, url.searchParams.get('all') === '1') }));
+            if (!workItem) return json(res, 200, sanitize({ sessions: linked.mine(user, base, url.searchParams.get('all') === '1') }));
+            const withTelemetry = url.searchParams.get('telemetry') === '1';
+            const sessions = await linked.forWorkItem(user, workItem, base, withTelemetry);
+            if (!withTelemetry) return json(res, 200, sanitize({ sessions }));
+            const detail = await ploeg.detail(user, workItem);
+            const owner = tenants.workItemOwner(detail.item.target);
+            const ploegRuns = ploegRunUsage(detail.shifts ?? [], dayStart => owner ? linkedUsage.markups.at(owner, 'ploeg-run', dayStart) : 0, Date.now());
+            return json(res, 200, sanitize({ sessions, usage: { linkedSessions: await linked.workItemUsage(user, workItem, owner), ploegRuns } }));
           }
           if (tracedRevision) {
             if (method !== 'GET') fault(405, 'method', 'Read Agent Trace records with GET.');
@@ -1145,7 +1162,13 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
             if (path === '/api/ploeg/cost-export') {
               if (user.role === 'viewer') fault(403, 'forbidden', 'Only operators and administrators export cost.');
               let query; try { query = focusExportQuery(url.searchParams); } catch (error) { if (error instanceof FocusQueryError) fault(400, 'cost_export_filter', error.message); throw error; }
-              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams: (await ploeg.teams(user, fresh)).map(team => team.id), reaches: facts => tenants.reachesWorkItem(user, facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh }));
+              const teams = (await ploeg.teams(user, fresh)).map(team => team.id);
+              const linkedCosts = () => linkedWorkCharges(linkedUsage, id => linked.store.get(id), query.from, query.to, async id => {
+                const { item } = await ploeg.detail(user, id, fresh);
+                if (!teams.includes(item.team) || !tenants.reachesWorkItem(user, item.target)) return undefined;
+                return { item: { id: item.id, title: item.title, team: item.team, target: item.target ? { owner: item.target.owner, repo: item.target.repo } : null, externalRef: ploegTrackerReference(item.provider, item.externalId) ?? '' }, owner: tenants.workItemOwner(item.target) };
+              });
+              const result = ploeg.isDemo ? null : sanitize(await readFocusExport(ploeg, query, { teams, reaches: facts => tenants.reachesWorkItem(user, facts.workItem.target), owner: facts => tenants.workItemOwner(facts.workItem.target), fresh, linked: linkedCosts, markup: (owner, source, dayStart) => linkedUsage.markups.at(owner, source, dayStart) }));
               const file = focusFile(result, query);
               res.writeHead(200, { 'Content-Type': file.contentType, 'Content-Disposition': `attachment; filename="${file.filename}"`, 'Cache-Control': 'no-store', ...file.headers });
               res.end(file.body); return;

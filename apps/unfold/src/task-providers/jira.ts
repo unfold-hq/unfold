@@ -142,6 +142,10 @@ export const jira: TaskProviderAdapter = {
   },
   webRoot: siteRoot,
   taskUrl: (source, id) => browse(source, id),
+  async resolveReference(source, candidate, webHost) {
+    const key = candidate.kind === 'key' ? candidate.key : candidate.kind === 'url' && webHost && candidate.host === webHost ? /^\/browse\/([A-Z][A-Z0-9_]{1,9}-[1-9][0-9]{0,9})$/.exec(candidate.path)?.[1] : undefined;
+    return key && issueKey.test(key) && key.slice(0, key.lastIndexOf('-')) === source.project ? { externalId: key } : undefined;
+  },
   headers(source, headers) {
     headers['X-Atlassian-Token'] = 'no-check';
     if (!source.token) return;

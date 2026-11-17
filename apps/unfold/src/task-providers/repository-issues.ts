@@ -1,5 +1,5 @@
 import type { IssueRelease, TaskSourceConfig } from '../tasks.ts';
-import type { DetailReaders, FileRequest, ParsedTask, TaskDetails } from './registry.ts';
+import type { DetailReaders, FileRequest, ParsedTask, ResolvedTask, TaskCandidate, TaskDetails } from './registry.ts';
 import { field, nativeTaskId, numericId, pathProject, record, TaskError, updated, when } from './shared.ts';
 
 /** The issues collection of an `owner/repository` source, as Forgejo and GitHub name it. */
@@ -11,6 +11,13 @@ export function repositoryIssuePath(source: TaskSourceConfig): string {
 export function ownerRepository(value: string): string {
   pathProject(value, 2);
   return value.toLowerCase();
+}
+
+/** The issue an `owner/repository#12` reference or an issue address names in a repository source: the same repository, and on the source's own host when the reference carries one. */
+export async function repositoryIssueReference(source: TaskSourceConfig, candidate: TaskCandidate, webHost: string): Promise<ResolvedTask | undefined> {
+  if (candidate.kind !== 'issue' || candidate.path !== source.project.toLowerCase()) return undefined;
+  if (candidate.host !== undefined && candidate.host !== webHost) return undefined;
+  return { externalId: candidate.number, repository: candidate.path };
 }
 
 /** Whether a listed issue is a pull request, which Forgejo and GitHub list among issues. */

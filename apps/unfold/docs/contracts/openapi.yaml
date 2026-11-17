@@ -3734,6 +3734,7 @@ paths:
         - { name: format, in: query, required: false, schema: { type: string, enum: [csv, jsonl, parquet], default: csv }, description: '`parquet` writes the CSV columns with Decimal columns as DECIMAL(38,10), Date/Time columns as UTC millisecond timestamps and the rest as UTF-8 text.' }
         - { name: granularity, in: query, required: false, schema: { type: string, enum: [run, work-item], default: run } }
         - { name: unsettled, in: query, required: false, schema: { type: string, enum: [exclude, include], default: exclude } }
+        - { name: linkedSessions, in: query, required: false, schema: { type: string, enum: [exclude, include], default: exclude }, description: 'With `include`, adds one row per Work Item and UTC day for the Linked Session estimates Unfold recorded: BilledCost 0, ListCost the estimate at API list prices, `x_UnfoldCostSource` `linked-session`, `x_UnfoldCostBasis` `telemetry-estimate`, `x_UnfoldEstimatedCost` and `x_UnfoldBillableCost` (the estimate plus the owner''s `linked-session` markup of that day in `x_UnfoldMarkupPercent`). Run rows always carry `x_UnfoldCostSource` `ploeg-run` and `x_UnfoldCostBasis` `metered`, and a settled Run its billable amount with the `ploeg-run` markup. The header `X-Unfold-Linked-Session-Rows` counts them.' }
         - { name: currency, in: query, required: false, schema: { type: string, enum: [USD, EUR], default: USD } }
         - { name: usdToEur, in: query, required: false, schema: { type: string, pattern: '^\d{1,3}(\.\d{1,10})?$' }, description: 'The euros one US$ buys; required with `currency=EUR`. Unfold never looks a rate up.' }
         - { name: tenant, in: query, required: false, schema: { type: string } }
@@ -6460,6 +6461,62 @@ paths:
                   counts: { type: object }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/billing/usage-markups:
+    get:
+      tags: [Billing]
+      operationId: listUsageMarkups
+      summary: 'List the markups on recorded costs'
+      description: 'Every markup within the caller''s Tenants, oldest first per Owner and source. A markup holds from `effectiveFrom` until the next one of the same Owner and source. For one source on one day the first in effect wins: the Client''s for that source, the Client''s for `all`, the Tenant''s for that source, the Tenant''s for `all`; none means 0.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [] }
+        - { editorBearer: [] }
+      responses:
+        '200':
+          description: '`{markups: [{tenant, client, effectiveFrom, basisPoints, percent, setAt, setBy}]}`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  markups: { type: array, items: { $ref: '#/components/schemas/UsageMarkup' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Billing]
+      operationId: setUsageMarkup
+      summary: 'Set the markup on a Tenant''s or Client''s Ploeg Run costs, Linked Session estimates, or both'
+      description: 'The markup applies only to billable amounts of its `source` (`ploeg-run`, `linked-session`, or `all` by default), from `effectiveFrom` (`YYYY-MM-DD`, default today) until the next markup; the recorded estimate never changes. The first markup of an Owner and source may start on any date; a later one starts today or later, and only one not yet in effect may be replaced. 400 `billing_markup` or `billing_owner`, 404 `billing_owner` outside the caller''s Tenants, 409 `billing_markup_history` for a change that reaches back, `billing_demo` in the demo.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [percent]
+              properties:
+                tenant: { type: string, default: default }
+                client: { type: [string, 'null'] }
+                source: { type: string, enum: [all, ploeg-run, linked-session], default: all, description: 'The cost the markup applies to; `all` applies to every source without its own markup.' }
+                percent: { type: [string, number], description: 'A percentage from 0 to 1000 with at most two decimals, such as `15` or `12.5`.' }
+                effectiveFrom: { type: string, format: date }
+      responses:
+        '200':
+          description: 'The stored markup.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UsageMarkup' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
   /api/billing/mappings:
     put:
       tags: [Billing]
@@ -7956,6 +8013,17 @@ components:
         key: { type: string }
         errorCode: { type: string }
         errorDetails: { type: string }
+    UsageMarkup:
+      type: object
+      properties:
+        tenant: { type: string }
+        client: { type: [string, 'null'] }
+        source: { type: string, enum: [all, ploeg-run, linked-session] }
+        effectiveFrom: { type: string, format: date }
+        basisPoints: { type: integer }
+        percent: { type: string }
+        setAt: { type: string, format: date-time }
+        setBy: { type: string }
     BillingLine:
       type: object
       properties:

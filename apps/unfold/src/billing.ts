@@ -9,6 +9,7 @@ import { actsFor, reaches, type TenantScope } from './tenant-scope.ts';
 import type { User } from './types.ts';
 import { JobQueue } from './jobs/queue.ts';
 import { JobWorker, type JobOutcome } from './jobs/worker.ts';
+import { MarkupError, markupBasisPoints, markupPercent, markupSources, type MarkupSource, type UsageMarkup, type UsageMarkupStore } from './linked-usage.ts';
 
 /** The job kind of sending one billing line. At most once: a lost lease makes it dead, never sends it again. */
 export const billingLineJob = 'billing.line';
@@ -108,6 +109,8 @@ export type BillingOptions = {
   settings?: BillingSettings; definition?: BillingExporterDefinition; exporter?: BillingExporter;
   facts?: FactsSource; tenants: TenantScope; enabled: (tenant: string) => Promise<boolean>;
   calendar?: AcceptanceCalendar; demo: boolean; now?: () => number; schedule?: boolean;
+  /** The markups on recorded costs, which Billing settings change. */
+  markups?: UsageMarkupStore;
   log?: (level: 'info' | 'warn', event: string, fields: Record<string, unknown>) => void;
 };
 /** What one sync did: lines added, Work Items without a mapping, and lines sent or failed by the sweep that followed. */
@@ -350,6 +353,43 @@ export class BillingService {
     return mapping;
   }
 
+  /** Every markup on recorded costs that `user` may see, oldest first per Owner and source, each with its percentage. */
+  markups(user: User): (UsageMarkup & { percent: string })[] {
+    this.requireAdmin(user);
+    return (this.options.markups?.all() ?? []).filter(entry => this.visible(user, { tenant: entry.tenant, ...(entry.client ? { client: entry.client } : {}) })).map(entry => ({ ...entry, percent: markupPercent(entry.basisPoints) }));
+  }
+
+  /**
+   * Sets the markup of one Owner from `data`: `{ tenant, client?, source?, percent, effectiveFrom? }`. `source` is
+   * `ploeg-run`, `linked-session` or `all` (the default, for every source without its own). It applies only to billable
+   * amounts, from `effectiveFrom` (today when absent) until the next markup of that source; the recorded amounts never
+   * change. A change starts today or later, so a day already billed keeps its markup.
+   */
+  setMarkup(user: User, data: Record<string, unknown>): UsageMarkup & { percent: string } {
+    this.requireAdmin(user);
+    if (this.options.demo) fail(409, 'billing_demo', 'The demo has no billing: it records no Linked Session cost.');
+    if (!this.options.markups) fail(409, 'billing_unconfigured', 'This workbench keeps no markups.');
+    const source = data.source === undefined || data.source === '' ? 'all' : data.source;
+    if (!(markupSources as readonly unknown[]).includes(source)) fail(400, 'billing_markup', `Choose the source the markup applies to: ${markupSources.join(', ')}.`);
+    const tenant = data.tenant ?? 'default';
+    const client = data.client === undefined || data.client === null || data.client === '' ? null : data.client;
+    if (!validTenancyId(tenant) || (client !== null && !validTenancyId(client))) fail(400, 'billing_owner', 'Name the Tenant and Client by their ids.');
+    const owner: Ownership = { tenant: tenant as string, ...(client ? { client: client as string } : {}) };
+    if (!this.visible(user, owner, true)) fail(404, 'billing_owner', 'No such Tenant or Client.');
+    let basisPoints: number;
+    try { basisPoints = markupBasisPoints(data.percent); } catch (error) { return fail(400, 'billing_markup', (error as Error).message); }
+    const today = this.iso().slice(0, 10);
+    const effectiveFrom = data.effectiveFrom === undefined || data.effectiveFrom === '' ? today : data.effectiveFrom;
+    if (typeof effectiveFrom !== 'string' || !dateText.test(effectiveFrom) || Number.isNaN(Date.parse(`${effectiveFrom}T00:00:00Z`))) fail(400, 'billing_markup', 'Give the first day of the markup as YYYY-MM-DD.');
+    try {
+      const saved = this.options.markups!.set(owner, source as MarkupSource, basisPoints, effectiveFrom as string, today, user.id, this.iso());
+      return { ...saved, percent: markupPercent(saved.basisPoints) };
+    } catch (error) {
+      if (error instanceof MarkupError) return fail(409, 'billing_markup_history', error.message);
+      throw error;
+    }
+  }
+
   /** Removes the mapping of one Owner. Lines already saved keep their state; pending ones fail until the Owner is mapped again. */
   deleteMapping(user: User, tenant: string, client: string | null): void {
     this.requireAdmin(user);
@@ -453,6 +493,11 @@ export async function billingRoute(service: BillingService, user: User, method: 
     if (method === 'PUT') return { status: 200, json: service.setMapping(user, await body()) };
     if (method === 'DELETE') { service.deleteMapping(user, query.get('tenant') ?? 'default', query.get('client') || null); return { status: 200, json: { ok: true } }; }
     fail(405, 'method', 'Set a mapping with PUT and remove it with DELETE.');
+  }
+  if (path === '/api/billing/usage-markups') {
+    if (method === 'GET') return { status: 200, json: { markups: service.markups(user) } };
+    if (method === 'PUT') return { status: 200, json: service.setMarkup(user, await body()) };
+    fail(405, 'method', 'Read markups with GET and set one with PUT.');
   }
   if (path === '/api/billing/sync') {
     if (method !== 'POST') fail(405, 'method', 'Sync with POST.');

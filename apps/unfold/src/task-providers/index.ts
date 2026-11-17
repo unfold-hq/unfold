@@ -34,4 +34,4 @@ export function displayDescription(provider: string, text: string): string { ret
 /** Whether a provider sends task descriptions as HTML. */
 export function sendsHtml(provider: string): boolean { return findTaskProvider(provider)?.descriptionFormat === 'html'; }
 
-export { andList, appCredentialFields, findTaskProvider, handoffLabels, issueLabels, orList, providerByPrefix, registerTaskProvider, taskProvider, taskProviders, type AppAuthentication, type IssueFiling, type ScopeDescription, type ScopeEntry, type ServiceAccountGuide, type SourceApp, type TaskHandoff, type TaskProviderAdapter, type TaskSetup } from './registry.ts';
+export { andList, appCredentialFields, findTaskProvider, handoffLabels, issueLabels, orList, providerByPrefix, registerTaskProvider, taskProvider, taskProviders, type AppAuthentication, type IssueFiling, type ResolvedTask, type ScopeDescription, type ScopeEntry, type TaskCandidate, type ServiceAccountGuide, type SourceApp, type TaskHandoff, type TaskProviderAdapter, type TaskSetup } from './registry.ts';
