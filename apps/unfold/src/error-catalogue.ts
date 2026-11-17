@@ -414,6 +414,8 @@ const rows: Record<ErrorArea, readonly Row[]> = {
     ['billing_owner', [400, 404], 'The Tenant or Client is unknown or not named by id.', 'Name the Tenant and Client by their ids.'],
     ['billing_mapping', [400], 'The price mapping is not valid.', fixInput],
     ['billing_price', [400], 'The price is not valid.', fixInput],
+    ['billing_markup', [400], 'The markup is not a percentage Unfold accepts, or its first day is not a date.', fixInput],
+    ['billing_markup_history', [409], 'The markup would change what an earlier day already billed.', 'Set a new markup from today or a later day.'],
     ['billing_priced', [409], 'This line already has its price.', 'Nothing more to do here.'],
     ['billing_line_not_found', [404], 'There is no such billing line.', 'Choose a line from the billing page.'],
     ['billing_not_failed', [409], 'Only a failed line can be sent again.', reload],
