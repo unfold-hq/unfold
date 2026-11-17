@@ -70,12 +70,19 @@ export function linkedSessionsMarkup(detail, linked, { now = Date.now(), canChan
   return card({ id: 'work-linked-sessions', title: 'Agent sessions', subtitle: 'Sessions people run on their own machines that report to Unfold and are linked here.', icon: 'bot', body: `${clash}<ul class="linked-session-list">${rows}</ul>`, region: true });
 }
 
-function telemetryTiles(telemetry) {
-  if (!telemetry) return '';
-  if (!telemetry.available) return callout({ tone: 'neutral', icon: 'info', title: 'No telemetry for this session', body: `<p>${escape(telemetry.reason || 'Claude Code sent no telemetry for this session to the stores this workbench reads.')}</p>` });
+function recordedTile(recorded) {
+  return stat({ label: 'Recorded estimate', value: money(recorded.costUsd), detail: `What Unfold kept of Claude Code’s API-price estimate, read ${recorded.observedAt.slice(0, 10)}. It stays when the metrics store drops the session.`, icon: 'coins' });
+}
+
+function telemetryTiles(telemetry, recorded) {
+  if (!telemetry) return recorded ? `<div class="stat-row linked-session-stats">${recordedTile(recorded)}</div>` : '';
+  const liveCost = typeof telemetry.costUsd === 'number' ? telemetry.costUsd : null;
+  const keep = recorded && (liveCost === null || recorded.costUsd > liveCost) ? recordedTile(recorded) : '';
+  if (!telemetry.available) return `${keep ? `<div class="stat-row linked-session-stats">${keep}</div>` : ''}${callout({ tone: 'neutral', icon: 'info', title: 'No telemetry for this session', body: `<p>${escape(telemetry.reason || 'Claude Code sent no telemetry for this session to the stores this workbench reads.')}</p>` })}`;
   const tokens = telemetry.tokens;
   const tiles = [
     telemetry.costUsd !== null ? stat({ label: 'API-price estimate', value: money(telemetry.costUsd), detail: 'What Claude Code estimates at API prices. A Claude plan is not billed this.', icon: 'coins' }) : stat({ label: 'API-price estimate', value: 'Not known yet', detail: 'Claude Code has reported no cost for this session to the metrics store.', icon: 'coins', quiet: true }),
+    keep,
     tokens ? stat({ label: 'Tokens', value: compactCount(tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreation), detail: `${compactCount(tokens.output)} out · ${compactCount(tokens.cacheRead)} from cache`, icon: 'layers' }) : '',
     telemetry.activeSeconds !== null ? stat({ label: 'Active time', value: duration(telemetry.activeSeconds), icon: 'clock' }) : '',
     telemetry.events ? stat({ label: 'Prompts', value: compactCount(telemetry.events.prompts), detail: `${compactCount(telemetry.events.toolResults)} tool calls${telemetry.events.apiErrors ? ` · ${plural(telemetry.events.apiErrors, 'API error')}` : ''}`, icon: 'send' }) : '',
@@ -126,7 +133,9 @@ function suggestionList(session, suggestions) {
 function sessionHeader(session, { now, workItems }) {
   const state = linkedStates[session.state] ?? linkedStates.idle;
   const where = session.repository ? `${session.repository}${session.branch ? ` @ ${session.branch}` : ''}` : session.branch;
-  const cost = session.telemetry?.available && session.telemetry.costUsd !== null && session.telemetry.costUsd !== undefined ? `≈ ${money(session.telemetry.costUsd)} API-price estimate` : '';
+  const live = session.telemetry?.available && typeof session.telemetry.costUsd === 'number' ? session.telemetry.costUsd : null;
+  const known = [live, session.recordedUsage?.costUsd].filter(value => typeof value === 'number');
+  const cost = known.length ? `≈ ${money(Math.max(...known))} API-price estimate` : '';
   const facts = [
     `<li>${escape(`${harnessName(session.harness)}${session.model ? ` · ${session.model}` : ''} · ${session.mine ? 'you' : session.ownerName}`)}</li>`,
     where ? `<li class="mono">${escape(where)}</li>` : '',
@@ -148,7 +157,7 @@ export function linkedSessionPage(session, { now = Date.now(), workItems = {}, s
   const items = (session.workItems ?? []).map(entry => `<li>${chip({ label: workItems[entry.id] ? `${entry.id} · ${workItems[entry.id]}` : `Work Item ${entry.id}`, href: `#work/${encodeURIComponent(entry.id)}`, icon: 'work' })} <span class="meta">${escape(linkedHow(entry))}</span>${session.mine ? ` ${button({ label: 'Unlink', icon: 'x', variant: 'ghost', size: 'sm', action: 'linked-session-unlink', data: { id: session.id, workItem: entry.id } })}` : ''}</li>`).join('');
   const linkForm = session.mine ? `<form class="linked-session-link-form" data-form="linked-session-link" data-id="${escape(session.id)}"><label class="field-label" for="linked-session-work-item">Link to Work Item</label><div class="linked-session-link-row"><input id="linked-session-work-item" name="workItem" class="mono" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="184">${button({ label: 'Link', icon: 'link', type: 'submit', size: 'sm' })}</div></form>` : '';
   const workCard = card({ id: 'linked-session-work', title: 'Work Items', body: `${items ? `<ul class="linked-session-work">${items}</ul>` : emptyState({ icon: 'work', title: 'Not linked to a Work Item', body: 'Link it here, or name the Work Item or its task (VIK-123) in a prompt or a commit message. A branch that names the task, such as feat/vik-123-login, and a pull request of the Work Item link it too.', compact: true })}${suggestionList(session, suggestions)}${linkForm}` });
-  const telemetry = session.telemetry ? card({ id: 'linked-session-telemetry', title: 'Telemetry', subtitle: 'From Claude Code\'s OpenTelemetry export. Prompts and tool content are never read here.', actions: session.telemetry.dashboardUrl ? button({ label: 'Open in Grafana', icon: 'external', href: session.telemetry.dashboardUrl, external: true, size: 'sm', variant: 'ghost' }) : '', body: telemetryTiles(session.telemetry) }) : '';
+  const telemetry = session.telemetry ? card({ id: 'linked-session-telemetry', title: 'Telemetry', subtitle: 'From Claude Code\'s OpenTelemetry export. Prompts and tool content are never read here.', actions: session.telemetry.dashboardUrl ? button({ label: 'Open in Grafana', icon: 'external', href: session.telemetry.dashboardUrl, external: true, size: 'sm', variant: 'ghost' }) : '', body: telemetryTiles(session.telemetry, session.recordedUsage) }) : '';
   const commits = card({ id: 'linked-session-commits', title: 'Commits', subtitle: attributionLine(session), actions: session.commits?.some(entry => entry.aiLines !== null && entry.aiLines !== undefined) ? button({ label: 'Agent Trace records', icon: 'download', href: `/api/linked-sessions/${encodeURIComponent(session.id)}/agent-trace`, size: 'sm', variant: 'ghost' }) : '', body: `${commitsTable(session)}${session.pullRequests?.length ? `<p class="meta">Pull requests: ${session.pullRequests.map(url => `<a href="${escape(url)}" target="_blank" rel="noopener noreferrer">${escape(url.replace(/^https:\/\//, ''))}</a>`).join(' · ')}</p>` : ''}` });
   if (!split) {
     const state = linkedStates[session.state] ?? linkedStates.idle;

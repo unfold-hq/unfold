@@ -37,6 +37,7 @@ curl -H "Cookie: …" "https://unfold.example/api/ploeg/cost-export?month=2026-1
 | `usdToEur` | The euros one US dollar buys, such as `0.9210`. Required with `currency=EUR` | None |
 | `provider` | The model provider, such as `Anthropic`, when you know all usage went there | `unknown` |
 | `format` | `csv`, `jsonl` or `parquet` | `csv` |
+| `linkedSessions` | `exclude` or `include`: add the recorded Claude Code estimate of Linked Sessions ([below](#linked-session-estimates)) | `exclude` |
 
 A wrong value answers 400 `cost_export_filter` with the reason. The [API contract](../contracts/api.md) and [OpenAPI document](../contracts/openapi.yaml) describe the route.
 
@@ -48,7 +49,8 @@ The response headers say what the file leaves out:
 | `X-Unfold-Unsettled-Runs` | Runs in the period whose cost is not settled yet |
 | `X-Unfold-Unreported-Runs` | Runs that finished without reporting a cost. They have no row |
 | `X-Unfold-Unowned-Work-Items` | Work Items whose repository is registered to more than one owner. They have no row |
-| `X-Unfold-Truncated` | `true` when Unfold stopped after 1000 Work Items with activity since the period began. Export a shorter period |
+| `X-Unfold-Truncated` | `true` when Unfold stopped after 1000 Work Items with activity since the period began, or, with `linkedSessions=include`, after 2000 Linked Sessions or 500 of their Work Items. Export a shorter period |
+| `X-Unfold-Linked-Session-Rows` | With `linkedSessions=include`: how many Linked Session rows the file has |
 
 ## How Unfold fills the FOCUS columns
 
@@ -81,6 +83,8 @@ Unfold's own columns start with `x_Unfold`, as FOCUS requires of custom columns:
 | `x_UnfoldWorkItemId`, `x_UnfoldExternalReference` | The Work Item and its ticket, such as `VIK-41` |
 | `x_UnfoldRunId`, `x_UnfoldRunCount` | The Run (null on a Work Item row) and how many Runs the row adds |
 | `x_UnfoldInputTokens`, `x_UnfoldOutputTokens`, `x_UnfoldCacheReadInputTokens`, `x_UnfoldCacheCreationInputTokens` | Token counts. On a Work Item row a count is null when any of its Runs did not report it |
+| `x_UnfoldCostSource` | `ploeg` for a Run's cost, `telemetry-estimate` for a Linked Session row |
+| `x_UnfoldEstimatedCost`, `x_UnfoldMarkupPercent`, `x_UnfoldBillableCost`, `x_UnfoldLinkedSessionCount` | Only on a Linked Session row: the recorded estimate, the owner's markup that day, the estimate plus that markup, and how many sessions the row adds. Null on a Ploeg row |
 
 ## Unsettled spend is never billed
 
@@ -89,7 +93,17 @@ A Run's cost settles once it finished and holds no budget. Before that it is uns
 - `unsettled=exclude`, the default, leaves those Runs out. `X-Unfold-Unsettled-Runs` counts them.
 - `unsettled=include` writes them with every cost column 0, `x_UnfoldSpendStatus` `Unsettled` and the amount seen so far in `x_UnfoldObservedCost`. A FinOps tool that adds `BilledCost` adds nothing for them.
 
-## Euros
+## Linked Session estimates
+
+People who run Claude Code on their own machine and link the session to a Work Item ([Link your Claude Code sessions](../../../../docs/how-to/link-claude-code-sessions.md)) cause cost that Ploeg never sees. Unfold records Claude Code's own estimate of each session at API list prices, from the metrics store, and keeps it after the store drops the session ([ADR 0069](../adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md)). With `linkedSessions=include`, the export adds one row per Work Item and UTC day:
+
+- `ListCost` is the estimate. `BilledCost`, `EffectiveCost`, `ContractedCost` and `PricingCurrencyEffectiveCost` are 0, because nobody invoiced it: a Claude plan is not billed at API prices, and FOCUS keeps estimates out of `BilledCost`.
+- `x_UnfoldEstimatedCost` repeats the estimate as recorded. `x_UnfoldBillableCost` is the estimate plus the markup of that day for the Work Item's Client or Tenant, set under Billing (`PUT /api/billing/usage-markups`). Without a markup the two are equal. Changing a markup applies from its first day on, so an exported month keeps its amounts.
+- A session linked to several Work Items splits each day's estimate evenly between them, in whole micro-dollars, so the sum over Work Items is the session's estimate.
+- The day of a row is the UTC day Unfold read the figure: after each live read on the session or Work Item page, and a few minutes after the session stops working or ends. A session's cost before its first reading lands on that first day.
+- The row names the Work Item, Client and Tenant, never the session or the person. `ResourceType` is `Linked sessions`, `ServiceName` `Claude Code`, and the provider columns `Anthropic`.
+- `granularity` does not split Linked Session rows further: they are always per Work Item and day.
+
 
 Costs are recorded in US$. With `currency=EUR&usdToEur=0.9210`, every cost column is multiplied by that rate, `BillingCurrency` is `EUR`, and each row carries the rate in `x_UnfoldExchangeRate` and the US$ amount in `PricingCurrencyEffectiveCost`. Unfold never looks a rate up and never guesses one. Choose the rate your books use, such as the ECB reference rate on the last day of the month. FOCUS says `BillingCurrency` matches the currency of the invoice, so export euros only when you charge your Clients in euros.
 

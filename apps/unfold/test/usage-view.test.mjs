@@ -34,3 +34,10 @@ test('the page shows spend by source, demo items left out, and what is not attri
   assert.match(page, /Ploeg does not report that spend per person yet/);
   assert.match(page, /class="segmented"/);
 });
+
+test('Linked Sessions show the estimate Unfold recorded when the metrics store no longer has it, and say so', () => {
+  const html = linkedMarkup(linked({ count: 1, claudeCode: 1, estimateUsd: 4.25, estimateSource: 'recorded', recordedAt: '2026-10-17T10:00:00.000Z', tokens: { input: 1000, output: 0, cacheRead: 0, cacheCreation: 0 }, telemetry: 'unreadable', reason: 'The metrics store answered 503.' }));
+  assert.match(html, /About US\$\s4,25/);
+  assert.match(html, /as Unfold recorded it \(newest reading 2026-10-17\)/);
+  assert.doesNotMatch(html, /Not known yet/);
+});

@@ -81,3 +81,13 @@ test('the brief check says what an agent would start from and offers a Done when
   assert.match(ready, /Names acceptance conditions/);
   assert.doesNotMatch(ready, /linked-start-done-when/);
 });
+
+test('a session the metrics store dropped still counts with the estimate Unfold recorded, and a markup shows a billable amount beside it', () => {
+  const recordedUsage = { costUsd: 3, tokens: { input: 1, output: 0, cacheRead: 0, cacheCreation: 0 }, observedAt: '2026-10-17T10:00:00.000Z', source: 'telemetry-estimate', costStatus: 'estimate' };
+  const linked = { sessions: [{ id: 'a', harness: 'claude-code', telemetry: telemetry(0), recordedUsage }, { id: 'b', harness: 'claude-code', telemetry: telemetry(5), recordedUsage }], usage: { costUsd: 6, billableUsd: 6.9, markupPercent: '15', scope: 'all' } };
+  assert.equal(workCost(detail(), linked).sessionsUsd, 8, 'the higher of live and recorded, per session');
+  const html = linkedWorkMarkup(detail(), { linkedSessions: linked, userId: 'op' });
+  assert.match(html, /Billable/);
+  assert.match(html, /recorded estimate of US\$\s6,00 plus the markup, now 15%/);
+  assert.doesNotMatch(linkedWorkMarkup(detail(), { linkedSessions: { ...linked, usage: { ...linked.usage, billableUsd: 6, markupPercent: '0' } }, userId: 'op' }), /Billable/, 'no markup, no second figure');
+});

@@ -46,9 +46,15 @@ export function takeOverCommand(detail) {
   return branch ? `git fetch origin ${shellQuote(branch)} && git switch ${shellQuote(branch)} && ${start}` : start;
 }
 
+/** A linked session's API-price estimate: the higher of what the metrics store says now and what Unfold recorded, or null when neither is known. */
+export function sessionEstimate(session) {
+  const values = [session.telemetry?.costUsd, session.recordedUsage?.costUsd].filter(amount);
+  return values.length ? Math.max(...values) : null;
+}
+
 /**
  * A Work Item's total cost: what Ploeg recorded over every attempt plus the API-price estimates of the linked sessions
- * whose telemetry the viewer may see. `untracked` counts linked sessions of harnesses that send no cost (only Claude Code
+ * whose telemetry the viewer may see, live or as Unfold recorded it. `untracked` counts linked sessions of harnesses that send no cost (only Claude Code
  * does), `hidden` Claude Code sessions whose cost only their owner or an administrator sees, and `unknown` those whose
  * telemetry had no cost.
  */
@@ -58,9 +64,9 @@ export function workCost(detail, linked) {
   const ploegUsd = spent.length ? spent.reduce((sum, value) => sum + value, 0) : null;
   const all = linked?.sessions ?? [];
   const sessions = all.filter(session => (session.harness ?? 'claude-code') === 'claude-code');
-  const seen = sessions.filter(session => session.telemetry);
-  const priced = seen.filter(session => amount(session.telemetry.costUsd));
-  const sessionsUsd = priced.length ? priced.reduce((sum, session) => sum + session.telemetry.costUsd, 0) : null;
+  const seen = sessions.filter(session => session.telemetry || session.recordedUsage);
+  const priced = seen.filter(session => sessionEstimate(session) !== null);
+  const sessionsUsd = priced.length ? priced.reduce((sum, session) => sum + sessionEstimate(session), 0) : null;
   return { ploegUsd, sessionsUsd, totalUsd: ploegUsd === null && sessionsUsd === null ? null : (ploegUsd ?? 0) + (sessionsUsd ?? 0), sessions: all.length, priced: priced.length, untracked: all.length - sessions.length, hidden: sessions.length - seen.length, unknown: seen.length - priced.length };
 }
 
@@ -76,7 +82,15 @@ function costMarkup(detail, linked) {
     stat({ label: 'Total cost', value: money(cost.totalUsd), detail: cost.sessionsUsd === null ? 'What Ploeg recorded' : 'Ploeg plus the linked sessions’ estimate', icon: 'coins' }),
     stat({ label: 'Ploeg', value: money(cost.ploegUsd), detail: plural(detail.shifts?.length || (detail.item?.latestShift ? 1 : 0), 'attempt'), icon: 'layers' }),
     stat({ label: 'Linked sessions', value: cost.sessionsUsd === null ? 'Not visible' : `≈ ${money(cost.sessionsUsd)}`, detail: 'API-price estimate. A Claude plan is not billed this.', icon: 'bot', quiet: cost.sessionsUsd === null }),
+    billableStat(linked.usage),
   ].join('')}</div>${notes}`;
+}
+
+/** The billable amount of the linked sessions' recorded estimate, shown only when the Work Item's owner has a markup. */
+function billableStat(usage) {
+  if (!usage || !amount(usage.billableUsd) || !usage.markupPercent || usage.markupPercent === '0') return '';
+  const whose = usage.scope === 'own' ? 'your sessions’' : 'the';
+  return stat({ label: 'Billable', value: money(usage.billableUsd), detail: `${whose} recorded estimate of ${money(usage.costUsd)} plus the markup, now ${usage.markupPercent}%.`.replace(/^./, letter => letter.toUpperCase()), icon: 'coins' });
 }
 
 function startInClaudeMarkup(detail, model) {

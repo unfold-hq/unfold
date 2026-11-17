@@ -29,9 +29,11 @@ export function usageDetail(part, noun) {
 
 /** The estimate of the person's Linked Claude Code sessions, with its honest reason when telemetry is not connected or did not answer. */
 export function linkedMarkup(linked) {
-  const connected = linked.telemetry === 'connected';
-  const value = !linked.count ? 'No sessions' : linked.telemetry === 'not_configured' ? 'No telemetry connected' : linked.estimateUsd === null ? 'Not known yet' : `About ${money(linked.estimateUsd)}`;
-  const detail = !linked.count ? 'No agent session of yours reported in this period.' : linked.telemetry === 'not_configured' ? 'This workbench reads no metrics store, so Claude Code’s cost estimate cannot be shown.' : linked.reason || 'Claude Code’s own estimate at API prices. A Claude plan is not billed this.';
+  const recorded = linked.estimateSource === 'recorded' && linked.estimateUsd !== null;
+  const connected = linked.telemetry === 'connected' || recorded;
+  const value = !linked.count ? 'No sessions' : recorded ? `About ${money(linked.estimateUsd)}` : linked.telemetry === 'not_configured' ? 'No telemetry connected' : linked.estimateUsd === null ? 'Not known yet' : `About ${money(linked.estimateUsd)}`;
+  const recordedDetail = `Claude Code’s own estimate at API prices as Unfold recorded it${linked.recordedAt ? ` (newest reading ${linked.recordedAt.slice(0, 10)})` : ''}, because the metrics store no longer has all of it. A Claude plan is not billed this.`;
+  const detail = !linked.count ? 'No agent session of yours reported in this period.' : recorded ? recordedDetail : linked.telemetry === 'not_configured' ? 'This workbench reads no metrics store, so Claude Code’s cost estimate cannot be shown.' : linked.reason || 'Claude Code’s own estimate at API prices. A Claude plan is not billed this.';
   const total = linked.tokens ? linked.tokens.input + linked.tokens.output + linked.tokens.cacheRead + linked.tokens.cacheCreation : null;
   const tiles = [
     stat({ label: 'Estimated cost', value, detail, icon: 'coins', quiet: !connected || linked.estimateUsd === null }),
