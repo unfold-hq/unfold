@@ -61,6 +61,7 @@ runs:
             echo "gobuild=$(mise exec -- go env GOCACHE)"
             echo "go=$(mise exec -- go env GOVERSION)"
             echo "pnpm=$(mise -C apps/site exec -- corepack pnpm store path)"
+            echo "epg=$(awk '$1 == "github.com/fergusstrange/embedded-postgres" && $2 !~ /go.mod$/ { print $2 }' apps/unfold/scripts/unified-demo/go.sum)"
           } >> "$GITHUB_OUTPUT"
         fi
     - name: Restore Go module and build caches
@@ -93,6 +94,14 @@ runs:
         path: ${{ steps.caches.outputs.pnpm }}
         key: unfold-pnpm-${{ runner.os }}-${{ hashFiles('apps/site/pnpm-lock.yaml') }}
         restore-keys: unfold-pnpm-${{ runner.os }}-
+    - name: Restore embedded PostgreSQL binaries
+      id: epg-cache
+      if: inputs.setup == 'setup'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.embedded-postgres-go
+        key: unfold-embedded-postgres-${{ runner.os }}-${{ steps.caches.outputs.epg }}
+        restore-keys: unfold-embedded-postgres-${{ runner.os }}-
     - name: Restore verified gate results
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
@@ -135,6 +144,17 @@ runs:
       with:
         path: ${{ steps.caches.outputs.pnpm }}
         key: ${{ steps.pnpm-cache.outputs.cache-primary-key }}
+    - name: Find downloaded embedded PostgreSQL binaries
+      id: epg-downloaded
+      if: steps.epg-cache.outcome == 'success' && steps.epg-cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request'
+      shell: bash
+      run: if compgen -G "$HOME/.embedded-postgres-go/*" > /dev/null; then echo "found=true" >> "$GITHUB_OUTPUT"; fi
+    - name: Save embedded PostgreSQL binaries
+      if: steps.epg-downloaded.outputs.found == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.embedded-postgres-go
+        key: ${{ steps.epg-cache.outputs.cache-primary-key }}
     - name: Collect warnings
       id: warnings
       if: always()
