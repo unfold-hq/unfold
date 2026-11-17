@@ -129,6 +129,9 @@ test('a sign-in started by unfold-mcp is named after its host on the approval pa
   assert.equal(editorLabel('mcp', 'ryan-laptop'), 'unfold-mcp on ryan-laptop');
   assert.equal(editorLabel('acp', 'ryan-laptop'), 'unfold-acp-agent on ryan-laptop');
   assert.equal(editorLabel('acp', 'evil host'), 'unfold-acp-agent');
+  assert.equal(editorLabel('claude-code', 'ryan-laptop'), 'Claude Code on ryan-laptop');
+  assert.equal(editorLabel('claude-code', 'evil host'), 'Claude Code');
+  assert.equal(editorLabel('constructor', 'ryan-laptop'), 'VS Code', 'only a known client gets a host on its name');
   for (const host of ['', 'evil host', '<script>', 'a'.repeat(64), 42]) assert.equal(editorLabel('mcp', host), 'unfold-mcp', String(host));
   const started = auth.beginEditor('192.0.2.1', editorLabel('mcp', 'ryan-laptop'));
   assert.equal(auth.claimEditor(started.code, person), true);

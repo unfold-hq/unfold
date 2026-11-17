@@ -14,7 +14,7 @@ Both reporters live in this repository, so you need a checkout of it on the mach
 
 ## 1. Get an editor credential
 
-Follow step 1 of [Link your Claude Code sessions](link-claude-code-sessions.md#1-get-an-editor-credential). You get a `vle_…` credential. Export it, with Unfold's address, in the shell profile that starts your agent:
+From a checkout of this repository, run `UNFOLD_URL=https://unfold.example.org npm --prefix apps/unfold run mcp -- login`, open the link it prints, check that the code matches, and approve it. You get a `vle_…` credential that lasts 30 days. Export it, with Unfold's address, in the shell profile that starts your agent:
 
 ```sh
 export UNFOLD_URL=https://unfold.example.org

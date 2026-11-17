@@ -8,7 +8,7 @@ verified_by: "Read apps/unfold/extensions/claude-code against the Agent Plugins 
 
 # Install the Unfold plugin in Codex, Cursor, Copilot and VS Code
 
-**Goal:** your agent knows Unfold. It gets two skills, `unfold` (how to use Unfold's MCP tools) and `link-work-item` (link a session to a Work Item), and, when your operator publishes it, the connection to your Unfold's MCP tools. For Claude Code, which also reports sessions and records Agent Trace, follow [Link your Claude Code sessions](link-claude-code-sessions.md#3-install-the-plugin) instead.
+**Goal:** your agent knows Unfold. It gets two skills, `unfold` (how to use Unfold's MCP tools) and `link-work-item` (link a session to a Work Item), and, when your operator publishes it, the connection to your Unfold's MCP tools. For Claude Code, which also reports sessions and records Agent Trace, follow [Link your Claude Code sessions](link-claude-code-sessions.md#1-install-the-plugin-with-your-unfold-address) instead.
 
 One directory, [`apps/unfold/extensions/claude-code`](../../apps/unfold/extensions/claude-code/README.md), is the plugin for every client. Its root `plugin.json` is an [Agent Plugins 1.0.0](https://github.com/agentplugins/agent-plugins-spec/blob/main/spec/1.0.0.md) manifest, which these clients read before any client-specific one. Claude Code reads `.claude-plugin/plugin.json` in the same directory.
 

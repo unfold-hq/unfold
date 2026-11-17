@@ -4,9 +4,11 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { remoteName, workItemArgument } from './unfold-start.mjs';
+import { resolveCredential } from './credentials.mjs';
 
 const unfoldUrl = (process.env.UNFOLD_URL ?? '').trim().replace(/\/+$/, '');
-const token = (process.env.UNFOLD_TOKEN ?? '').trim();
+let resolvedToken;
+const token = () => (resolvedToken ??= resolveCredential(unfoldUrl).token);
 const claude = process.env.UNFOLD_CLAUDE_BIN || 'claude';
 const plain = (text, max) => String(text ?? '').replace(/[\0-\x08\x0b-\x1f\x7f]/g, ' ').trim().slice(0, max);
 
@@ -57,7 +59,7 @@ export function mainCheckout(cwd) {
 }
 
 async function call(path, init = {}) {
-  const response = await fetch(`${unfoldUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin', ...(init.body ? { 'content-type': 'application/json' } : {}) }, signal: AbortSignal.timeout(15_000) });
+  const response = await fetch(`${unfoldUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token()}`, accept: 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin', ...(init.body ? { 'content-type': 'application/json' } : {}) }, signal: AbortSignal.timeout(15_000) });
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -125,7 +127,7 @@ async function handback(argument, note) {
 
 async function main() {
   const [mode, argument, ...rest] = process.argv.slice(2);
-  if (!unfoldUrl || !token) { say('Set UNFOLD_URL and UNFOLD_TOKEN in ~/.claude/settings.json first; see Settings › Agent sessions in Unfold.'); return 2; }
+  if (!unfoldUrl || !token()) { say(unfoldUrl ? 'This machine is not signed in to Unfold. Run /unfold:login, approve it in your browser, then run this again.' : 'Set UNFOLD_URL first: your organisation sets it in Claude Code’s managed settings, or add it to the env block of ~/.claude/settings.json.'); return 2; }
   if (mode === 'takeover') return takeover(argument);
   if (mode === 'handback') return handback(argument, rest.join(' '));
   say('Use takeover <work item> or handback <work item> [note].');

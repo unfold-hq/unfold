@@ -19,47 +19,36 @@ For OpenCode and Codex, see [Link your OpenCode and Codex sessions](link-opencod
 
 Unfold never holds your Claude sign-in. Anthropic does not allow third-party apps to hold one ([terms](https://code.claude.com/docs/en/legal-and-compliance)). Your Unfold editor credential is the only credential involved ([ADR 0047](../../apps/unfold/docs/adrs/0047-people-link-their-own-agent-sessions-through-a-plugin-agent-trace-and-telemetry-never-a-claude-sign-in.md)).
 
-## 1. Get an editor credential
+## 1. Install the plugin with your Unfold address
 
-From a checkout of this repository:
+Nobody generates or pastes a token. The plugin needs only `UNFOLD_URL`, and it signs each person in through the browser by itself (step 2).
 
-```sh
-UNFOLD_URL=https://unfold.example.org npm --prefix apps/unfold run mcp -- login
-```
-
-Open the link it prints, check that the code matches, and approve it. It prints a `vle_…` credential that lasts 30 days. If you already use `unfold-mcp`, reuse its credential.
-
-## 2. Tell Claude Code where Unfold is
-
-Add the address and the credential to the `env` block of `~/.claude/settings.json`:
+**For a whole organisation**, an administrator adds this once to Claude Code's [managed settings](https://code.claude.com/docs/en/managed-settings), as a `managed-settings.json` file on each machine or as [server-managed settings](https://code.claude.com/docs/en/server-managed-settings) in the claude.ai admin console:
 
 ```json
 {
-  "env": {
-    "UNFOLD_URL": "https://unfold.example.org",
-    "UNFOLD_TOKEN": "vle_…"
-  }
+  "env": { "UNFOLD_URL": "https://unfold.example.org" },
+  "extraKnownMarketplaces": {
+    "unfold": {
+      "source": { "source": "git", "url": "https://github.com/unfold-hq/unfold.git" }
+    }
+  },
+  "enabledPlugins": { "unfold@unfold": true }
 }
 ```
 
-The same file switches on Claude Code's telemetry. The session page reads it back by session id ([monitoring](https://code.claude.com/docs/en/monitoring-usage)). Keep `CLAUDE_CODE_ENABLE_TELEMETRY=1` and the `OTEL_*` exporter settings your observability stack already expects.
+Replace the address with your own Unfold. Managed settings need no workspace trust step, and no person can override them. To allow only approved marketplaces, add `strictKnownMarketplaces` with the same source. Your Unfold needs single sign-on configured: the browser sign-in is Unfold's editor sign-in ([ADR 0037](../../apps/unfold/docs/adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md)).
 
-The metrics store can keep Claude Code's metrics under Prometheus names (`claude_code_cost_usage_USD_total`, label `session_id`) or as OTLP sent them (`claude_code.cost.usage`, label `session.id`); Unfold reads both, so the store needs no recording rule or relabelling ([names](../../apps/unfold/docs/contracts/api.md#claude-code-telemetry-names)). Until the store holds a session's metrics, its cost reads **Not known yet**, never $0.00.
-
-## 3. Install the plugin
-
-In Claude Code:
+**For yourself only**, add `"env": { "UNFOLD_URL": "https://unfold.example.org" }` to `~/.claude/settings.json` and run in Claude Code:
 
 ```text
 /plugin marketplace add https://github.com/unfold-hq/unfold.git
 /plugin install unfold@unfold
 ```
 
-To link sessions from the agent as well, register `unfold-mcp` ([Ask Unfold and Ploeg from an AI client](ask-from-an-ai-client.md)). The plugin's skill then calls `unfold_link_session` when you name a Work Item.
+### Other ways to install it
 
-For Codex, GitHub Copilot, VS Code, Cursor and Kiro, which install the same plugin's skills, see [Install the Unfold plugin](install-the-unfold-plugin.md).
-
-### For everyone who opens a repository
+#### For everyone who opens a repository
 
 To give every person who works in a repository the plugin without the two commands, commit this to the repository's `.claude/settings.json`:
 
@@ -76,11 +65,11 @@ To give every person who works in a repository the plugin without the two comman
 
 Claude Code registers the marketplace and offers the plugin once a person accepts the workspace trust dialog for the folder; in a folder nobody trusted it ignores both keys. VS Code 1.143 reads the same file for its Copilot, Claude and Codex harnesses, also only after trust, and installs the plugin for the session without writing it to the person's settings. GitHub Copilot reads `.github/copilot/settings.json` with the same two keys; when both files name the plugin, the `.claude` one wins. Copilot and VS Code install the plugin's skill from version 0.3.0 on; the hooks that report sessions run in Claude Code only.
 
-The plugin does nothing for a person who has not done steps 1 and 2: without `UNFOLD_URL` and `UNFOLD_TOKEN` its hooks print nothing and exit. Point the `url` at your own mirror if you build Unfold from one.
+The repository file can carry `"env": { "UNFOLD_URL": "https://unfold.example.org" }` too; like the two keys, it applies once the person trusts the folder. Without `UNFOLD_URL` the hooks print nothing and exit; with it, the first session asks the person to approve the sign-in (step 2). Point the `url` at your own mirror if you build Unfold from one.
 
-### For a whole organisation
+#### GitHub Copilot and VS Code across an organisation
 
-An administrator can install it on every managed machine instead. In Claude Code's `managed-settings.json`, the same two keys apply everywhere and need no trust step; add `strictKnownMarketplaces` with the same source to allow only approved marketplaces. For GitHub Copilot in Copilot CLI, VS Code and JetBrains IDEs, the enterprise-managed settings take the same `extraKnownMarketplaces` and `enabledPlugins`, and `allowedMcpServers` can allow Unfold's two MCP servers by address:
+For Claude Code, use the managed settings of step 1. For GitHub Copilot in Copilot CLI, VS Code and JetBrains IDEs, the enterprise-managed settings take the same `extraKnownMarketplaces` and `enabledPlugins`, and `allowedMcpServers` can allow Unfold's two MCP servers by address:
 
 ```json
 {
@@ -99,6 +88,26 @@ An administrator can install it on every managed machine instead. In Claude Code
 
 Replace the two addresses with your own. GitHub documents only `github` marketplace sources in that file, so check that your Copilot version accepts a `git` source before you roll it out. VS Code shows Unfold's own sessions through `chat.remoteAgentHosts`, which no managed setting controls; leave `chat.remoteAgentHostsEnabled` on.
 
+## 2. Approve once in the browser
+
+1. Start Claude Code. In the first session without a sign-in, the plugin opens your browser on Unfold's sign-in and shows one line: `Unfold: approve the sign-in in your browser to link this session. Check that it shows BCDF-GHJK.`, with the link in case the browser did not open.
+2. Sign in with your company account if the browser asks, check that the page names **Claude Code on** your machine's name and shows the same code, and press **Approve**. Deny it if you did not start it or the code differs.
+3. That is all. Your session keeps working the whole time: the hook returns at once, and a background process waits for your approval. From your next prompt on, the session reports to Unfold.
+
+On macOS the plugin keeps the credential in your login Keychain (service `unfold-claude-code`, one entry per Unfold address), encrypted at rest; elsewhere in `credentials.json` in the plugin's data directory, mode 0600. Either way a program you run as yourself can read it, as with any credential on your machine. Two Unfold installations never share a credential, and no token is written to a log or to your settings. A credential lasts 30 days. Eight days before it ends, the plugin opens the browser once more for a renewal; while your browser is still signed in to your company account, that is one click on **Approve**. The new credential replaces the old one, which the plugin signs out of Unfold. When Unfold refuses a credential, because it was revoked under **Settings › Signed-in editors** or went unused for 14 days, the plugin forgets it and signs you in again at the next session. If you ignore a sign-in, the plugin asks again after an hour, not on every session.
+
+`/unfold:login` starts a sign-in at any time, `/unfold:login status` says whether and until when this machine is signed in, and `/unfold:logout` signs it out of Unfold and forgets the credential. `UNFOLD_TOKEN`, when you set it yourself, wins over the plugin's own credential and is never renewed by the plugin. `UNFOLD_CREDENTIAL_STORE=file` keeps the credential in the file on macOS too.
+
+## 3. Turn on telemetry
+
+The settings file that sets `UNFOLD_URL` also switches on Claude Code's telemetry. The session page reads it back by session id ([monitoring](https://code.claude.com/docs/en/monitoring-usage)). Keep `CLAUDE_CODE_ENABLE_TELEMETRY=1` and the `OTEL_*` exporter settings your observability stack already expects.
+
+The metrics store can keep Claude Code's metrics under Prometheus names (`claude_code_cost_usage_USD_total`, label `session_id`) or as OTLP sent them (`claude_code.cost.usage`, label `session.id`); Unfold reads both, so the store needs no recording rule or relabelling ([names](../../apps/unfold/docs/contracts/api.md#claude-code-telemetry-names)). Until the store holds a session's metrics, its cost reads **Not known yet**, never $0.00.
+
+To link sessions from the agent as well, register `unfold-mcp` ([Ask Unfold and Ploeg from an AI client](ask-from-an-ai-client.md)). The plugin's skill then calls `unfold_link_session` when you name a Work Item.
+
+For Codex, GitHub Copilot, VS Code, Cursor and Kiro, which install the same plugin's skills, see [Install the Unfold plugin](install-the-unfold-plugin.md).
+
 ## 4. Work as usual
 
 * **Start on a branch that names the ticket**, such as `feat/vik-123-login`, `feat/ops-12-login` for a Jira key or ClickUp custom task id, or `CU-86c1abcde_login` as ClickUp's git integration names it. The session links itself to that ticket's Work Items and takes "VIK-123 …" as its title.
@@ -116,7 +125,7 @@ Replace the two addresses with your own. GitHub documents only `github` marketpl
 * **Pull requests link too.** When the session opens a pull request that is a Work Item's, for example while fixing up a Ploeg pull request, the session links to that Work Item.
 * **Or pick it on the page.** The session's page suggests open Work Items on the same repository, with a **Link** button each, and has a field to link any Work Item by id. A Work Item you unlink is never linked again automatically.
 * **Titles.** A name you give the session with `/rename` becomes its title in Unfold. A session without one shows the subject of its first commit, or its branch in words, such as "Connect a repository" for `docs/connect-a-repository`.
-* **Credential reminders.** When your Unfold credential expires within a week, the session tells you once when it starts. Sign in again (step 1) and replace `UNFOLD_TOKEN`.
+* **Credential renewal.** The plugin renews its own credential in the browser before it ends (step 2). When you set `UNFOLD_TOKEN` yourself and it expires within a week, the session tells you once when it starts; get a new one, or remove `UNFOLD_TOKEN` and let the plugin sign you in.
 * **Commits.** The session is asked to end each commit with `Unfold-Session: <its page>`. After each commit the plugin writes an Agent Trace record to `refs/notes/agent-trace` and sends it to Unfold. To share the records on the forge, see [Show reviewers which lines an agent wrote](#show-reviewers-which-lines-an-agent-wrote).
 
 The Work Item page lists every linked session in its **Agent sessions** card: state, owner, branch and AI-written lines. Your own sessions also offer `claude --resume <id>` and, under Remote Control, **Open in Claude**.
@@ -162,7 +171,7 @@ Zed, JetBrains AI Assistant and the Neovim ACP plugins start their agent over th
 }
 ```
 
-That is Zed's `settings.json`. JetBrains reads the same `agent_servers` block, without `type`, from `~/.jetbrains/acp.json`. The README has both in full. Use the credential from step 1.
+That is Zed's `settings.json`. JetBrains reads the same `agent_servers` block, without `type`, from `~/.jetbrains/acp.json`. The README has both in full. Use a credential from `npm run mcp -- login` ([Ask Unfold and Ploeg from an AI client](ask-from-an-ai-client.md)).
 
 `unfold-acp` passes every message on unchanged and reports the session with `harness: acp`. Its title starts with the agent's name. The session shows as working during a prompt turn, waiting while the agent asks a permission, and idle when the turn ends. Commits follow the same rules as in Claude Code. Lines get an Agent Trace record only when an edit tool call that sent a diff completed. Other commits are reported without one. These sessions have no resume command in Unfold, because only the editor can resume them. If the agent is Claude Code through an ACP adapter and the plugin is installed too, the plugin may report the same work as a second session.
 
@@ -205,7 +214,7 @@ Confirm the warning Claude Code shows. Without `UNFOLD_CHANNEL=1` the server sta
 Limits:
 
 * The development flag is ignored with `-p` and in the Agent SDK. On a Team or Enterprise plan, an administrator must turn on `channelsEnabled`, or list `unfold@unfold` under `allowedChannelPlugins`.
-* The server takes `UNFOLD_URL`, `UNFOLD_TOKEN` and `UNFOLD_CHANNEL` from the environment Claude Code starts it with. Put them in your shell or in the `env` block of `~/.claude/settings.json`.
+* The server takes `UNFOLD_URL` and `UNFOLD_CHANNEL` from the environment Claude Code starts it with, and the credential the plugin keeps (or `UNFOLD_TOKEN` when set). Put the variables in your shell or in the `env` block of your settings.
 * Claude Code does not acknowledge a pushed message. If the session did not load the server as a channel, Claude Code drops the message, and Unfold still shows it as delivered. That is why `UNFOLD_CHANNEL=1` is needed only when you start with the flag.
 
 ## Approve a tool from Unfold
@@ -257,7 +266,7 @@ The description of a shell command is the agent's own words. An agent that read 
 
 ### Answering from an agent
 
-`unfold_permission_requests` lists the waiting prompts, and `unfold_answer_permission` answers one. When another agent calls them, an agent is approving a tool for an agent. So the tool always asks you to confirm, with the tool and the summary in the question, and refuses to act in a client that cannot ask. The editor credential your plugin reports with can never answer its own prompts. Give `unfold-mcp` its own credential (sign in again as in step 1) to answer through it, or answer in the browser.
+`unfold_permission_requests` lists the waiting prompts, and `unfold_answer_permission` answers one. When another agent calls them, an agent is approving a tool for an agent. So the tool always asks you to confirm, with the tool and the summary in the question, and refuses to act in a client that cannot ask. The editor credential your plugin reports with can never answer its own prompts. Give `unfold-mcp` its own credential (`npm run mcp -- login`, see [Ask Unfold and Ploeg from an AI client](ask-from-an-ai-client.md)) to answer through it, or answer in the browser.
 
 ### Why it is built this way
 
@@ -327,7 +336,9 @@ While you read a session's conversation in Unfold, it sends that session's promp
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| No session appears | `UNFOLD_URL` or `UNFOLD_TOKEN` is missing from the environment Claude Code starts with, or the credential expired | Check `~/.claude/settings.json`, sign in again (step 1), and run one session with `UNFOLD_HOOK_DEBUG=1` to see the hook's errors |
+| No session appears | `UNFOLD_URL` is missing from the environment Claude Code starts with, or the sign-in was not approved yet | Run `/unfold:login status`, then `/unfold:login` to sign in again, and run one session with `UNFOLD_HOOK_DEBUG=1` to see the hook's errors |
+| The browser never opens for the sign-in | Claude Code runs where no browser is, such as over SSH, or the last sign-in was denied or ignored less than an hour ago | Open the link the session shows, or run `/unfold:login` |
+| `/unfold:login` says Unfold did not start a sign-in | Unfold has no single sign-on configured, or `UNFOLD_URL` is wrong | Ask the operator to configure single sign-on, or set `UNFOLD_TOKEN` to a credential from `npm run mcp -- login` |
 | The session does not link to the Work Item | The branch names no ticket, none of your task sources holds the ticket (a ClickUp source needs your linked ClickUp account when it has no token of its own), Ploeg has no Work Item for that ticket in your Teams, or you unlinked it before | Link it on the session page or with `unfold_link_session` |
 | **Conversation** says the machine is not answering | The session runs plugin 0.13 or older, `UNFOLD_CONVERSATION=0`, or Claude Code without the plugin's MCP server, or the machine sleeps | Update the plugin, start a new session or resume this one, and check `/mcp` shows `unfold-channel` connected |
 | A message stays **Waiting** | The session has not had a prompt, command or stop since, or it is idle without the channel | Type anything in the session, or start it with the Unfold channel |

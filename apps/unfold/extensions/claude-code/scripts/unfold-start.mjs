@@ -2,9 +2,11 @@
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { resolveCredential } from './credentials.mjs';
 
 const unfoldUrl = (process.env.UNFOLD_URL ?? '').trim().replace(/\/+$/, '');
-const token = (process.env.UNFOLD_TOKEN ?? '').trim();
+let resolvedToken;
+const token = () => (resolvedToken ??= resolveCredential(unfoldUrl).token);
 const claude = process.env.UNFOLD_CLAUDE_BIN || 'claude';
 const dispatchTimeoutMs = Number(process.env.UNFOLD_DISPATCH_TIMEOUT_MS) || 180_000;
 
@@ -38,7 +40,7 @@ export function claimBody(sessionId) {
 }
 
 async function call(path, init = {}) {
-  const response = await fetch(`${unfoldUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token}`, accept: 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin', ...(init.body ? { 'content-type': 'application/json' } : {}) }, signal: AbortSignal.timeout(15_000) });
+  const response = await fetch(`${unfoldUrl}${path}`, { ...init, headers: { authorization: `Bearer ${token()}`, accept: 'application/json', 'x-unfold-request': '1', 'x-unfold-client': 'claude-code-plugin', ...(init.body ? { 'content-type': 'application/json' } : {}) }, signal: AbortSignal.timeout(15_000) });
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -51,7 +53,7 @@ function say(text) { process.stdout.write(`${text}\n`); }
 async function main() {
   const id = workItemArgument(process.argv[2]);
   if (!id) { say('Name the Work Item: /unfold:start 184, or paste its Unfold link.'); return 2; }
-  if (!unfoldUrl || !token) { say('Set UNFOLD_URL and UNFOLD_TOKEN in ~/.claude/settings.json first; see Settings › Agent sessions in Unfold.'); return 2; }
+  if (!unfoldUrl || !token()) { say(unfoldUrl ? 'This machine is not signed in to Unfold. Run /unfold:login, approve it in your browser, then run this again.' : 'Set UNFOLD_URL first: your organisation sets it in Claude Code’s managed settings, or add it to the env block of ~/.claude/settings.json.'); return 2; }
   const { item } = await call(`/api/ploeg/work-items/${id}`);
   if (!item?.waitingForClient) { say(`No Run of Work Item ${id} waits for your Claude Code.`); return 1; }
   const wanted = item.target ? `${item.target.owner}/${item.target.repo}`.toLowerCase() : '';
