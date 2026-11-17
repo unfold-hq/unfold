@@ -6,7 +6,7 @@ import { request, TaskError } from './task-providers/shared.ts';
 import type { PloegRoute } from './ploeg.ts';
 import { canHandOff, validateTaskSources, type TaskSourceConfig, type TaskTarget } from './tasks.ts';
 import { setupTarget } from './task-setup.ts';
-import { defaultTenant, validTenancyId } from './tenancy.ts';
+import { defaultTenant, ownership, validTenancyId } from './tenancy.ts';
 import { reaches } from './tenant-scope.ts';
 import { ClientProjects, ensureIntegrationSchema, mirrorTrackerConnection, unmirrorTrackerConnection } from './integration-store.ts';
 import { StoredRepositories } from './stored-repositories.ts';
@@ -52,6 +52,7 @@ export class TrackerConnections {
   private readonly config: AppConfig;
   private readonly options: Options;
   private readonly listeners: ((secret: string) => void)[] = [];
+  private readonly synced: (() => void)[] = [];
   private routes: PloegRoute[] = [];
   private readRoutes: (() => Promise<PloegRoute[]>) | undefined;
   /** Each Tenant's Client Projects, Own work among them. */
@@ -64,7 +65,7 @@ export class TrackerConnections {
     this.config = config;
     this.options = options;
     const reconciled = ensureIntegrationSchema(store.db, this.now());
-    if (reconciled.toIntegrationAccounts || reconciled.toTrackerConnections || reconciled.refreshed) this.log('tracker_connections.reconciled', reconciled);
+    if (reconciled.toIntegrationAccounts || reconciled.toTrackerConnections || reconciled.refreshed || reconciled.renamedRepositories) this.log('tracker_connections.reconciled', reconciled);
     this.projects = new ClientProjects(store.db, config);
     this.repositories = new StoredRepositories(store.db, config, this.projects, { enforced: options.enforced, manages: (user, tenant) => this.manages(user, tenant), sees: (user, tenant) => this.sees(user, tenant), now: () => this.now(), log: (event, fields) => this.log(event, fields) });
   }
@@ -123,10 +124,22 @@ export class TrackerConnections {
   private shadowing(source: ConnectionSource, connection: TrackerConnection): TaskSourceConfig | undefined {
     return (this.config.taskSources ?? []).find(entry => !entry.connection && (entry.id === source.id || (entry.provider === connection.provider && entry.baseUrl === connection.baseUrl && entry.project === source.project)));
   }
+  /**
+   * Whether a saved source is used. Its repository is missing when none has its id, when that repository belongs to
+   * another Tenant or Client than the source, or when the stored repository it was saved against is not in use, even
+   * if a configured repository now has the same id.
+   */
   private state(source: ConnectionSource, connection: TrackerConnection): SourceState {
     if (this.shadowing(source, connection)) return 'shadowed';
-    return this.config.repositories.some(repository => repository.id === source.repositoryId) ? 'active' : 'repository_missing';
+    const saved = this.repositories.repository(source.repositoryId);
+    const repository = this.config.repositories.find(entry => entry.id === source.repositoryId);
+    if (!repository || (saved && (!repository.stored || saved.tenant !== source.tenant || this.repositories.state(saved) !== 'active'))) return 'repository_missing';
+    const owner = ownership(repository);
+    return owner.tenant === source.tenant && (owner.client === undefined || owner.client === source.client) ? 'active' : 'repository_missing';
   }
+
+  /** Calls `listener` after each sync, so what reads `config.repositories` and `config.taskSources` can rebuild its indexes. */
+  onSync(listener: () => void): void { this.synced.push(listener); }
 
   /** Lets stored repositories join `config.repositories`, or takes them out, and syncs when that changes. */
   joinStoredRepositories(on: boolean): void { if (this.repositories.join(on)) this.sync(); }
@@ -171,6 +184,7 @@ export class TrackerConnections {
         ...(target ? { ploeg: { target } } : {}), tenant: source.tenant, ...(source.client ? { client: source.client } : {}), connection: connection.id,
       });
     }
+    for (const listener of this.synced) listener();
   }
 
   private guide(provider: string): { adapter: TaskProviderAdapter; guide: ServiceAccountGuide; root: string } {

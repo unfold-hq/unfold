@@ -313,7 +313,7 @@ Codes Ploeg sends that Unfold does not name here pass through with Ploeg's own m
 | `source_exists` | 409 | Another task source already reads this project. | Use the task source the message names, or remove it first. |
 | `source_read_only` | 409 | This task source is in the server configuration, so it cannot be changed or removed from the screen. | Ask an administrator to change the server configuration. |
 | `repository_invalid` | 400, 409 | A field of the repository is missing, holds a value Unfold does not accept, or goes over a limit. | Correct the value the message names and send it again. |
-| `repository_exists` | 409 | Unfold already has a repository with this forge host and owner/name. | Use the repository that is there, or remove it first. |
+| `repository_exists` | 409 | This Tenant already has a repository with this forge host and owner/name. | Use the repository that is there, or remove it first. |
 | `repository_not_found` | 404 | There is no such repository, or it is outside what your account may see. | Reload the page to see the repositories there are. |
 | `repository_read_only` | 409 | This repository is in the server configuration, so it cannot be changed or removed from the screen. | Ask an administrator to change the server configuration. |
 | `repositories_off` | 404 | Adding and changing repositories from the screen is off on this workbench. | An administrator turns it on with the repositories.stored flag. |

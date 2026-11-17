@@ -276,6 +276,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   void delivery.reconcileAll().catch(() => undefined);
   const handoff = new TaskHandoff(config, ploeg);
   const tenants = new TenantScope(config);
+  trackerConnections.onSync(() => tenants.rebuild());
   const references = new TaskReferenceResolver(async user => (await Promise.all(tenants.sources(user).map(async source => {
     const provider = sourceLinkProvider(source);
     if (!provider) return source;
@@ -827,7 +828,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         }
         if (path === '/api/repositories') {
           if (method === 'GET') { await storedRepositories(); return json(res, 200, sanitize({ repositories: trackerConnections.repositories.list(user), manageTenants: trackerConnections.managedTenants(user) })); }
-          if (method === 'POST') { await storedRepositoryWrites(); const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); return json(res, 201, sanitize({ repository })); }
+          if (method === 'POST') { await storedRepositoryWrites(); const repository = trackerConnections.repositories.create(user, await body(req)); trackerConnections.sync(); res.setHeader('Location', `/api/repositories/${repository.id}`); return json(res, 201, sanitize({ repository })); }
           fault(405, 'method', 'List stored repositories with GET and add one with POST.');
         }
         const repositoryRoute = path.match(/^\/api\/repositories\/([a-z0-9][a-z0-9-]{0,63})$/);

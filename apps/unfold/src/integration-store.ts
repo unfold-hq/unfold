@@ -13,13 +13,14 @@ export const ownWorkName = 'Own work';
 const ownWorkSlug = 'own-work';
 const migrationActor = 'migration';
 
+const repositoriesTable = 'CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, key TEXT NOT NULL, integration_account_id TEXT REFERENCES integration_accounts(id), created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, key))';
 const tables = `
   CREATE TABLE IF NOT EXISTS client_projects (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, client TEXT, slug TEXT NOT NULL, is_default INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, body TEXT NOT NULL);
   CREATE UNIQUE INDEX IF NOT EXISTS client_projects_key ON client_projects(tenant, ifnull(client, ''), slug);
   CREATE UNIQUE INDEX IF NOT EXISTS client_projects_default ON client_projects(tenant) WHERE is_default = 1;
   CREATE TABLE IF NOT EXISTS integration_accounts (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('tracker', 'forge')), provider TEXT NOT NULL, base_url TEXT NOT NULL, account_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, provider, base_url, account_id));
   CREATE TABLE IF NOT EXISTS tracker_connections (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, provider TEXT NOT NULL, base_url TEXT NOT NULL, created_at TEXT NOT NULL, body TEXT NOT NULL, UNIQUE (tenant, provider, base_url));
-  CREATE TABLE IF NOT EXISTS repositories (id TEXT PRIMARY KEY, tenant TEXT NOT NULL, key TEXT NOT NULL UNIQUE, integration_account_id TEXT REFERENCES integration_accounts(id), created_at TEXT NOT NULL, body TEXT NOT NULL);
+  ${repositoriesTable};
   CREATE TABLE IF NOT EXISTS repository_grants (client_project_id TEXT NOT NULL REFERENCES client_projects(id), repository_id TEXT NOT NULL REFERENCES repositories(id), granted_at TEXT NOT NULL, granted_by TEXT NOT NULL, PRIMARY KEY (client_project_id, repository_id));
   CREATE INDEX IF NOT EXISTS repository_grants_repository ON repository_grants(repository_id);
 `;
@@ -64,11 +65,53 @@ function reshapeSources(db: DatabaseSync): void {
   }, true);
 }
 
+/** Makes a repository key unique per Tenant instead of across Unfold, so adding one never tells an Admin what another Tenant holds. */
+function reshapeRepositories(db: DatabaseSync): void {
+  const unique = (db.prepare('PRAGMA index_list(repositories)').all() as { name: string; unique: number }[]).filter(index => index.unique);
+  const globalKey = unique.some(index => (db.prepare(`PRAGMA index_info("${index.name.replace(/"/g, '""')}")`).all() as { name: string }[]).map(column => column.name).join(',') === 'key');
+  if (!globalKey) return;
+  db.exec('PRAGMA legacy_alter_table=ON');
+  try {
+    transaction(db, () => {
+      db.exec('ALTER TABLE repositories RENAME TO repositories_before');
+      db.exec(repositoriesTable);
+      db.exec('INSERT INTO repositories(id,tenant,key,integration_account_id,created_at,body) SELECT id, tenant, key, integration_account_id, created_at, body FROM repositories_before');
+      db.exec('DROP TABLE repositories_before');
+      const broken = db.prepare('PRAGMA foreign_key_check(repository_grants)').all();
+      if (broken.length) throw new Error(`Reshaping the stored repositories left ${broken.length} Repository Grants without their repository`);
+    }, true);
+  } finally { db.exec('PRAGMA legacy_alter_table=OFF'); }
+}
+
+/**
+ * Gives each stored repository an id that starts with `r-`, so no configured repository id can take over its work.
+ * Its Repository Grants follow, and so does each saved source of the same Tenant that named the old id.
+ */
+function namespaceStoredRepositories(db: DatabaseSync): number {
+  const plain = db.prepare("SELECT id, tenant, body FROM repositories WHERE id NOT LIKE 'r-%' ORDER BY created_at, id").all() as { id: string; tenant: string; body: string }[];
+  if (!plain.length) return 0;
+  transaction(db, () => {
+    const taken = (id: string) => Boolean(db.prepare('SELECT 1 FROM repositories WHERE id=?').get(id));
+    const sources = db.prepare('SELECT id, tenant, body FROM tracker_connection_sources').all() as { id: string; tenant: string; body: string }[];
+    for (const row of plain) {
+      let next = `r-${row.id}`.slice(0, 64);
+      while (taken(next)) next = `r-${row.id.slice(0, 54)}-${randomBytes(3).toString('hex')}`;
+      db.prepare('UPDATE repositories SET id=?, body=? WHERE id=?').run(next, JSON.stringify({ ...JSON.parse(row.body), id: next }), row.id);
+      db.prepare('UPDATE repository_grants SET repository_id=? WHERE repository_id=?').run(next, row.id);
+      for (const source of sources) {
+        const body = JSON.parse(source.body) as { repositoryId?: string };
+        if (source.tenant === row.tenant && body.repositoryId === row.id) db.prepare('UPDATE tracker_connection_sources SET body=? WHERE id=?').run(JSON.stringify({ ...body, repositoryId: next }), source.id);
+      }
+    }
+  }, true);
+  return plain.length;
+}
+
 type ConnectionRow = { id: string; tenant: string; provider: string; base_url: string; created_at: string; body: string };
 const updatedAt = (body: string): string => { try { return String((JSON.parse(body) as { updatedAt?: unknown }).updatedAt ?? ''); } catch { return ''; } };
 
 /** What {@link reconcileTrackerConnections} changed: rows copied into each table, and bodies brought up to the newer copy. */
-export type ConnectionReconcile = { toIntegrationAccounts: number; toTrackerConnections: number; refreshed: number };
+export type ConnectionReconcile = { toIntegrationAccounts: number; toTrackerConnections: number; refreshed: number; renamedRepositories?: number };
 
 /**
  * Keeps `tracker_connections` and the `tracker` rows of `integration_accounts` equal, so an image from before the
@@ -116,7 +159,9 @@ export function ensureIntegrationSchema(db: DatabaseSync, at: string): Connectio
   const reconciled = reconcileTrackerConnections(db);
   reshapeSources(db);
   placeInOwnWork(db, at);
-  return reconciled;
+  reshapeRepositories(db);
+  const renamedRepositories = namespaceStoredRepositories(db);
+  return renamedRepositories ? { ...reconciled, renamedRepositories } : reconciled;
 }
 
 /** Writes a tracker connection to `tracker_connections` as well, the table an image from before the Integration Accounts reads. */

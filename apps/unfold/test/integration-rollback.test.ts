@@ -91,7 +91,7 @@ test('roll forward, roll back to the image before Integration Accounts, add a co
   assert.deepEqual(again.getSecret(`tracker-connection:${second.id}`), { token: fakeToken('SECOND') });
   assert.ok(lines.some(line => line.includes('tracker_connections.reconciled')), 'the reconcile is logged');
   rolledForward.sync();
-  assert.deepEqual(config.taskSources!.map(entry => [entry.id, entry.token]), [['sprint-1', fakeToken('RENEWED')], ['sprint-2', fakeToken('SECOND')]], 'each source reads with its connection token, the renewed one too');
+  assert.deepEqual(config.taskSources!.map(entry => [entry.id, entry.token]), [['sprint-1', fakeToken('RENEWED')]], 'the source reads with the renewed token; the one whose repository belongs to another Tenant is not used');
   assert.equal(new TrackerConnections(again, configFor(dir), { enforced: true, log: line => lines.push(line) }).connections().length, 2, 'a second start changes nothing');
 });
 

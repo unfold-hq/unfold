@@ -14,7 +14,7 @@ import { TarGzipWriter } from './tar-writer.ts';
 /** The bundle format name written into every manifest. */
 export const tenantExportFormat = 'unfold-tenant-export';
 /** The version of the bundle layout and manifest. Each entity carries its own schema version as well. */
-export const tenantExportFormatVersion = 1;
+export const tenantExportFormatVersion = 2;
 /** The file in the bundle that says how to export what Ploeg holds. */
 export const ploegPointerFile = 'ploeg-data.md';
 

@@ -55,7 +55,7 @@ const downloads: Array<{ pattern: RegExp; resource: (match: RegExpExecArray, que
   { pattern: /^\/api\/ploeg\/cost-export$/, resource: (_match, query) => ({ type: 'FOCUS cost export', name: `FOCUS cost export (${query.get('format') ?? 'csv'})` }) },
 ];
 
-type EntityRule = { method: string; pattern: RegExp; entity: string; action: 'create' | 'update' | 'delete' | 'deactivate'; change?: string; tenant?: 'body' | 'query' | 'owner'; owner?: true; uid?: number };
+type EntityRule = { method: string; pattern: RegExp; entity: string; action: 'create' | 'update' | 'delete' | 'deactivate'; change?: string; tenant?: 'body' | 'query' | 'owner'; owner?: true; uid?: number | 'location' };
 
 const entityRules: readonly EntityRule[] = [
   { method: 'POST', pattern: /^\/api\/admin\/webhooks$/, entity: 'Webhook subscription', action: 'create', tenant: 'body' },
@@ -78,10 +78,16 @@ const entityRules: readonly EntityRule[] = [
   { method: 'POST', pattern: /^\/api\/tracker-connections\/([^/]+)\/sources$/, entity: 'Task source', action: 'create', change: 'added_from_screen', tenant: 'owner', uid: 0 },
   { method: 'PATCH', pattern: /^\/api\/tracker-connections\/([^/]+)\/sources\/([^/]+)$/, entity: 'Task source', action: 'update', tenant: 'owner', uid: 2 },
   { method: 'DELETE', pattern: /^\/api\/tracker-connections\/([^/]+)\/sources\/([^/]+)$/, entity: 'Task source', action: 'delete', tenant: 'owner', uid: 2 },
-  { method: 'POST', pattern: /^\/api\/repositories$/, entity: 'Repository', action: 'create', change: 'added_from_screen', tenant: 'body' },
+  { method: 'POST', pattern: /^\/api\/repositories$/, entity: 'Repository', action: 'create', change: 'added_from_screen', tenant: 'body', uid: 'location' },
   { method: 'PATCH', pattern: /^\/api\/repositories\/([^/]+)$/, entity: 'Repository', action: 'update', tenant: 'owner' },
   { method: 'DELETE', pattern: /^\/api\/repositories\/([^/]+)$/, entity: 'Repository', action: 'delete', tenant: 'owner' },
 ];
+
+function createdId(request: TapRequest): string | undefined {
+  if (outcome(request.status) !== 'success' || !request.location) return undefined;
+  const last = request.location.split('?')[0].split('/').filter(Boolean).at(-1);
+  return last && /^[a-z0-9][a-z0-9-]{0,63}$/.test(last) ? last : undefined;
+}
 
 function namedTenant(request: TapRequest, from: 'body' | 'query'): string[] | undefined {
   if (outcome(request.status) !== 'success') return undefined;
@@ -97,7 +103,7 @@ function entityChange(request: TapRequest, user: User): Captured | undefined {
     if (!match) continue;
     const named = (field: string) => text(rule.tenant === 'body' ? request.inputs()[field] : request.query.get(field), 100);
     const owner = rule.owner ? [named('tenant') ?? defaultTenant, named('client')].filter(Boolean).join('/') : undefined;
-    const uid = rule.uid === 0 ? undefined : match[rule.uid ?? 1] ?? owner;
+    const uid = rule.uid === 'location' ? createdId(request) : rule.uid === 0 ? undefined : match[rule.uid ?? 1] ?? owner;
     const data = rule.change ? { change: rule.change } : undefined;
     const tenants = rule.tenant === 'owner' ? (request.owner ? [request.owner] : undefined) : rule.tenant ? namedTenant(request, rule.tenant) : undefined;
     return { actor: user, ...(tenants ? { tenants } : {}), fact: { kind: 'entity', action: rule.action, entity: { type: rule.entity, ...(uid ? { uid } : {}), ...(data ? { data } : {}) }, outcome: outcome(request.status), ...(reason(request.status) ? { reason: reason(request.status) } : {}) } };
