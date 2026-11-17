@@ -427,3 +427,16 @@ test('the file names its period, and an export with no rows is a header only', (
   const parquet = focusFile(null, october({ format: 'parquet' }));
   assert.deepEqual([parquet.filename, parquet.contentType, parquet.body instanceof Uint8Array], ['unfold-focus-cost-demo-2026-10-01-to-2026-11-01.parquet', 'application/vnd.apache.parquet', true]);
 });
+
+test('a settled Run bills its metered cost plus the Ploeg-run markup, never the estimate markup, and keeps BilledCost as metered', () => {
+  const markup = (found: Ownership, source: 'ploeg-run' | 'linked-session', dayStart: number) => source === 'ploeg-run' ? (dayStart >= oct(6, 0) ? 2000 : 1000) : 9000;
+  const { rows } = focusExport(world(), october({ unsettled: 'include' }), { owner, now, markup });
+  const byId = Object.fromEntries(rows.map(row => [row.ResourceId as string, row]));
+  const run = byId['unfold:run:410']!;
+  assert.deepEqual([run.BilledCost, run.x_UnfoldCostSource, run.x_UnfoldCostBasis, run.x_UnfoldEstimatedCost, run.x_UnfoldMarkupPercent, run.x_UnfoldBillableCost], [{ decimal: '1.25' }, 'ploeg-run', 'metered', null, { decimal: '10' }, { decimal: '1.375' }]);
+  assert.deepEqual([byId['unfold:run:412']!.x_UnfoldMarkupPercent, byId['unfold:run:412']!.x_UnfoldBillableCost], [{ decimal: '20' }, { decimal: '0.0000001476' }], 'the markup of the day the Run finished');
+  const unsettled = rows.find(row => row.x_UnfoldSpendStatus === 'Unsettled')!;
+  assert.deepEqual([unsettled.x_UnfoldMarkupPercent, unsettled.x_UnfoldBillableCost], [null, null], 'unsettled spend is never billable');
+  const plain = focusExport(world(), october(), { owner, now }).rows[0]!;
+  assert.deepEqual([plain.x_UnfoldMarkupPercent, plain.x_UnfoldBillableCost], [{ decimal: '0' }, plain.BilledCost], 'without a markup the billable amount is the metered cost');
+});

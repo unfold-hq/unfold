@@ -25,14 +25,16 @@ test('a shell argument survives any quote, and the take-over command switches to
 
 test('the total cost adds the visible sessions’ API-price estimate to Ploeg’s spend and says what it cannot see', () => {
   const linked = { sessions: [{ id: 'a', harness: 'claude-code', telemetry: telemetry(2) }, { id: 'b', harness: 'claude-code' }, { id: 'c', harness: 'claude-code', telemetry: telemetry(null) }, { id: 'ses_d', harness: 'opencode' }] };
-  assert.deepEqual(workCost(detail(), linked), { ploegUsd: 1.75, sessionsUsd: 2, totalUsd: 3.75, sessions: 4, priced: 1, untracked: 1, hidden: 1, unknown: 1 }, 'an OpenCode session is not counted as hidden: it reports no cost at all');
+  assert.deepEqual(workCost(detail(), linked), { ploegUsd: 1.75, sessionsUsd: 2, sessions: 4, priced: 1, untracked: 1, hidden: 1, unknown: 1 }, 'an OpenCode session is not counted as hidden: it reports no cost at all');
   const html = linkedWorkMarkup(detail(), { linkedSessions: linked, userId: 'op' });
-  assert.match(html, /Total cost/);
+  assert.match(html, /Ploeg, metered/);
+  assert.match(html, /Linked sessions, estimated/);
+  assert.doesNotMatch(html, /Total cost|3,75/, 'a metered and an estimated amount are never added');
   assert.match(html, /API-price estimate\. A Claude plan is not billed this/);
   assert.match(html, /The cost of 1 linked session is not counted: only its owner and administrators see it/);
   assert.match(html, /1 session sent no cost/);
   assert.match(html, /1 linked session ran in OpenCode, Codex or an ACP editor, which report no cost\. Only Claude Code sessions are counted/);
-  assert.doesNotMatch(linkedWorkMarkup(detail(), { linkedSessions: { sessions: [] } }), /Total cost/, 'no linked session, no total');
+  assert.doesNotMatch(linkedWorkMarkup(detail(), { linkedSessions: { sessions: [] } }), /Ploeg, metered/, 'no linked session, no cost card');
   assert.equal(workCost(detail(), { sessions: [{ id: 'b' }] }).sessionsUsd, null);
 });
 
@@ -84,10 +86,11 @@ test('the brief check says what an agent would start from and offers a Done when
 
 test('a session the metrics store dropped still counts with the estimate Unfold recorded, and a markup shows a billable amount beside it', () => {
   const recordedUsage = { costUsd: 3, tokens: { input: 1, output: 0, cacheRead: 0, cacheCreation: 0 }, observedAt: '2026-10-17T10:00:00.000Z', source: 'telemetry-estimate', costStatus: 'estimate' };
-  const linked = { sessions: [{ id: 'a', harness: 'claude-code', telemetry: telemetry(0), recordedUsage }, { id: 'b', harness: 'claude-code', telemetry: telemetry(5), recordedUsage }], usage: { costUsd: 6, billableUsd: 6.9, markupPercent: '15', scope: 'all' } };
+  const linked = { sessions: [{ id: 'a', harness: 'claude-code', telemetry: telemetry(0), recordedUsage }, { id: 'b', harness: 'claude-code', telemetry: telemetry(5), recordedUsage }], usage: { linkedSessions: { costUsd: 6, billableUsd: 6.9, markupPercent: '15', scope: 'all' }, ploegRuns: { meteredUsd: 1.75, billableUsd: 1.925, markupPercent: '10', openShifts: 1, source: 'ploeg-run', basis: 'metered' } } };
   assert.equal(workCost(detail(), linked).sessionsUsd, 8, 'the higher of live and recorded, per session');
   const html = linkedWorkMarkup(detail(), { linkedSessions: linked, userId: 'op' });
-  assert.match(html, /Billable/);
-  assert.match(html, /recorded estimate of US\$\s6,00 plus the markup, now 15%/);
-  assert.doesNotMatch(linkedWorkMarkup(detail(), { linkedSessions: { ...linked, usage: { ...linked.usage, billableUsd: 6, markupPercent: '0' } }, userId: 'op' }), /Billable/, 'no markup, no second figure');
+  assert.match(html, /Linked sessions, billable[\s\S]*recorded estimate of US\$\s6,00 plus the markup, now 15%/);
+  assert.match(html, /Ploeg, billable[\s\S]*US\$\s1,93[\s\S]*now 10%\. 1 open attempt not billed yet/);
+  const unmarked = linkedWorkMarkup(detail(), { linkedSessions: { ...linked, usage: { linkedSessions: { ...linked.usage.linkedSessions, billableUsd: 6, markupPercent: '0' }, ploegRuns: { ...linked.usage.ploegRuns, markupPercent: '0' } } }, userId: 'op' });
+  assert.doesNotMatch(unmarked, /billable/, 'no markup, no second figure');
 });
