@@ -1,3 +1,7 @@
+# Changelog
+
+> **This file is no longer updated.** It holds the commit-generated notes up to its last entry. Release notes are now written per change in [`apps/unfold/changes`](unfold/changes/README.md), lead every [GitHub release](https://github.com/unfold-hq/unfold/releases) and show in the workbench under *What's new*; see [Write release notes](unfold/docs/operations/release-notes.md).
+
 ## [unfold-v0.4.0-rc.114](https://forgejo.webgrip.dev/webgrip/unfold/compare/unfold-v0.4.0-rc.113...unfold-v0.4.0-rc.114) (2026-10-25)
 
 ### Fixed

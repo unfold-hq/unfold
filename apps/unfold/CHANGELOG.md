@@ -1,3 +1,7 @@
+# Changelog
+
+> **This file is no longer updated.** It holds the commit-generated notes up to its last entry. Release notes are now written per change in [`apps/unfold/changes`](changes/README.md), lead every [GitHub release](https://github.com/unfold-hq/unfold/releases) and show in the workbench under *What's new*; see [Write release notes](docs/operations/release-notes.md).
+
 ## [0.3.0-rc.16](https://forgejo.webgrip.dev/webgrip/unfold/compare/vloer-v0.3.0-rc.15...vloer-v0.3.0-rc.16) (2026-09-11)
 
 ### Added

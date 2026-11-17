@@ -28,7 +28,7 @@ const id = '[^/]+';
 
 /** GET routes answered from the recorded responses. A recorded key the replay lacks answers 404 and counts as unmatched. */
 export const recordedRoutes = Object.freeze([
-  '/api/bootstrap', '/api/health', '/api/status', '/api/links', '/api/models', '/api/auth/methods', '/api/me/card-identity',
+  '/api/bootstrap', '/api/health', '/api/changelog', '/api/status', '/api/links', '/api/models', '/api/auth/methods', '/api/me/card-identity',
   '/api/binder', '/api/packs', '/api/packs/odds', `/api/packs/${id}`, '/api/season', `/api/cards/${id}/seen`,
   '/api/card-themes', `/api/card-themes/${id}`, `/api/card-themes/${id}/versions`, `/api/card-themes/${id}/versions/${id}`,
   '/api/task-sources', `/api/task-sources/${id}/tasks`, `/api/task-sources/${id}/tasks/${id}`,

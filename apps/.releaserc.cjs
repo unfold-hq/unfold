@@ -1,6 +1,6 @@
 'use strict';
 
-const { makeConfig, COMMIT_ANALYZER_PLUGIN } = require(process.env.UNFOLD_RELEASE_CONFIG || require('node:path').join(__dirname, '../scripts/release-config'));
+const { makeConfig, COMMIT_ANALYZER_PLUGIN, RELEASE_NOTES_PLUGIN } = require(process.env.UNFOLD_RELEASE_CONFIG || require('node:path').join(__dirname, '../scripts/release-config'));
 
 const siteCommitsReleaseNothing = { scope: 'site', release: false };
 
@@ -20,6 +20,9 @@ analyzer.releaseRules = releaseRulesThatReachTheSiteVeto(analyzer.releaseRules);
 if (analyzer.releaseRules.some((rule) => rule.release === 'major')) {
   throw new Error('Unfold release policy rejects major release rules, which would end the analysis before the site veto.');
 }
+const notes = config.plugins.findIndex((plugin) => Array.isArray(plugin) && plugin[0] === RELEASE_NOTES_PLUGIN);
+if (notes < 0) throw new Error('Unfold release notes require the configured notes generator.');
+config.plugins[notes] = [require.resolve('../scripts/release-notes-fragments.cjs'), config.plugins[notes][1]];
 config.plugins.unshift(require.resolve('../scripts/release-policy.cjs'));
 
 module.exports = config;
