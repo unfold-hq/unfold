@@ -4089,12 +4089,12 @@ paths:
         - $ref: '#/components/parameters/Refresh'
       responses:
         '200':
-          description: '`{demo, manage, onboarding, pinnedBundle, stages, installValues, connections, reads, fetchedAt}`'
+          description: '`{demo, manage, onboarding, pinnedBundle, stages, installValues, storedRepositories, connections, reads, fetchedAt}`'
           content:
             application/json:
               schema:
                 type: object
-                required: [demo, manage, onboarding, pinnedBundle, stages, installValues, connections, reads, fetchedAt]
+                required: [demo, manage, onboarding, pinnedBundle, stages, installValues, storedRepositories, connections, reads, fetchedAt]
                 properties:
                   demo: { type: boolean }
                   manage: { type: boolean }
@@ -4120,6 +4120,7 @@ paths:
                         action: { type: object, properties: { label: { type: string }, href: { type: string }, kind: { type: string, enum: [link, refresh, install-values, config-entry] } } }
                         checks: { type: array, items: { type: object } }
                   installValues: { type: array, items: { type: object, properties: { prerequisite: { type: string }, value: { type: string }, read: { type: string } } } }
+                  storedRepositories: { type: array, description: 'Repositories added in Unfold, with `state` `active`, `shadowed` by the configuration, or `off` while the repositories.stored flag is off.', items: { type: object, properties: { id: { type: string }, name: { type: string }, url: { type: string }, state: { type: string, enum: [active, shadowed, off] } } } }
                   connections: { type: [object, 'null'] }
                   reads: { type: object, properties: { connections: { type: [string, 'null'] }, teams: { type: [string, 'null'] } } }
                   fetchedAt: { type: string }

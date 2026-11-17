@@ -47,6 +47,7 @@ export type ChecklistLine = {
 export type Checklist = {
   demo: boolean; manage: boolean; onboarding: boolean; pinnedBundle: string;
   stages: ChecklistLine[]; installValues: typeof installValues;
+  storedRepositories: ReturnType<StoredEntries['repositories']>;
   connections: PloegConnections | null; reads: { connections: string | null; teams: string | null }; fetchedAt: string;
 };
 
@@ -57,8 +58,10 @@ type PloegReads = {
   routing(user: User, fresh?: boolean): Promise<{ all: PloegTeam[] }>;
   serves(user: User, route: string, fresh?: boolean): Promise<boolean | null>;
 };
+/** What Unfold's own store holds for the Tenant: repositories Admins added from the screen with their state, and how many saved task sources. */
+export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off' }[]; sources(): number };
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
-type Options = { store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps };
+type Options = { store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries };
 
 const stateId = (tenant: string) => `onboarding:${tenant}`;
 const askAdmin = 'Ask an administrator to connect this.';
@@ -92,10 +95,12 @@ export class Onboarding {
   private readonly insight: Recorder | undefined;
   private readonly now: () => Date;
   private readonly steps: PloegSteps;
+  private readonly stored: StoredEntries;
 
   constructor(options: Options) {
     this.store = options.store; this.ploeg = options.ploeg; this.config = options.config; this.insight = options.insight;
     this.now = options.now ?? (() => new Date()); this.steps = options.steps ?? ploegSteps;
+    this.stored = options.stored ?? { repositories: () => [], sources: () => 0 };
   }
 
   /** Whether `user` connects accounts and adds repositories and Lists: an administrator, and under `tenancy.enforce` an Admin of the Tenant. */
@@ -104,8 +109,8 @@ export class Onboarding {
     return this.config.tenancy?.enforce !== true || (user.memberships ?? []).some(held => held.kind === 'tenant' && held.tenant === tenant && held.role === 'admin');
   }
 
-  /** Whether the Tenant has no task source and no repository at all, configured or stored. */
-  empty(): boolean { return !(this.config.repositories ?? []).length && !(this.config.taskSources ?? []).length; }
+  /** Whether the Tenant has no task source and no repository at all, configured or stored, whether or not a stored one is in use. */
+  empty(): boolean { return !(this.config.repositories ?? []).length && !(this.config.taskSources ?? []).length && !this.stored.repositories().length && !this.stored.sources(); }
 
   /** Where `user` lands after signing in: Connections for an Admin of an empty Tenant, which also starts onboarding once per Tenant. */
   landing(user: User): { land: boolean } {
@@ -181,13 +186,14 @@ export class Onboarding {
     const served = Object.fromEntries(await Promise.all(this.steps.steps.map(async step => [step.id, await this.available(user, step.id, fresh).then(result => result.served).catch(() => null)] as const))) as Record<StepId, boolean | null>;
     const state = this.read();
     const manage = this.manages(user);
-    const stages = this.stages({ connections, teams, served, state, manage });
+    const storedRepositories = this.stored.repositories();
+    const stages = this.stages({ connections, teams, served, state, manage, storedRepositories });
     this.track(user, state, stages);
-    return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.steps.pinnedBundle, stages, installValues: manage ? installValues : [], connections, reads, fetchedAt: this.now().toISOString() };
+    return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.steps.pinnedBundle, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString() };
   }
 
-  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean }): ChecklistLine[] {
-    const { connections, teams, served, state, manage } = input;
+  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']> }): ChecklistLine[] {
+    const { connections, teams, served, state, manage, storedRepositories } = input;
     const step = (id: StepId) => this.steps.steps.find(entry => entry.id === id)!;
     const repositories = connections?.repositories ?? [];
     const boards = connections?.boards ?? [];
@@ -219,9 +225,19 @@ export class Onboarding {
       : notServed('connect-github', 'Connect GitHub', 'Ploeg: a GitHub forge with its App id and private key (Connect GitHub as a forge in Ploeg’s docs).', secondForge));
 
     const notReady = repositories.filter(repository => repository.readiness === 'not_ready');
-    lines.push(repositories.length
-      ? { id: 'register-repositories', stage: 3, title: 'Register repositories', status: 'ok', configured: true, text: `Configured by the installation: ${repositories.length === 1 ? '1 repository' : `${repositories.length} repositories`}, listed below.` }
-      : notServed('register-repositories', 'Register repositories', 'Ploeg: a targets entry per repository. Unfold: a repositories[] entry with the same owner/name.'));
+    const count = (n: number) => n === 1 ? '1 repository' : `${n} repositories`;
+    const activeStored = storedRepositories.filter(entry => entry.state === 'active');
+    const offStored = storedRepositories.filter(entry => entry.state === 'off');
+    const shadowedStored = storedRepositories.filter(entry => entry.state === 'shadowed');
+    const storedText = [
+      activeStored.length ? `${count(activeStored.length)} added in Unfold: ${list(activeStored.map(entry => entry.name))}.` : '',
+      offStored.length ? `${count(offStored.length)} added in Unfold ${offStored.length === 1 ? 'is' : 'are'} not in use while the repositories.stored flag is off: ${list(offStored.map(entry => entry.name))}.` : '',
+      shadowedStored.length ? `${count(shadowedStored.length)} added in Unfold ${shadowedStored.length === 1 ? 'is' : 'are'} hidden by the configuration: ${list(shadowedStored.map(entry => entry.name))}.` : '',
+    ].filter(Boolean).join(' ');
+    const register = repositories.length
+      ? { id: 'register-repositories', stage: 3, title: 'Register repositories', status: 'ok' as const, configured: true, text: `Configured by the installation: ${count(repositories.length)}, listed below.${storedText ? ` ${storedText}` : ''}` }
+      : notServed('register-repositories', 'Register repositories', 'Ploeg: a targets entry per repository. Unfold: a repositories[] entry with the same owner/name.', storedText ? ` ${storedText} Ploeg does not know ${storedRepositories.length === 1 ? 'it' : 'them'} until it registers repositories at runtime.` : '');
+    lines.push(offStored.length && register.status === 'ok' ? { ...register, status: 'warning' as const, fix: manage ? 'Turn on the repositories.stored feature flag to use the repositories added in Unfold.' : askAdmin } : register);
 
     const clickup = boards.filter(board => board.tracker === pair.tracker);
     lines.push(clickup.length

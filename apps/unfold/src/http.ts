@@ -313,7 +313,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const cardArt = new CardArtGenerator(config);
   const upkeep = new StoreUpkeep(store, errors);
   const insight = new InsightService(store, config, applicationVersion, undefined, { upkeep: () => upkeep.run() });
-  const onboarding = new Onboarding({ store, ploeg, config, insight });
+  const onboarding = new Onboarding({ store, ploeg, config, insight, stored: { repositories: () => trackerConnections.repositories.repositories().map(repository => ({ id: repository.id, name: repository.name, url: repository.url, state: trackerConnections.repositories.state(repository) })), sources: () => trackerConnections.sources().length } });
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });
   const secrets = knownSecrets(config);
   trackerConnections.onSecret(secret => { if (!secrets.includes(secret)) secrets.push(secret); engine.redact(secret); });
@@ -724,7 +724,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           const answer = await tenantExportRoute(tenantExports, { method, path, user, scope: auth.scope(req), body: () => body(req), res });
           return answer ? json(res, answer.status, answer.body) : undefined;
         }
-        if (method === 'GET' && path === '/api/onboarding') return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1')));
+        if (method === 'GET' && path === '/api/onboarding') { await storedRepositories(); return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1'))); }
         if (method === 'GET' && path === '/api/bootstrap') return json(res, 200, sanitize({
           user, mode: config.mode, onboarding: onboarding.landing(user), sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,
           gatewayPolicy: config.gatewayPolicy ?? null,

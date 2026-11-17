@@ -11,7 +11,7 @@ import type { AppConfig, User } from '../src/types.ts';
 import { Store } from '../src/store.ts';
 import { InsightService } from '../src/insight.ts';
 import { PloegClient, PloegError, type PloegConnections, type PloegTeam } from '../src/ploeg.ts';
-import { Onboarding, compareReleases, ploegSteps, type ChecklistLine } from '../src/onboarding.ts';
+import { Onboarding, compareReleases, ploegSteps, type ChecklistLine, type StoredEntries } from '../src/onboarding.ts';
 import { application, configuration, request } from './api-support.ts';
 
 const admin: User = { id: 'admin-1', name: 'Admin', role: 'admin' };
@@ -38,10 +38,10 @@ function fakePloeg(options: { teams?: PloegTeam[]; connections?: PloegConnection
   };
 }
 
-function setup(t: TestContext, store: Store, ploeg: ReturnType<typeof fakePloeg>, config: Partial<AppConfig> = {}) {
+function setup(t: TestContext, store: Store, ploeg: ReturnType<typeof fakePloeg>, config: Partial<AppConfig> = {}, stored?: StoredEntries) {
   const insight = new InsightService(store, { mode: 'live' } as AppConfig, '9.9.9', clock, { schedule: false });
   t.after(() => insight.stop());
-  return new Onboarding({ store, ploeg, insight, now: clock, config: { repositories: [], taskSources: [], ...config } });
+  return new Onboarding({ store, ploeg, insight, now: clock, config: { repositories: [], taskSources: [], ...config }, ...(stored ? { stored } : {}) });
 }
 
 const events = (store: Store) => store.db.prepare('SELECT * FROM product_event ORDER BY id').all() as Record<string, string>[];
@@ -63,6 +63,30 @@ test('a configured installation opens Now and records no onboarding.started', as
   const checklist = await onboarding.checklist(admin);
   assert.equal(checklist.onboarding, false);
   assert.equal(events(store).length, 0, 'no onboarding event is recorded for a configured installation');
+});
+
+test('a stored repository or a saved source counts as the Tenant having one, even while the flag keeps it out of use', async t => {
+  const store = await withStore(t);
+  const off = setup(t, store, fakePloeg(), {}, { repositories: () => [{ id: 'r-site', name: 'acme/site', url: 'https://github.com/acme/site.git', state: 'off' }], sources: () => 0 });
+  assert.deepEqual(off.landing(admin), { land: false });
+  const source = setup(t, await withStore(t), fakePloeg(), {}, { repositories: () => [], sources: () => 1 });
+  assert.deepEqual(source.landing(admin), { land: false });
+  assert.equal(events(store).length, 0);
+});
+
+test('stored repositories show on the register line with their state', async t => {
+  const connections = { ...emptyConnections, repositories: [{ key: 'acme', label: 'acme', forge: 'forgejo', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: null, boards: [] }] } as PloegConnections;
+  const stored: StoredEntries = { repositories: () => [{ id: 'r-a', name: 'acme/app', url: 'https://forge.example/acme/app.git', state: 'active' }, { id: 'r-b', name: 'acme/old', url: 'https://forge.example/acme/old.git', state: 'off' }], sources: () => 0 };
+  const checklist = await setup(t, await withStore(t), fakePloeg({ connections }), {}, stored).checklist(admin);
+  const register = line(checklist.stages, 'register-repositories');
+  assert.equal(register.status, 'warning');
+  assert.match(register.text, /1 repository added in Unfold: acme\/app\./);
+  assert.match(register.text, /acme\/old/);
+  assert.match(register.fix!, /repositories\.stored/);
+  assert.deepEqual(checklist.storedRepositories.map(entry => entry.state), ['active', 'off']);
+  const without = await setup(t, await withStore(t), fakePloeg(), {}, { repositories: () => [{ id: 'r-a', name: 'acme/app', url: 'https://forge.example/acme/app.git', state: 'active' }], sources: () => 0 }).checklist(admin);
+  assert.equal(line(without.stages, 'register-repositories').status, 'unavailable', 'a repository only Unfold holds is not registered in Ploeg');
+  assert.match(line(without.stages, 'register-repositories').text, /added in Unfold: acme\/app\. Ploeg does not know it/);
 });
 
 test('under tenancy.enforce only an Admin membership of the Tenant manages it', async t => {
