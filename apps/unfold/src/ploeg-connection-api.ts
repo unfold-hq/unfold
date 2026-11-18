@@ -11,8 +11,20 @@ export type PloegTrackerConnection = {
 export type PloegFlowStart = { flow: { id: string; method: string; expiresAt: string; state: string }; authorizeUrl?: string };
 /** One flow start: a pasted-token flow, or an OAuth flow that returns to `redirectUri`. */
 export type PloegFlowInput = { kind: string; instance: string; method: 'token' | 'oauth'; label: string; handOverAgent: boolean; redirectUri?: string };
-/** One List or other tracker container a connection can see, for the List picker. */
-export type PloegTrackerScope = { id: string; name: string; path: string[] };
+/**
+ * One container a tracker connection reaches (Ploeg ADR-0196): ClickUp's Workspace, Space, Folder or List. `ref` is
+ * what a deeper read takes as `parent`; only a `bindable` one can be bound. Its name is the tracker's text, kept under
+ * `untrusted` so it is only ever shown escaped, never as markup or instructions.
+ */
+export type PloegTrackerScope = { kind: string; id: string; ref: string; bindable: boolean; browsable: boolean; untrusted: { name: string } };
+/** One level of Scopes (Ploeg ADR-0196 `trackerScopesResponse`): the level read, its Scopes, the cursor of the next page and when Ploeg read the tracker. */
+export type PloegScopeLevel = { connection: string; parent: { kind: string; id: string } | null; scopes: PloegTrackerScope[]; nextCursor: string | null; fetchedAt: string };
+/** One open item of a Scope (Ploeg ADR-0196 `trackerScopeItemsResponse`), its title and status under `untrusted`. */
+export type PloegScopeItem = { id: string; url: string; updatedAt: string | null; untrusted: { title: string; status: string } };
+/** One page of a Scope's open items. */
+export type PloegScopeItems = { items: PloegScopeItem[]; nextCursor: string | null };
+/** One item (Ploeg ADR-0196 `trackerItemResponse`): the preview fields, its Scope, whether it is closed, and its text under `untrusted`. */
+export type PloegTrackerItem = { id: string; url: string; scope: string; closed: boolean; createdAt: string | null; updatedAt: string | null; untrusted: { title: string; description: string; labels: string[] } };
 /** A Scope binding's state (Ploeg ADR-0186 section 4); `unknown` for a state this Unfold does not know yet. */
 export type PloegBindingState = 'active' | 'awaiting_webhook' | 'shadowed' | 'invalid' | 'unknown';
 /** A Scope binding or static route as Ploeg's binding read reports it (Ploeg ADR-0186 section 2). */
@@ -37,14 +49,16 @@ export interface PloegConnectionApi {
   startFlow(user: User, input: PloegFlowInput): Promise<PloegFlowStart>;
   completeFlow(user: User, input: { state: string; token: string } | { state: string; code: string }): Promise<{ connection: PloegTrackerConnection; replayed: boolean }>;
   removeConnection(user: User, id: string): Promise<void>;
-  scopes(user: User, connection: string, after?: string): Promise<{ scopes: PloegTrackerScope[]; next: string | null }>;
+  scopes(user: User, connection: string, parent?: string, after?: string): Promise<PloegScopeLevel>;
+  items(user: User, connection: string, scope: string, after?: string): Promise<PloegScopeItems>;
+  item(user: User, connection: string, id: string): Promise<PloegTrackerItem>;
   bindings(user: User): Promise<PloegBinding[]>;
   bind(user: User, team: string, input: PloegBindInput, dryRun: boolean): Promise<PloegBindResult>;
   unbind(user: User, team: string, id: string): Promise<void>;
 }
 
 /** The one call the live adapter needs: `PloegClient.operatorCall`. */
-export type OperatorCall = (user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown }) => Promise<Record<string, unknown> | null>;
+export type OperatorCall = (user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; slow?: boolean }) => Promise<Record<string, unknown> | null>;
 
 const invalid = () => new PloegError(502, 'ploeg_response', 'Ploeg returned a connection or binding Unfold could not read.');
 const object = (value: unknown): Record<string, unknown> => { if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid(); return value as Record<string, unknown>; };
@@ -80,6 +94,14 @@ export function binding(value: unknown): PloegBinding {
   };
 }
 
+const untrusted = (value: Record<string, unknown>) => value.untrusted === undefined || value.untrusted === null ? {} : object(value.untrusted);
+
+/** A Scope as Ploeg ADR-0196 lists it; its name stays under `untrusted`. */
+export function scope(value: unknown): PloegTrackerScope {
+  const data = object(value);
+  return { kind: text(data.kind, 64), id: text(data.id, 256), ref: text(data.ref, 320), bindable: data.bindable === true, browsable: data.browsable === true, untrusted: { name: optional(untrusted(data).name, 4096) ?? '' } };
+}
+
 export function bindingCheck(value: unknown): PloegBindingCheck {
   const data = object(value);
   const status = data.status ?? (data.ok === true ? 'ok' : data.ok === false ? 'problem' : undefined);
@@ -111,15 +133,28 @@ export class HttpPloegConnectionApi implements PloegConnectionApi {
   }
 
   async completeFlow(user: User, input: { state: string; token: string } | { state: string; code: string }): Promise<{ connection: PloegTrackerConnection; replayed: boolean }> {
-    const data = object(await this.call(user, 'connection-flows/complete', { method: 'POST', body: input }));
+    const data = object(await this.call(user, 'connection-flows/complete', { method: 'POST', body: input, slow: true }));
     return { connection: trackerConnection(data.connection), replayed: data.replayed === true };
   }
 
   async removeConnection(user: User, id: string): Promise<void> { await this.call(user, `tracker-connections/${segment(id)}`, { method: 'DELETE' }); }
 
-  async scopes(user: User, connection: string, after?: string): Promise<{ scopes: PloegTrackerScope[]; next: string | null }> {
-    const data = object(await this.call(user, `tracker-connections/${segment(connection)}/scopes?${new URLSearchParams({ limit: '200', ...(after ? { after } : {}) })}`));
-    return { scopes: list(data.scopes ?? data.items, entry => { const scope = object(entry); return { id: text(scope.id, 512), name: text(scope.name, 500), path: list(scope.path, part => text(part, 200), 10) }; }, 200), next: optional(data.next ?? data.after, 512) };
+  async scopes(user: User, connection: string, parent?: string, after?: string): Promise<PloegScopeLevel> {
+    const data = object(await this.call(user, `tracker-connections/${segment(connection)}/scopes?${new URLSearchParams({ ...(parent ? { parent } : {}), ...(after ? { after } : {}), limit: '200' })}`));
+    const level = data.parent === null || data.parent === undefined ? null : object(data.parent);
+    return { connection: text(data.connection, 128), parent: level ? { kind: text(level.kind, 64), id: text(level.id, 256) } : null, scopes: list(data.scopes, scope, 200), nextCursor: optional(data.nextCursor, 512), fetchedAt: text(data.fetchedAt, 64) };
+  }
+
+  async items(user: User, connection: string, scopeId: string, after?: string): Promise<PloegScopeItems> {
+    const data = object(await this.call(user, `tracker-connections/${segment(connection)}/scopes/${segment(scopeId)}/items${after ? `?${new URLSearchParams({ after })}` : ''}`));
+    return { items: list(data.items, item => { const entry = object(item); const said = untrusted(entry); return { id: text(entry.id, 256), url: text(entry.url, 2048), updatedAt: optional(entry.updatedAt, 64), untrusted: { title: optional(said.title, 4096) ?? '', status: optional(said.status, 4096) ?? '' } }; }, 100), nextCursor: optional(data.nextCursor, 512) };
+  }
+
+  async item(user: User, connection: string, id: string): Promise<PloegTrackerItem> {
+    const data = object(await this.call(user, `tracker-connections/${segment(connection)}/items/${segment(id)}`));
+    const entry = data.item === undefined ? data : object(data.item);
+    const said = untrusted(entry);
+    return { id: text(entry.id, 256), url: text(entry.url, 2048), scope: optional(entry.scope, 256) ?? '', closed: entry.closed === true, createdAt: optional(entry.createdAt, 64), updatedAt: optional(entry.updatedAt, 64), untrusted: { title: optional(said.title, 4096) ?? '', description: optional(said.description, 16384) ?? '', labels: list(said.labels, label => text(label, 4096), 100) } };
   }
 
   async bindings(user: User): Promise<PloegBinding[]> {

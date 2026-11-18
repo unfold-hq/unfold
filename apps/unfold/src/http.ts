@@ -333,7 +333,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const onboarding = new Onboarding({ store, ploeg, config, insight, stored: { repositories: () => trackerConnections.repositories.repositories().map(repository => ({ id: repository.id, name: repository.name, url: repository.url, state: trackerConnections.repositories.state(repository) })), sources: () => trackerConnections.sources().length } });
   const clickup = new ClickUpOnboarding({
     steps: onboarding, api: new HttpPloegConnectionApi((user, path, options) => ploeg.operatorCall(user, path, options)), reads: ploeg, connections: trackerConnections, config, store, demo: ploeg.isDemo,
-    personal: user => { try { const login = links?.describe(user.id, 'clickup').login; return login ? [user.name, login] : [user.name]; } catch { return [user.name]; } },
+    personal: user => { try { const login = links?.describe(user.id, 'clickup').login; return { ids: [], names: login ? [user.name, login] : [user.name] }; } catch { return { ids: [], names: [user.name] }; } },
     audit: change => audit.record({ actor: auditActor(change.user), tenants: [change.tenant], fact: { kind: 'entity', action: change.action, entity: { type: change.entity, uid: change.uid, name: change.name, data: change.data }, outcome: 'success' } }),
   });
   onboarding.useStepLines(manage => clickup.lines(manage));

@@ -36,7 +36,10 @@ export async function clickUpRoute(service: ClickUpOnboarding, request: ClickUpR
     if (path === '/api/onboarding/clickup/bindings' && method === 'POST') return { status: 200, body: await service.bind(user, await body()) };
     const connection = path.match(/^\/api\/onboarding\/clickup\/connections\/(tc-[a-f0-9]{12})(?:\/(lists))?$/);
     if (connection && !connection[2] && method === 'DELETE') return { status: 200, body: await service.removeConnection(user, connection[1]) };
-    if (connection && connection[2] && method === 'GET') return { status: 200, body: await service.lists(user, connection[1], query.get('after') ?? undefined) };
+    if (connection && connection[2] && method === 'GET') return { status: 200, body: await service.lists(user, connection[1], query.get('parent') ?? undefined, query.get('after') ?? undefined) };
+    const orphan = path.match(/^\/api\/onboarding\/clickup\/unrecorded\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})(?:\/(adopt))?$/);
+    if (orphan && orphan[2] && method === 'POST') return { status: 201, body: { connection: await service.adopt(user, orphan[1]) } };
+    if (orphan && !orphan[2] && method === 'DELETE') return { status: 200, body: await service.removeUnrecorded(user, orphan[1]) };
     const binding = path.match(/^\/api\/onboarding\/clickup\/bindings\/([a-z0-9][a-z0-9-]{0,63})(?:\/(check))?$/);
     if (binding && binding[2] && method === 'POST') return { status: 200, body: { source: await service.check(user, binding[1]) } };
     if (binding && !binding[2] && method === 'DELETE') return { status: 200, body: await service.unbind(user, binding[1]) };
@@ -49,4 +52,4 @@ export async function clickUpRoute(service: ClickUpOnboarding, request: ClickUpR
   return undefined;
 }
 
-const known = [/^\/api\/onboarding\/clickup(?:\/(?:token|oauth|callback|map|bindings))?$/, /^\/api\/onboarding\/clickup\/connections\/(tc-[a-f0-9]{12})(?:\/(lists))?$/, /^\/api\/onboarding\/clickup\/bindings\/([a-z0-9][a-z0-9-]{0,63})(?:\/(check))?$/];
+const known = [/^\/api\/onboarding\/clickup(?:\/(?:token|oauth|callback|map|bindings))?$/, /^\/api\/onboarding\/clickup\/connections\/(tc-[a-f0-9]{12})(?:\/(lists))?$/, /^\/api\/onboarding\/clickup\/bindings\/([a-z0-9][a-z0-9-]{0,63})(?:\/(check))?$/, /^\/api\/onboarding\/clickup\/unrecorded\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})(?:\/(adopt))?$/];
