@@ -123,6 +123,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Ploeg | [0158](../../apps/ploeg/docs/adrs/0158-a-stable-release-is-a-soaked-candidate-promoted-by-fast-forwarding-main.md) | A stable release is a soaked candidate, promoted by fast-forwarding main | 2026-10-26 | — |
 | Ploeg | [0161](../../apps/ploeg/docs/adrs/0161-ploeg-reaches-its-first-consumer-only-through-published-contracts-and-the-consumer-rolls-back-by-pinning-an-earlier-release.md) | Ploeg reaches its first consumer only through published contracts, and the consumer rolls back by pinning an earlier release | 2026-10-27 | — |
 | Ploeg | [0191](../../apps/ploeg/docs/adrs/0191-contract-schemas-are-identified-by-their-url-on-the-projects-github-pages-site.md) | Contract schemas are identified by their URL on the project's GitHub Pages site | 2026-11-16 | — |
+| Ploeg | [0201](../../apps/ploeg/docs/adrs/0201-the-worker-meets-its-harness-launcher-on-the-pods-loopback-with-a-per-pod-token.md) | The worker meets its harness launcher on the pod's loopback with a per-pod token | 2026-11-18 | — |
 | Unfold | [0001](../../apps/unfold/docs/adrs/0001-the-human-workbench-beside-ploeg.md) | The human workbench beside Ploeg | 2026-09-09 | — |
 | Unfold | [0002](../../apps/unfold/docs/adrs/0002-native-node-and-single-writer-storage.md) | Native Node and one durable writer | 2026-09-09 | — |
 | Unfold | [0003](../../apps/unfold/docs/adrs/0003-runtime-workspace-and-credential-seams.md) | Keep harness, workspace and credential seams distinct | 2026-09-09 | — |
