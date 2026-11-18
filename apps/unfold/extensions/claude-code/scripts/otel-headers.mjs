@@ -22,7 +22,7 @@ const self = fileURLToPath(import.meta.url);
 const tokenPattern = /^[\x21-\x7e]{1,16384}$/;
 const userCodePattern = /^[A-Za-z0-9-]{1,64}$/;
 
-/** The configuration, all from the environment: issuer, client id, scopes, optional audience, the header to print and the audience of the token the plugin's sign-in exchanges for. */
+/** The configuration, all from the environment: issuer, client id, scopes, optional audience, the header to print, and the audience and scopes of the token the plugin's sign-in exchanges for. */
 export function configuration(env = process.env) {
   const issuer = String(env.UNFOLD_TELEMETRY_ISSUER ?? '').trim().replace(/\/+$/, '');
   let valid = false;
@@ -34,6 +34,7 @@ export function configuration(env = process.env) {
     audience: String(env.UNFOLD_TELEMETRY_AUDIENCE ?? '').trim(),
     header: String(env.UNFOLD_TELEMETRY_HEADER ?? '').trim() || 'Authorization',
     exchangeAudience: String(env.UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE ?? '').trim() || 'unfold',
+    exchangeScopes: String(env.UNFOLD_TELEMETRY_EXCHANGE_SCOPES ?? '').trim() || 'openid profile email',
     notify: env.UNFOLD_TELEMETRY_NOTIFY !== '0',
     debug: env.UNFOLD_TELEMETRY_DEBUG === '1',
   };
@@ -383,7 +384,7 @@ export async function exchangeForUnfold(configurationValues, { env = process.env
   let discovery;
   try { discovery = await discover(configurationValues.issuer, { env, fetcher, now, timeoutMs: tokenDeadlineMs }); } catch { return ''; }
   let result;
-  try { result = await postForm(fetcher, discovery.tokenEndpoint, { grant_type: exchangeGrant, client_id: configurationValues.clientId, subject_token: session.accessToken, subject_token_type: accessTokenType, audience: configurationValues.exchangeAudience }, signal); } catch { return ''; }
+  try { result = await postForm(fetcher, discovery.tokenEndpoint, { grant_type: exchangeGrant, client_id: configurationValues.clientId, subject_token: session.accessToken, subject_token_type: accessTokenType, audience: configurationValues.exchangeAudience, scope: configurationValues.exchangeScopes }, signal); } catch { return ''; }
   const token = String(result.answer.access_token ?? '');
   return result.ok && tokenPattern.test(token) ? token : '';
 }

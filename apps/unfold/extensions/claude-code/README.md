@@ -65,6 +65,7 @@ With `UNFOLD_URL` set and no credential, the `SessionStart` hook starts Unfold's
 | `UNFOLD_TELEMETRY_AUDIENCE` | Sent as `audience` on the device authorization and refresh requests when the issuer wants one |
 | `UNFOLD_TELEMETRY_HEADER` | The header to print, default `Authorization`; the value is always `Bearer <access token>` |
 | `UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE` | The `audience` of the token `token` exchanges for, default `unfold` |
+| `UNFOLD_TELEMETRY_EXCHANGE_SCOPES` | The `scope` of that exchange, default `openid profile email`: the claims Unfold's role mapping and provisioning read (groups, name, email). An exchange without a scope gives a token with no groups, which Unfold refuses as not entitled |
 | `UNFOLD_TELEMETRY_STORE` | `keychain` or `file`; otherwise the Keychain on macOS and the file elsewhere |
 | `UNFOLD_TELEMETRY_NOTIFY` | `0` shows no desktop notification |
 | `UNFOLD_TELEMETRY_DEBUG` | `1` prints errors on stderr, tokens masked |
@@ -75,7 +76,7 @@ With `UNFOLD_URL` set and no credential, the `SessionStart` hook starts Unfold's
 | `login` | Runs the device flow in the foreground and prints its progress | 0 approved; 1 denied, expired or failed; 2 not configured |
 | `status` | The issuer and client this machine is signed in to, as whom, until when, whether the helper refreshes it, where it is kept, and the state of the last sign-in | 0, or 2 when not configured |
 | `logout` | Deletes the stored session. The refresh token is not revoked at the issuer | 0, or 2 when not configured |
-| `token` | Prints one line: an access token for Unfold from RFC 8693 token exchange at the issuer's token endpoint, `subject_token` the telemetry access token, `subject_token_type=urn:ietf:params:oauth:token-type:access_token`, `audience` from `UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE`. Never opens a browser and gives up after five seconds | 0 printed; 1 no session or refused; 2 not configured |
+| `token` | Prints one line: an access token for Unfold from RFC 8693 token exchange at the issuer's token endpoint, `subject_token` the telemetry access token, `subject_token_type=urn:ietf:params:oauth:token-type:access_token`, `audience` from `UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE`, `scope` from `UNFOLD_TELEMETRY_EXCHANGE_SCOPES`. Never opens a browser and gives up after five seconds | 0 printed; 1 no session or refused; 2 not configured |
 
 The session (refresh token, access token, expiry, issuer, client id and the person's name from the ID token) is one generic password in the macOS login Keychain, service `dev.unfold.telemetry`, account the issuer, handed to `security -i` on standard input; elsewhere, or when the Keychain is missing or locked, `plugins/data/unfold/telemetry.json` under `$CLAUDE_CONFIG_DIR` or `~/.claude`, mode 0600. `telemetry-state.json` beside it keeps the flow's progress and the discovery document, and no token. With `UNFOLD_TELEMETRY_ISSUER` set and no `UNFOLD_IDP_TOKEN_COMMAND`, the [sign-in](#sign-in) runs `node <plugin>/scripts/otel-headers.mjs token` as its identity-provider token source, so the telemetry approval is also the Unfold sign-in.
 
