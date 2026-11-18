@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { UnfoldClient, ApiError, normalizeServerUrl, type Secrets } from '../src/client.ts';
+import { UnfoldClient, ApiError, gatewayFault, gatewayHeaderName, gatewayHeaderValue, gatewayWantsCredential, normalizeServerUrl, storedGatewayHeaders, workbenchFault, type Secrets } from '../src/client.ts';
 import { application, createInput, request, sessionUntil } from '../../../test/api-support.ts';
 import { signInForEditor, workbench } from '../../../test/oidc-support.ts';
 import { browserLogin } from '../src/browser-login.ts';
@@ -161,6 +161,161 @@ test('redirects never forward a stored control-plane cookie to a different desti
   assert.equal(targetCalls, 0);
 });
 
+function answer(status: number, headers: Record<string, string> = {}) {
+  return { status, headers: new Headers(headers) };
+}
+
+test('a redirect says where it went and what to do, and never repeats the query of a sign-in page', () => {
+  const origin = 'https://unfold.example';
+  const moved = gatewayFault(origin, '/api/bootstrap', answer(308, { location: 'https://workbench.example/api/bootstrap' }), false);
+  assert.equal(moved?.code, 'redirect');
+  assert.match(moved!.message, /^The workbench at unfold\.example redirects to https:\/\/workbench\.example\. If that is your workbench, run Unfold: Connect to Workbench with that origin\./);
+  assert.equal(gatewayWantsCredential(moved), false, 'a moved workbench needs its new origin, not a gateway credential');
+
+  const signIn = gatewayFault(origin, '/api/bootstrap', answer(302, { location: 'https://team.gateway.example/login/unfold.example?kid=abc&meta=eyJhbGciOi' }), false);
+  assert.equal(signIn?.code, 'gateway_sign_in');
+  assert.equal(signIn?.status, 302);
+  assert.match(signIn!.message, /something in front of it redirected the request to team\.gateway\.example\. That is usually an access gateway asking for a sign-in the editor cannot complete\. If it accepts a credential in request headers, such as a service token, store it with Unfold: Set Access Gateway Headers\. Credentials are never forwarded\.$/);
+  assert.doesNotMatch(signIn!.message, /kid=|meta=|eyJ/);
+  assert.equal(gatewayWantsCredential(signIn), true);
+
+  assert.match(gatewayFault(origin, '/api/bootstrap', answer(302, { location: 'https://team.gateway.example/login' }), true)!.message, /It did not accept the access gateway headers stored for this workbench; replace them with Unfold: Set Access Gateway Headers\./);
+  assert.match(gatewayFault(origin, '/api/sessions?x=1', answer(302, { location: '/oauth2/sign_in?rd=%2Fapi%2Fsessions' }), false)!.message, /redirected the request to its own path \/oauth2\/sign_in\. /);
+  assert.match(gatewayFault(origin, '/api/bootstrap', answer(302), false)!.message, /redirected the request to another address\./);
+  assert.match(gatewayFault(origin, '/api/bootstrap', answer(302, { location: 'http://[' }), false)!.message, /redirected the request to another address\./);
+});
+
+const gatewayJson = JSON.stringify({ message: 'Unauthorized. You do not have permission to view this.', status_code: 401, aud: 'opaque-audience' });
+const workbenchJson = JSON.stringify({ error: { code: 'unauthenticated', message: 'Sign in to your workbench.' } });
+
+test('a 401 or 403 is the workbench\'s own only when it names a fault as the Unfold JSON API does', () => {
+  const origin = 'https://unfold.example';
+  assert.deepEqual(workbenchFault(workbenchJson), { code: 'unauthenticated', message: 'Sign in to your workbench.' });
+  assert.deepEqual(workbenchFault('{"error":{"code":"csrf"}}'), { code: 'csrf', message: '' });
+  for (const body of [undefined, '', '<html>Forbidden</html>', gatewayJson, '{"error":"unauthorized"}', '{"error":{"code":""}}', '{"error":{"code":401}}', 'null', '[]']) assert.equal(workbenchFault(body), undefined);
+
+  const bare = gatewayFault(origin, '/api/bootstrap', answer(403, { 'content-type': 'text/html; charset=UTF-8' }), false, '<html>Forbidden</html>');
+  assert.equal(bare?.code, 'gateway_refused');
+  assert.equal(bare?.status, 0, 'a gateway 401 or 403 is not the workbench saying who may do what');
+  assert.match(bare!.message, /^The server at unfold\.example refused the request with 403 and did not return the Unfold JSON API\. Check the server URL\. If an access gateway in front of the workbench accepts a credential in request headers, such as a service token, store it with Unfold: Set Access Gateway Headers\.$/);
+  const json = gatewayFault(origin, '/api/bootstrap', answer(401, { 'content-type': 'application/json; charset=utf-8' }), true, gatewayJson);
+  assert.equal(json?.code, 'gateway_refused', 'a gateway that refuses in JSON is still not the workbench');
+  assert.match(json!.message, /^An access gateway in front of the workbench at unfold\.example refused the request with 401\. The headers stored for it may be wrong, expired or revoked; replace them with Unfold: Set Access Gateway Headers\.$/);
+  assert.equal(gatewayFault(origin, '/api/bootstrap', answer(401), true)?.code, 'gateway_refused', 'a refusal without a body is not the workbench either');
+  for (const [workbench, body] of [[answer(200, { 'content-type': 'application/json' }), '{}'], [answer(401, { 'content-type': 'application/json; charset=utf-8' }), workbenchJson], [answer(403, { 'content-type': 'application/json' }), '{"error":{"code":"origin","message":"Refused."}}'], [answer(404, { 'content-type': 'text/html' }), 'Not found'], [answer(502, { 'content-type': 'text/html' }), 'Bad gateway']] as const) assert.equal(gatewayFault(origin, '/api/bootstrap', workbench, true, body), undefined);
+});
+
+test('access gateway headers are checked as input and can never replace a header the editor sets', async () => {
+  assert.equal(gatewayHeaderName(' CF-Access-Client-Id '), 'CF-Access-Client-Id');
+  assert.equal(gatewayHeaderValue(' abc.access '), 'abc.access');
+  for (const name of ['', 'Two Words', 'Name: value', 'Naïve', 'x'.repeat(65)]) assert.throws(() => gatewayHeaderName(name), /Enter one header name/);
+  for (const name of ['Authorization', 'cookie', 'ORIGIN', 'Host', 'Accept', 'Content-Type', 'X-Unfold-Request', 'Transfer-Encoding']) assert.throws(() => gatewayHeaderName(name), /The editor sets .+ itself/);
+  for (const value of ['', '   ', 'line\nbreak', 'carriage\rreturn', 'nul\0', 'café', 'x'.repeat(8193)]) assert.throws(() => gatewayHeaderValue(value), /Enter the value on one line/);
+
+  assert.deepEqual(storedGatewayHeaders(undefined), {});
+  for (const unreadable of ['not json', '[]', '"text"', 'null']) assert.deepEqual(storedGatewayHeaders(unreadable), {});
+  assert.deepEqual(storedGatewayHeaders(JSON.stringify({ Authorization: 'Bearer stolen', 'X-Gateway-Token': 'kept', 'X-Number': 5, 'X-Break': 'a\nb' })), { 'X-Gateway-Token': 'kept' });
+
+  const secrets = new MemorySecrets();
+  const client = new UnfoldClient('https://unfold.example', secrets);
+  assert.equal(client.gatewayKey, 'unfold.gateway:https://unfold.example');
+  await client.setGatewayHeaders({ 'X-Gateway-Id': 'one', 'x-gateway-id': 'two', 'X-Gateway-Secret': ' three ' });
+  assert.deepEqual(await client.gatewayHeaders(), { 'x-gateway-id': 'two', 'X-Gateway-Secret': 'three' }, 'a name is one header whatever its case');
+  assert.deepEqual(await new UnfoldClient('https://other.example', secrets).gatewayHeaders(), {}, 'headers belong to one origin');
+  await assert.rejects(client.setGatewayHeaders({ Cookie: 'unfold=taken' }), /The editor sets Cookie itself/);
+  await assert.rejects(client.setGatewayHeaders(Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`X-Header-${index}`, 'v']))), /at most 16 access gateway headers/);
+  assert.deepEqual(Object.keys(await client.gatewayHeaders()), ['x-gateway-id', 'X-Gateway-Secret'], 'a refused change keeps what was stored');
+  await client.setGatewayHeaders({});
+  assert.equal(secrets.values.has(client.gatewayKey), false, 'an empty set forgets the secret');
+});
+
+test('behind an access gateway, the stored headers go with API calls, the event stream and downloads, to that workbench only', async t => {
+  let elsewhere = 0;
+  const loginPage = createServer((_request, response) => { elsewhere++; response.end('sign in'); });
+  await new Promise<void>(resolve => loginPage.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => loginPage.close(() => resolve())));
+  const loginAddress = loginPage.address();
+  assert(loginAddress && typeof loginAddress !== 'string');
+  const seen: Array<{ path: string; headers: Record<string, string | string[] | undefined> }> = [];
+  const gateway = createServer((request, response) => {
+    seen.push({ path: request.url ?? '', headers: request.headers });
+    if (request.headers['x-gateway-id'] !== 'editors' || request.headers['x-gateway-secret'] !== 'opaque-gateway-secret') { response.writeHead(302, { Location: `http://127.0.0.1:${loginAddress.port}/login?next=${encodeURIComponent(request.url ?? '')}`, 'Content-Type': 'text/html' }); response.end('<html>sign in</html>'); return; }
+    if (request.url === '/api/bootstrap') { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ user: { name: 'Ada' }, teams: [] })); return; }
+    if (request.url?.startsWith('/api/sessions/session-1/events')) { response.writeHead(200, { 'Content-Type': 'text/event-stream' }); response.end(`data: ${JSON.stringify({ id: 1, sessionId: 'session-1', type: 'session.started' })}\n\n`); return; }
+    if (request.url?.startsWith('/api/sessions/session-1/candidate/download')) { response.writeHead(200, { 'Content-Type': 'text/plain' }); response.end('diff --git a/file b/file\n'); return; }
+    response.writeHead(404, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { code: 'not_found', message: 'Not found.' } }));
+  });
+  await new Promise<void>(resolve => gateway.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => gateway.close(() => resolve())));
+  const address = gateway.address();
+  assert(address && typeof address !== 'string');
+  const secrets = new MemorySecrets();
+  const client = new UnfoldClient(`http://127.0.0.1:${address.port}`, secrets);
+  await secrets.store(client.secretKey, 'unfold=opaque-control-cookie');
+
+  await assert.rejects(client.bootstrap(), (error: unknown) => error instanceof ApiError && error.code === 'gateway_sign_in' && error.message.includes(`redirected the request to 127.0.0.1:${loginAddress.port}.`) && !error.message.includes('next='));
+  await assert.rejects(client.stream('session-1', 0, { onEvent: () => undefined }, new AbortController().signal), (error: unknown) => gatewayWantsCredential(error));
+  await assert.rejects(client.downloadCandidate('session-1', 'patch'), (error: unknown) => gatewayWantsCredential(error));
+  assert.equal(await secrets.get(client.secretKey), 'unfold=opaque-control-cookie', 'a gateway in the way never signs the editor out of the workbench');
+
+  await client.setGatewayHeaders({ 'X-Gateway-Id': 'editors', 'X-Gateway-Secret': 'opaque-gateway-secret' });
+  seen.length = 0;
+  assert.equal((await client.bootstrap()).user.name, 'Ada');
+  const events: number[] = [];
+  await client.stream('session-1', 0, { onEvent: event => events.push(event.id) }, new AbortController().signal);
+  assert.deepEqual(events, [1]);
+  assert.equal(Buffer.from(await client.downloadCandidate('session-1', 'patch')).toString('utf8'), 'diff --git a/file b/file\n');
+  assert.deepEqual(seen.map(request => request.path.split('?')[0]), ['/api/bootstrap', '/api/sessions/session-1/events', '/api/sessions/session-1/candidate/download']);
+  for (const request of seen) {
+    assert.equal(request.headers['x-gateway-secret'], 'opaque-gateway-secret');
+    assert.equal(request.headers.cookie, 'unfold=opaque-control-cookie', 'the workbench credential still travels beside the gateway headers');
+    assert.equal(request.headers['x-unfold-request'], '1');
+    assert.equal(request.headers.origin, client.origin);
+  }
+  assert.equal(elsewhere, 0, 'neither credential follows a redirect');
+});
+
+test('an access gateway that refuses the stored headers keeps the workbench sign-in, and the workbench\'s own 401 still ends it', async t => {
+  let mode: 'gateway-json' | 'gateway-html' | 'gateway-large' | 'workbench-forbidden' | 'workbench' = 'gateway-json';
+  const server = createServer((_request, response) => {
+    if (mode === 'gateway-json') { response.writeHead(401, { 'Content-Type': 'application/json; charset=utf-8' }); response.end(gatewayJson); return; }
+    if (mode === 'gateway-html') { response.writeHead(403, { 'Content-Type': 'text/html' }); response.end('<html>Forbidden</html>'); return; }
+    if (mode === 'gateway-large') { response.writeHead(401, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { code: 'unauthenticated', message: 'x'.repeat(70_000) } })); return; }
+    if (mode === 'workbench-forbidden') { response.writeHead(403, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { code: 'origin', message: 'Unfold refused this change because it came from another website.' } })); return; }
+    response.writeHead(401, { 'Content-Type': 'application/json' }); response.end(workbenchJson);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const secrets = new MemorySecrets();
+  const client = new UnfoldClient(`http://127.0.0.1:${address.port}`, secrets);
+  await secrets.store(client.secretKey, 'unfold=opaque-control-cookie');
+  await client.setGatewayHeaders({ 'X-Gateway-Secret': 'revoked' });
+  const refused = (error: unknown) => error instanceof ApiError && error.code === 'gateway_refused' && error.status === 0 && /may be wrong, expired or revoked/.test(error.message);
+  for (const gateway of ['gateway-json', 'gateway-html', 'gateway-large'] as const) {
+    mode = gateway;
+    await assert.rejects(client.bootstrap(), refused, `${gateway} on an API call`);
+    await assert.rejects(client.stream('session-1', 0, { onEvent: () => undefined }, new AbortController().signal), refused, `${gateway} on the event stream`);
+    await assert.rejects(client.downloadCandidate('session-1', 'patch'), refused, `${gateway} on a download`);
+    assert.equal(await secrets.get(client.secretKey), 'unfold=opaque-control-cookie', `${gateway} keeps the workbench sign-in`);
+  }
+  mode = 'workbench-forbidden';
+  await assert.rejects(client.bootstrap(), (error: unknown) => error instanceof ApiError && error.status === 403 && error.code === 'origin' && error.message === 'Unfold refused this change because it came from another website.');
+  await assert.rejects(client.stream('session-1', 0, { onEvent: () => undefined }, new AbortController().signal), (error: unknown) => error instanceof ApiError && error.code === 'stream_unavailable');
+  await assert.rejects(client.downloadCandidate('session-1', 'patch'), (error: unknown) => error instanceof ApiError && error.code === 'download_failed');
+  assert.equal(await secrets.get(client.secretKey), 'unfold=opaque-control-cookie', 'a 403 from the workbench is no sign-out');
+  mode = 'workbench';
+  await assert.rejects(client.bootstrap(), (error: unknown) => error instanceof ApiError && error.status === 401 && error.code === 'unauthenticated' && error.message === 'Sign in to your workbench.');
+  assert.equal(await secrets.get(client.secretKey), undefined, 'the workbench itself ended the session');
+  for (const again of [() => client.stream('session-1', 0, { onEvent: () => undefined }, new AbortController().signal), () => client.downloadCandidate('session-1', 'patch')]) {
+    await secrets.store(client.secretKey, 'unfold=opaque-control-cookie');
+    await assert.rejects(again(), (error: unknown) => error instanceof ApiError && ['unauthenticated', 'download_failed'].includes(error.code));
+    assert.equal(await secrets.get(client.secretKey), undefined);
+  }
+  assert.deepEqual(await client.gatewayHeaders(), { 'X-Gateway-Secret': 'revoked' }, 'signing out of the workbench leaves the access gateway headers');
+});
+
 test('invalid route identifiers are rejected before any network action', async () => {
   const client = new UnfoldClient('http://127.0.0.1:1', new MemorySecrets());
   for (const id of ['../login', 'abc/../def', 'session?token=secret', 'https://evil.example']) {
@@ -273,7 +428,7 @@ test('candidate downloads reject redirects and oversized responses without forwa
   const secrets = new MemorySecrets();
   const client = new UnfoldClient(`http://127.0.0.1:${address.port}`, secrets);
   await secrets.store(client.secretKey, 'unfold=opaque-download-cookie');
-  await assert.rejects(client.downloadCandidate('session-123', 'bundle'), (error: unknown) => error instanceof ApiError && error.code === 'redirect');
+  await assert.rejects(client.downloadCandidate('session-123', 'bundle'), (error: unknown) => error instanceof ApiError && error.code === 'gateway_sign_in');
   assert.equal(targetCalls, 0);
   mode = 'oversized';
   await assert.rejects(client.downloadCandidate('session-123', 'bundle'), (error: unknown) => error instanceof ApiError && error.code === 'response_too_large');

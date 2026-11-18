@@ -65,18 +65,145 @@ export function credentialHeaders(stored: string | undefined): Record<string, st
   return editorCredential.test(stored) ? { Authorization: `Bearer ${stored}` } : { Cookie: stored };
 }
 
+/** Extra request headers a person stores for one workbench, for an access gateway in front of it that wants its own credential. */
+export type GatewayHeaders = Record<string, string>;
+
+export const gatewayHeaderLimit = 16;
+const gatewayHeaderToken = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$/;
+const gatewayHeaderText = /^[\x20-\x7e]{1,8192}$/;
+const ownedHeaders = new Set(['accept', 'authorization', 'connection', 'content-length', 'content-type', 'cookie', 'expect', 'host', 'keep-alive', 'origin', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'x-unfold-request']);
+
+/** A gateway header's name as it will be sent; throws for a name that is no header name or that the editor sets itself. */
+export function gatewayHeaderName(value: string): string {
+  const name = value.trim();
+  if (!gatewayHeaderToken.test(name)) throw new Error('Enter one header name of at most 64 characters, without a colon or spaces.');
+  if (ownedHeaders.has(name.toLowerCase())) throw new Error(`The editor sets ${name} itself, so an access gateway header cannot replace it.`);
+  return name;
+}
+
+/** A gateway header's value as it will be sent; throws for an empty, multi-line, non-ASCII or oversized value. */
+export function gatewayHeaderValue(value: string): string {
+  const text = value.trim();
+  if (!gatewayHeaderText.test(text)) throw new Error('Enter the value on one line, in printable ASCII, at most 8192 characters.');
+  return text;
+}
+
+/** The headers a stored secret holds; an unreadable secret or an entry that would not pass as input counts as absent. */
+export function storedGatewayHeaders(stored: string | undefined): GatewayHeaders {
+  if (!stored) return {};
+  let parsed: unknown;
+  try { parsed = JSON.parse(stored); } catch { return {}; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const headers: GatewayHeaders = {};
+  for (const [name, value] of Object.entries(parsed).slice(0, gatewayHeaderLimit)) {
+    if (typeof value !== 'string') continue;
+    try { headers[gatewayHeaderName(name)] = gatewayHeaderValue(value); } catch { continue; }
+  }
+  return headers;
+}
+
+type Answer = { status: number; headers: { get(name: string): string | null } };
+
+export type WorkbenchFault = { code: string; message: string };
+
+/** The fault a body names the way the Unfold JSON API names every refusal, `{ error: { code, message } }`, or undefined for any other body. */
+export function workbenchFault(body: string | undefined): WorkbenchFault | undefined {
+  let data: { error?: { code?: unknown; message?: unknown } } | undefined;
+  try { data = JSON.parse(body ?? ''); } catch { return undefined; }
+  const code = data?.error?.code;
+  if (typeof code !== 'string' || !code) return undefined;
+  return { code, message: typeof data?.error?.message === 'string' ? data.error.message : '' };
+}
+
+const refusalBodyLimit = 65_536;
+
+async function boundedText(response: Response, limit: number): Promise<string | undefined> {
+  const reader = response.body?.getReader();
+  if (!reader) return undefined;
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (size <= limit) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      chunks.push(chunk.value);
+    }
+  } catch { return undefined; }
+  finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+  return size > limit ? undefined : Buffer.concat(chunks).toString('utf8');
+}
+
+function redirectTarget(origin: string, location: string | null): URL | undefined {
+  if (!location) return undefined;
+  try { return new URL(location, origin); } catch { return undefined; }
+}
+
+/**
+ * The fault when something in front of the workbench answered in its place: a redirect, which the workbench never sends
+ * on a route this client calls, or a 401 or 403 whose `body` does not name a fault as the Unfold JSON API does. Undefined
+ * when the workbench may have answered.
+ */
+export function gatewayFault(origin: string, path: string, answer: Answer, gatewayHeadersStored: boolean, body?: string): ApiError | undefined {
+  const host = new URL(origin).host;
+  if (answer.status >= 300 && answer.status < 400) {
+    const target = redirectTarget(origin, answer.headers.get('location'));
+    if (target && target.origin !== origin && target.pathname === new URL(path, origin).pathname) return new ApiError(answer.status, 'redirect', `The workbench at ${host} redirects to ${target.origin}. If that is your workbench, run Unfold: Connect to Workbench with that origin. Credentials are never forwarded.`);
+    const destination = !target ? 'another address' : target.origin === origin ? `its own path ${target.pathname}` : target.host;
+    const remedy = gatewayHeadersStored
+      ? 'It did not accept the access gateway headers stored for this workbench; replace them with Unfold: Set Access Gateway Headers.'
+      : 'If it accepts a credential in request headers, such as a service token, store it with Unfold: Set Access Gateway Headers.';
+    return new ApiError(answer.status, 'gateway_sign_in', `The workbench at ${host} did not answer: something in front of it redirected the request to ${destination}. That is usually an access gateway asking for a sign-in the editor cannot complete. ${remedy} Credentials are never forwarded.`);
+  }
+  if ((answer.status === 401 || answer.status === 403) && !workbenchFault(body)) {
+    return new ApiError(0, 'gateway_refused', gatewayHeadersStored
+      ? `An access gateway in front of the workbench at ${host} refused the request with ${answer.status}. The headers stored for it may be wrong, expired or revoked; replace them with Unfold: Set Access Gateway Headers.`
+      : `The server at ${host} refused the request with ${answer.status} and did not return the Unfold JSON API. Check the server URL. If an access gateway in front of the workbench accepts a credential in request headers, such as a service token, store it with Unfold: Set Access Gateway Headers.`);
+  }
+  return undefined;
+}
+
+/** Whether a failure is an access gateway in front of the workbench asking for a credential the editor did not send or that it refused. */
+export function gatewayWantsCredential(error: unknown): boolean {
+  return error instanceof ApiError && (error.code === 'gateway_sign_in' || error.code === 'gateway_refused');
+}
+
 export class UnfoldClient {
   readonly origin: string;
   readonly secretKey: string;
+  readonly gatewayKey: string;
   private readonly secrets: Secrets;
   private readonly requestTimeout: number;
   private readonly retryDelay: number;
   constructor(origin: string, secrets: Secrets, requestTimeout = 15_000, retryDelay = 750) {
     this.origin = normalizeServerUrl(origin);
     this.secretKey = `unfold.session:${this.origin}`;
+    this.gatewayKey = `unfold.gateway:${this.origin}`;
     this.secrets = secrets;
     this.requestTimeout = requestTimeout;
     this.retryDelay = retryDelay;
+  }
+  async gatewayHeaders(): Promise<GatewayHeaders> { return storedGatewayHeaders(await this.secrets.get(this.gatewayKey)); }
+  /** Replaces the access gateway headers of this workbench; an empty set forgets them. A name is one header whatever its case, and the last entry wins. */
+  async setGatewayHeaders(headers: GatewayHeaders): Promise<void> {
+    const checked = new Map<string, [string, string]>();
+    for (const [name, value] of Object.entries(headers)) checked.set(name.trim().toLowerCase(), [gatewayHeaderName(name), gatewayHeaderValue(value)]);
+    if (checked.size > gatewayHeaderLimit) throw new Error(`A workbench takes at most ${gatewayHeaderLimit} access gateway headers.`);
+    if (!checked.size) { await this.secrets.delete(this.gatewayKey); return; }
+    await this.secrets.store(this.gatewayKey, JSON.stringify(Object.fromEntries(checked.values())));
+  }
+  private async outgoing(accept: string): Promise<{ headers: Record<string, string>; gatewayHeadersStored: boolean }> {
+    const gateway = await this.gatewayHeaders();
+    const stored = await this.secrets.get(this.secretKey);
+    return { headers: { ...gateway, Accept: accept, Origin: this.origin, 'X-Unfold-Request': '1', ...credentialHeaders(stored) }, gatewayHeadersStored: Object.keys(gateway).length > 0 };
+  }
+  /** Throws when something in front of the workbench answered in its place; answers the workbench's own 401 or 403, whose body it has then read. */
+  private async refusal(path: string, response: Response, gatewayHeadersStored: boolean): Promise<WorkbenchFault | undefined> {
+    const refused = response.status === 401 || response.status === 403;
+    const body = refused ? await boundedText(response, refusalBodyLimit) : undefined;
+    const fault = gatewayFault(this.origin, path, response, gatewayHeadersStored, body);
+    if (fault) { await response.body?.cancel().catch(() => undefined); throw fault; }
+    return workbenchFault(body);
   }
   async request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
     if (!path.startsWith('/api/') || path.includes('://') || path.includes('..')) throw new Error('Invalid API route.');
@@ -88,9 +215,7 @@ export class UnfoldClient {
     }
   }
   private async attempt<T>(path: string, method: string, body?: unknown): Promise<T> {
-    const stored = await this.secrets.get(this.secretKey);
-    const headers: Record<string, string> = { Accept: 'application/json', Origin: this.origin, 'X-Unfold-Request': '1' };
-    Object.assign(headers, credentialHeaders(stored));
+    const { headers, gatewayHeadersStored } = await this.outgoing('application/json');
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     let response: Response;
     try {
@@ -98,8 +223,11 @@ export class UnfoldClient {
     } catch {
       throw new ApiError(0, 'unreachable', method === 'GET' ? 'The workbench could not be reached. Check the server URL, network and certificate.' : 'The request outcome could not be confirmed. Refresh the session before repeating the action; check the network and server connection.');
     }
-    if (response.status >= 300 && response.status < 400) throw new ApiError(response.status, 'redirect', 'The API redirected the request. Configure the final workbench origin; credentials are never forwarded.');
-    if (response.status === 401) await this.secrets.delete(this.secretKey);
+    const refused = await this.refusal(path, response, gatewayHeadersStored);
+    if (refused) {
+      if (response.status === 401) await this.secrets.delete(this.secretKey);
+      throw new ApiError(response.status, refused.code, refused.message || `Request failed (${response.status}).`);
+    }
     const contentType = response.headers.get('content-type') ?? '';
     if (!contentType.includes('application/json')) {
       await response.body?.cancel().catch(() => undefined);
@@ -211,12 +339,12 @@ export class UnfoldClient {
     return this.request(`/api/sessions/${identifier(id)}/budget`, 'POST', { amountUsd });
   }
   async stream(id: string, after: number, handlers: StreamHandlers, signal: AbortSignal): Promise<void> {
-    const stored = await this.secrets.get(this.secretKey);
-    const headers: Record<string, string> = { Accept: 'text/event-stream', Origin: this.origin, 'X-Unfold-Request': '1' };
-    Object.assign(headers, credentialHeaders(stored));
+    const path = `/api/sessions/${identifier(id)}/events?after=${Math.max(0, Math.floor(after))}`;
+    const { headers, gatewayHeadersStored } = await this.outgoing('text/event-stream');
     let response: Response;
-    try { response = await fetch(`${this.origin}/api/sessions/${identifier(id)}/events?after=${Math.max(0, Math.floor(after))}`, { headers, signal, redirect: 'manual' }); }
+    try { response = await fetch(`${this.origin}${path}`, { headers, signal, redirect: 'manual' }); }
     catch (error) { if (signal.aborted) return; throw new ApiError(0, 'unreachable', 'The live event stream could not be opened.'); }
+    await this.refusal(path, response, gatewayHeadersStored);
     if (response.status === 401) { await this.secrets.delete(this.secretKey); throw new ApiError(401, 'unauthenticated', 'Sign in to your workbench.'); }
     if (!response.ok || !(response.headers.get('content-type') ?? '').includes('text/event-stream') || !response.body) { await response.body?.cancel(); throw new ApiError(response.status, 'stream_unavailable', 'The workbench did not offer a live event stream.'); }
     handlers.onOpen?.();
@@ -262,13 +390,11 @@ export class UnfoldClient {
   async downloadCandidate(id: string, format: CandidateFormat): Promise<Uint8Array> {
     if (!['bundle', 'patch', 'manifest', 'attestation', 'trace'].includes(format)) throw new Error('Invalid candidate format.');
     const path = `/api/sessions/${identifier(id)}/candidate/download?format=${format}`;
-    const stored = await this.secrets.get(this.secretKey);
-    const headers: Record<string, string> = { Accept: '*/*', Origin: this.origin, 'X-Unfold-Request': '1' };
-    Object.assign(headers, credentialHeaders(stored));
+    const { headers, gatewayHeadersStored } = await this.outgoing('*/*');
     let response: Response;
     try { response = await fetch(`${this.origin}${path}`, { headers, redirect: 'manual', signal: AbortSignal.timeout(60_000) }); }
     catch { throw new ApiError(0, 'unreachable', 'The candidate could not be downloaded. Check the workbench connection.'); }
-    if (response.status >= 300 && response.status < 400) throw new ApiError(response.status, 'redirect', 'The API redirected the download. Configure the final workbench origin; credentials are never forwarded.');
+    await this.refusal(path, response, gatewayHeadersStored);
     if (response.status === 401) await this.secrets.delete(this.secretKey);
     if (!response.ok) {
       await response.body?.cancel();
