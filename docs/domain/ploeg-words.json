@@ -455,6 +455,13 @@
           "mcp": "withdrawn_session_ended"
         },
         {
+          "value": "already_prepared",
+          "ploegSource": "pkg/store/prepare_repository.go",
+          "label": "The repository was already prepared before any Run started",
+          "chip": null,
+          "mcp": "already_prepared"
+        },
+        {
           "value": "operator_adopted",
           "ploegSource": "pkg/store/operator_source.go",
           "label": "An Unfold session took it over",
@@ -1091,6 +1098,16 @@
         {
           "value": "work_item.premise_checked",
           "label": "Checked the task before starting",
+          "mcp": "not exposed"
+        },
+        {
+          "value": "work_item.prepare_not_needed",
+          "label": "Preparing the repository was not needed: it was already ready",
+          "mcp": "not exposed"
+        },
+        {
+          "value": "work_item.prepare_cancelled",
+          "label": "Preparing the repository was cancelled",
           "mcp": "not exposed"
         },
         {
