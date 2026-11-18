@@ -395,6 +395,7 @@ const closeLabels = {
   withdrawn_closed: ['The task was closed before any Run started', 'neutral'],
   withdrawn_by_operator: ['An operator cancelled it', 'neutral'],
   withdrawn_session_ended: ['An operator closed it after its Unfold session ended', 'neutral'],
+  already_prepared: ['The repository was already prepared before any Run started', 'neutral'],
   operator_adopted: ['An Unfold session took it over', 'neutral'],
   operator_completed: ['The Unfold session completed it', 'neutral'],
   operator_cancelled: ['The Unfold session was cancelled', 'neutral'],
@@ -439,7 +440,7 @@ export function closeReasonMeta(closeReason) {
  */
 export function withdrawnReason(code) {
   const text = String(code ?? '').trim();
-  return text.startsWith('withdrawn_') && Object.hasOwn(closeLabels, text) ? `${closeLabels[text][0]}.` : null;
+  return (text.startsWith('withdrawn_') || text === 'already_prepared') && Object.hasOwn(closeLabels, text) ? `${closeLabels[text][0]}.` : null;
 }
 
 /**
@@ -506,6 +507,8 @@ export function auditEvent(entry) {
     case 'work_item.route_refused': return event('The task could not be routed to a repository', 'attention', 'alert', said);
     case 'work_item.epics_seen': { const epics = epicList(detail.epics); return event('The task’s epics changed', 'neutral', 'tag', epics === null ? '' : epics.length ? `Now under ${epics.join(', ')}` : 'No longer under an epic'); }
     case 'work_item.dependencies_seen': { const blockers = epicList(detail.waiting_for); return event('The task’s blockers changed', 'neutral', 'clock', blockers === null ? '' : blockers.length ? `Waiting for ${blockers.join(', ')}` : 'No longer waiting for another task'); }
+    case 'work_item.prepare_not_needed': return event('Preparing the repository was not needed: it was already ready', 'neutral', 'check', typeof detail.target === 'string' ? detail.target : '');
+    case 'work_item.prepare_cancelled': return event(detail.closed === false && pullRequestNumber(detail.pull_request) ? 'Preparing the repository was cancelled; its pull request is still open' : 'Preparing the repository was cancelled', 'neutral', 'circle-slash', [pullRequestNumber(detail.pull_request), sentence(detail.error)].filter(Boolean).join(' · '));
     case 'work_item.premise_checked': { const checked = premiseChecks[detail.verdict] ?? ['Checked the task before starting', 'neutral', 'check']; return event(...checked, detail.verdict === 'ask' ? sentence(detail.question) || said : said); }
     case 'pull_request.conflicted': return event('The pull request has a merge conflict', 'attention', 'alert', pullRequestNumber(detail.number));
     case 'pull_request.mergeable': return event('The merge conflict is resolved', 'success', 'check', pullRequestNumber(detail.number));

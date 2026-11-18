@@ -115,7 +115,7 @@ test('a first-time Tenant sees every later stage grey or refused with its reason
   assert.equal(bind.waitsFor?.record, 'Ploeg ADR-0186');
   assert.match(bind.configEntry!, /taskSources/);
   assert.equal(line(checklist.stages, 'installation').action?.kind, 'install-values');
-  assert.equal(checklist.installValues.length, 10);
+  assert.equal(checklist.installValues.length, 11);
 });
 
 test('someone who does not manage the Tenant reads the lines with "Ask an administrator" and no Admins listed', async t => {

@@ -24,7 +24,7 @@ export const optInRefusals = {
   registration_not_accepted: { id: 'install-registration', title: 'Ploeg accepts repositories from the screen', value: 'targetRegistration.enabled: true, with targetRegistration.connections naming the GitHub connection and targetRegistration.requireClaims' },
   bindings_not_accepted: { id: 'install-bindings', title: 'The Team accepts Lists from the screen', value: 'teams.<team>.trackerBindings.connections naming the ClickUp connection, and trackerBindings.max' },
   permission_required: { id: 'install-consumer', title: 'Unfold may connect, register and bind', value: 'the unfold entry in consumers[] with execute, bindScopes: true, registerTargets: true, manageConnections: true with Unfold’s callback in connectionRedirectUris, readTrackers naming the ClickUp connection (or ["*"]), and the Team in its teams' },
-  connections_not_accepted: { id: 'install-connections', title: 'Ploeg accepts connections from the screen', value: 'connections.enabled: true with an allow entry for clickup and its methods (token, or oauth with the instance’s ClickUp OAuth application), connections.requireClaims, and a SecretStore' },
+  connections_not_accepted: { id: 'install-connections', title: 'Ploeg accepts connections from the screen', value: 'connections.enabled: true with an allow entry for clickup and its methods (token, or oauth with the instance’s ClickUp OAuth application), an allow entry {port: forge, kind: github, methods: [github_app_manifest, github_app_installation]}, connections.requireClaims, a SecretStore and PLOEG_PUBLIC_WEBHOOK_BASE' },
   person_claim_required: { id: 'install-claims', title: 'Your sign-in carries the claims Ploeg asks for', value: 'the claims targetRegistration.requireClaims names, issued to the Admin by the identity provider' },
 } as const;
 export type OptInRefusal = keyof typeof optInRefusals;
@@ -41,6 +41,7 @@ export const installValues: readonly { prerequisite: string; value: string; read
   { prerequisite: 'A secret store', value: 'Ploeg’s SecretStore: OpenBao or Vault KV, or the Kubernetes Secret adapter with its Role', read: 'not reported yet' },
   { prerequisite: 'Egress', value: 'ploegd may reach api.github.com, github.com and api.clickup.com; Unfold may reach GitHub’s App pages and ClickUp’s API', read: 'not reported; the first probe’s failure names the host' },
   { prerequisite: 'A public webhook URL', value: 'Ploeg’s public webhook URL, reachable from GitHub and ClickUp', read: 'connections read' },
+  { prerequisite: 'Ploeg makes connections from the screen', value: optInRefusals.connections_not_accepted.value, read: 'not reported; starting a connection answers 422 connections_not_accepted' },
 ];
 
 /** What one checklist line says: `ok` green, `problem` red, `warning` amber, `unknown` not known yet, `pending` not started, `unavailable` refused because Ploeg does not serve the step. */
@@ -80,7 +81,7 @@ type PloegReads = {
 export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off' }[]; sources(): number };
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
 /** The line a later slice shows for a step this Ploeg serves, from what Unfold holds; none keeps the step's "Unfold adds its screen" line. */
-export type StepLines = (manage: boolean) => Partial<Record<StepId, ChecklistLine>>;
+export type StepLines = (manage: boolean, context: { otherForges: string[] }) => Partial<Record<StepId, ChecklistLine>>;
 type Readiness = { lines(user: User, input: { connections: PloegConnections | null; teams: PloegTeam[] | null; budget: TeamBudget[]; manage: boolean; fresh: boolean }): Promise<ReadinessLines> };
 type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries; stepLines?: StepLines };
 
@@ -95,6 +96,11 @@ const minute = (iso: string) => `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
 const confirmedBy = (confirmation: ShownConfirmation) => `${confirmation.by ? ` by ${confirmation.by.name}` : ''} on ${minute(confirmation.at)}`;
 /** The onboarding steps that spend or lead to spend, refused with `409 budget_missing` for a Team without a spend cap. */
 export const capGatedSteps: ReadonlySet<StepId> = new Set(['prepare-repository', 'bind-lists']);
+
+/** Whether the pinned Ploeg resolves a Run's forge from its Work Target (Ploeg ADR-0192), so an installation that serves another forge may add the onboarding forge. */
+export function secondForgeOpen(steps: PloegSteps, pinned: string): boolean {
+  return steps.secondForge.release !== null && pinned !== 'unknown' && compareReleases(pinned, steps.secondForge.release) >= 0;
+}
 
 /**
  * Compares two Ploeg release versions such as `0.2.0` and `0.2.0-rc.108`: negative when `a` is older. A release
@@ -288,7 +294,7 @@ export class Onboarding {
     const otherForges = forges.filter(forge => forge !== pair.forge);
     const action = (value: ChecklistAction): ChecklistAction | undefined => manage ? value : undefined;
     const readOnly = manage ? {} : { fix: askAdmin };
-    const own = this.stepLines?.(manage) ?? {};
+    const own = this.stepLines?.(manage, { otherForges }) ?? {};
     const notServed = (id: StepId, title: string, configEntry: string, extra = ''): ChecklistLine => {
       const record = step(id);
       const known = served[id];
