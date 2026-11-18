@@ -112,6 +112,8 @@ export type ServiceAccountGuide = {
   readonly tokenShape: string;
   /** How the token is sent: `bearer` adds the Bearer scheme; otherwise the token is the whole Authorization header. */
   readonly tokenType?: 'bearer';
+  /** The member guide of the onboarding's connect step: why the tracker needs a dedicated member, and how to make it and its token, in plain words. */
+  readonly member?: { readonly why: string; readonly steps: readonly string[] };
 };
 
 /** A tracker's reference format: `prefix` and the native id, such as `ABC-12` for prefix `ABC`, or `native` when the native id is already the reference people write, such as a Jira issue key. */

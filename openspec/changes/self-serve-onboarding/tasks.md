@@ -6,12 +6,13 @@ output pasted in the pull request.
 
 ## 0. Decisions and upstream
 
-- [ ] 0.1 **[owner]** Review ADR-0059 and this change; answer design.md Open Questions 1, 2 and 4 (3 was decided by the lead: two clocks)
+- [ ] 0.1 **[owner]** Review ADR-0059 and this change; answer design.md Open Questions 2 and 4 (1 was decided by the owner on 2026-11-18 in [ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md); 3 by the lead: two clocks)
 - [ ] 0.2 **[owner]** Sign or amend [Ploeg ADR-0184](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0184-tracker-and-forge-connection-secrets-live-in-a-secret-store-ploeg-writes-itself-and-no-person-handles-them.md) and [ADR-0186](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0186-an-operator-consumer-binds-a-tracker-scope-to-a-team-at-runtime-and-static-routing-wins-on-conflict.md) in ploeg-hq
 - [ ] 0.3 Land the proposed amendments (ploeg-hq/ploeg follow-up PR) carrying asks 1 to 3 of design.md section 4: the connection's own account as hand-over agent and store-backed connections in `trackerBindings.connections` (ADR-0186); the connection contract (OAuth code, manifest code, installation id, pasted token; list; state; replace; delete; `state` issuance) and rule 1's paste where the installation has no vendor OAuth app (ADR-0184); the GitHub forge receiver for `installation` and `installation_repositories` events with the store-held webhook secret (ADR-0193)
 - [ ] 0.4 **[owner]** Sign [Ploeg ADR-0192](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0192-a-runs-forge-is-resolved-from-its-work-target-and-the-claim-carries-the-forge-and-a-credential-minted-for-that-run.md), [ADR-0193](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0193-a-proven-operator-registers-a-work-target-at-runtime-only-for-a-repository-ploegs-forge-connection-was-granted.md) and [ADR-0194](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0194-a-repository-missing-only-its-instruction-file-may-receive-one-run-that-adds-it.md), with their amendments
 - [ ] 0.5 Raise asks 4 and 5 of design.md section 4 in ploeg-hq, in its words: an onboarding values profile in Ploeg's chart, and active forges per installation in `/operator/connections`
 - [ ] 0.6 Open the tickets for S1 to S11, each naming the Ploeg change it waits for
+- [ ] 0.7 Propose ask 6 of design.md section 4 in ploeg-hq as a record, in its words: an operator consumer reads a tracker connection's Scopes and their items, and assigns an item in a bound Scope to a hand-over agent with a note
 
 ## 1. S1 Checklist backbone
 
@@ -49,11 +50,11 @@ output pasted in the pull request.
 ## 5. S5 Connect ClickUp and bind Lists
 
 - [ ] 5.1 The member guide in plain words, from the ClickUp adapter's setup capability
-- [ ] 5.2 Paste once: shape check, ClickUp accepts it, `connection_token_personal`, relay to Ploeg's store, ADR-0064 sealed copy kept (Open Question 1)
-- [ ] 5.3 List picker and the map step: default repository, further repositories, Team; only ready repositories offered
+- [ ] 5.2 Paste once: shape check, relay to Ploeg's connection flow only (Ploeg ADR-0195), Ploeg's probe answer shown, `connection_token_personal` removes the connection again; nothing sealed in Unfold (ADR-0060), with a test that no token reaches Unfold's database
+- [ ] 5.3 List picker from Ploeg's Scope read (ask 6), refused with `ploeg_step_unavailable` until the pinned Ploeg serves it; the map step: default repository, further repositories, Team; only ready repositories offered
 - [ ] 5.4 ADR-0186 dry run, create, `409 conflicts_with_static` shown as configured, idempotent retry, remove; done only when `active`, `awaiting_webhook` amber with **Check again**
 - [ ] 5.5 Saved source takes the binding's target; removal drops it
-- [ ] 5.6 Move the Ploeg pin to the release with the connection contract, ADR-0186, ClickUp `ScopeProber` and the connection account as agent
+- [ ] 5.6 Move the Ploeg pin to the release with the connection contract, ADR-0186, ClickUp `ScopeProber`, the connection account as agent and the Scope read
 
 ## 6. S6 Spend-cap gate
 
@@ -62,9 +63,9 @@ output pasted in the pull request.
 
 ## 7. S7 Readiness pull request
 
-- [ ] 7.1 Offer only where Ploeg reports `prepareAvailable: true`; the cap that bounds the Run shown, no estimate
-- [ ] 7.2 Confirmation bound to the cap, sent as `budgetUsd`; re-ask on a changed cap; one Work Item per repository on retry; cancel never restarts; a cancel after the pull request opened closes or tracks it before a second prepare
-- [ ] 7.3 Review-and-merge line with the pull request link; after merge (`target.readiness_changed`): show Level 2 and the next Level 3 check (ADR-0047 part 4), and offer the repository for binding
+- [x] 7.1 Offer only where Ploeg reports `prepareAvailable: true`; the cap that bounds the Run shown, no estimate
+- [x] 7.2 Confirmation bound to the cap, sent as `budgetUsd`; re-ask on a changed cap; one Work Item per repository on retry; cancel never restarts; a cancel after the pull request opened closes or tracks it before a second prepare
+- [x] 7.3 Review-and-merge line with the pull request link; after merge (`target.readiness_changed`): show Level 2 and the next Level 3 check (ADR-0047 part 4), and offer the repository for binding
 - [ ] 7.4 Move the Ploeg pin to the release with ADR-0194
 
 ## 8. S8 First task to first pull request, measured
@@ -75,17 +76,17 @@ output pasted in the pull request.
 - [ ] 8.4 **[owner]** Buy the ClickUp seat and create the GitHub organisation for the dogfood trial
 - [ ] 8.5 **[owner]** Run the timed trial on a fresh installation after the install values are set, once with a ready repository and once with one missing `AGENTS.md`; record both clocks and the Run durations; accept or amend ADR-0059
 
-## 9. S9 GitHub Issues as the tracker, with the shared App key
+## 9. S9 GitHub Issues as the tracker, through Ploeg
 
-- [ ] 9.1 GitHub Issues setup capability with the same App; hand-off once Ploeg's team read reports GitHub logins
-- [ ] 9.2 Chart: optional read-only mount of the App key secret Ploeg writes as `githubApp.privateKeyFile`, `optional: true`; values schema
-- [ ] 9.3 Read the manifest-created App's `appId` from Ploeg's connection read, not from a chart value
+- [ ] 9.1 GitHub Issues as a tracker connection in Ploeg on the same App; issues read through Ploeg's Scope read; hand-off through Ploeg once its team read reports GitHub logins
+- [ ] 9.2 No App key, `appId` or GitHub token in Unfold's chart, configuration or store (ADR-0060)
 
-## 10. S10 Hardening before hosted
+## 10. S10 Remove Unfold's tracker credentials and direct reads
 
-- [ ] 10.1 Unfold reads GitHub with short-lived tokens Ploeg mints; the key mount is removed
-- [ ] 10.2 Unfold's ClickUp copy retired: service reads through Ploeg or people's own links, hand-off as a Ploeg action
-- [ ] 10.3 **[owner]** Register Unfold's own ClickUp OAuth app for the hosted offer
+- [ ] 10.1 The Tasks page reads every source's tasks through Ploeg's Scope read; hand-off is a Ploeg action for every source
+- [ ] 10.2 A migration deletes ADR-0064 sealed tracker tokens and people's linked tracker and forge tokens from `internal_state`, once the pinned Ploeg serves the reads
+- [ ] 10.3 Remove the legacy adapters in `src/task-providers` and `src/link-providers` and the GitHub App reader `github-app.ts` for installations whose Ploeg serves the reads; the demo keeps answering from fixtures
+- [ ] 10.4 **[owner]** Register the hosted offer's ClickUp OAuth app, configured in Ploeg (Ploeg ADR-0195)
 
 ## 11. S11 Move sources and repositories between projects
 

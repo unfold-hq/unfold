@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-10-31
+date: 2026-11-18
 decision-makers: Ryan Grippeling
 review-by: 2027-01-31
 ---
@@ -209,5 +209,7 @@ Decisions 4 and 5 were made by the owner on 2026-10-31. Decisions 1–3 and 6 ar
 4. **Who talks to trackers. Decided by the owner on 2026-10-31: split by job.** Unfold keeps its adapters for the operations people start: browse, read, hand off, file an issue and link an account. Ploeg keeps its own for intake and write-back. The table under Connections says who owns each operation. Reconsider when a third tracker needs adapters on both sides.
 5. **One Connection per origin for the tracker, link and publisher roles. Decided by the owner on 2026-10-31: yes.** It is built after the ClickUp setup PR #753 lands, as part of ADR-0048's shared connections (step T5).
 6. **Rename `PloegClient`.** Recommended: only in P7, when it becomes `src/ploeg/service.ts`.
+
+**2026-11-18.** Decision 4 and the ownership table under *Who talks to the tracker* are superseded by system [ADR-0060](../../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md): Ploeg owns every tracker and forge connection, including browsing, reading, hand-off and connection tests, and Unfold reads Scopes and items through Ploeg. The Tracker port stays as Unfold's interface; its live adapter reads through Ploeg, the demo adapter answers from fixtures, and the direct tracker adapters in `src/task-providers` are legacy until a pinned Ploeg serves the reads. Decision 5 now means one Integration Account per Ploeg connection, holding no credential. The rest of this record stands.
 
 Related: [architecture](../architecture.md), [Managed execution](../../../../docs/workflows/managed-execution.md), [0008](0008-task-connections-and-candidate-handoff.md) task connections, [0015](0015-ploeg-operator-read-api.md) the operator read API.

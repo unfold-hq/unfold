@@ -24,7 +24,14 @@
     {
       "id": "connect-clickup",
       "stage": 4,
-      "record": "Ploeg's connection contract (ADR-0184 amendment)",
+      "record": "Ploeg ADR-0195",
+      "read": "tracker-connections",
+      "release": null
+    },
+    {
+      "id": "read-scopes",
+      "stage": 5,
+      "record": "Ploeg ADR-0196",
       "read": null,
       "release": null
     },

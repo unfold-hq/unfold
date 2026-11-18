@@ -166,10 +166,15 @@ function confirmCaps(budget) {
 }
 
 function stageAction(line, values, budget = []) {
-  const action = line.action;
-  if (!action) return '';
+  const actions = [line.action, ...(Array.isArray(line.actions) ? line.actions : [])].filter(Boolean);
+  return actions.map(action => oneAction(action, line, values, budget)).join('');
+}
+
+function oneAction(action, line, values, budget) {
   if (action.kind === 'confirm-cap') return confirmCaps(budget);
-  if (action.kind === 'link') return button({ label: action.label, href: action.href, size: 'sm', icon: 'arrow' });
+  if (action.kind === 'prepare') return button({ label: action.label, size: 'sm', icon: 'check', variant: 'primary', action: 'connections-prepare', data: action.data || {} });
+  if (action.kind === 'cancel-prepare') return button({ label: action.label, size: 'sm', icon: 'stop', action: 'connections-cancel-prepare', data: action.data || {} });
+  if (action.kind === 'link') return button({ label: action.label, href: action.href, size: 'sm', icon: 'arrow', external: Boolean(action.external) });
   if (action.kind === 'refresh') return button({ label: action.label, size: 'sm', icon: 'refresh', action: 'connections-refresh' });
   if (action.kind === 'config-entry' && line.configEntry) return disclosure({ summary: action.label, plain: true, body: `<p class="checklist-entry">${escape(line.configEntry)}</p><p class="checklist-entry-note">The configuration wins over anything added on this page later, and Unfold never rewrites it.</p>` });
   if (action.kind === 'install-values' && values.length) return disclosure({ summary: action.label, plain: true, body: `<p class="checklist-entry-note">Hand these to the person who installed Unfold and Ploeg. They set them once.</p><dl class="checklist-values">${values.map(entry => `<div><dt>${escape(entry.prerequisite)}</dt><dd><code>${escape(entry.value)}</code></dd><dd class="checklist-read">Read from Ploeg: ${escape(entry.read)}</dd></div>`).join('')}</dl>` });

@@ -37,3 +37,7 @@ A forge or tracker withdraws OAuth for third-party applications, in which case p
 3. PV-084: sessions without a repository, repositories discovered from the link, private clone through the clone step.
 4. PV-085: "Open merge request" as a workbench action acting as the person, with ticket write-back.
 5. ClickUp and Vikunja links, then `tokenEnv` retired for interactive sources.
+
+## Amended
+
+2026-11-18: amended by system [ADR-0060](../../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md). Signing in through the estate's OpenID Connect provider stands. People no longer link their own forge or tracker accounts in v1: Ploeg owns every tracker and forge connection, Unfold holds no forge or tracker credential, and everyone who reaches the Tenant sees its connected Scopes through Ploeg. The GitLab and ClickUp links in `src/link-providers` are legacy until a pinned Ploeg serves those reads. Reconsider personal links when Client users start using Unfold.

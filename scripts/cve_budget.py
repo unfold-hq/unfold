@@ -6,6 +6,8 @@ from collections import Counter
 import yaml
 
 SEVERITIES = ['critical', 'high', 'medium', 'low']
+TROUBLESHOOTING = 'https://github.com/unfold-hq/unfold/blob/development/docs/operations/ci-troubleshooting.md'
+VEX_GUIDE = 'https://github.com/unfold-hq/unfold/blob/development/apps/unfold/ops/vex/README.md'
 
 
 def budget_for(budgets, image):
@@ -15,9 +17,27 @@ def budget_for(budgets, image):
     return budget
 
 
-def counted(report):
-    seen = {(match['vulnerability']['id'], match['artifact']['name'], match['artifact']['version']): match['vulnerability'].get('severity', '').lower() for match in report.get('matches', [])}
-    return Counter(seen.values())
+def findings(report):
+    unique = {}
+    for match in report.get('matches', []):
+        vulnerability, artifact = match['vulnerability'], match['artifact']
+        key = (vulnerability['id'], artifact['name'], artifact['version'])
+        if key in unique:
+            continue
+        fix = vulnerability.get('fix') or {}
+        unique[key] = {
+            'id': vulnerability['id'],
+            'severity': vulnerability.get('severity', '').lower(),
+            'aliases': sorted({related['id'] for related in match.get('relatedVulnerabilities') or [] if related.get('id') and related['id'] != vulnerability['id']}),
+            'url': vulnerability.get('dataSource', ''),
+            'package': artifact['name'],
+            'version': artifact['version'],
+            'type': artifact.get('type', ''),
+            'fixedIn': list(fix.get('versions') or []),
+            'location': next((location.get('path') for location in artifact.get('locations') or [] if location.get('path')), ''),
+        }
+    order = {severity: rank for rank, severity in enumerate(SEVERITIES)}
+    return sorted(unique.values(), key=lambda finding: (order.get(finding['severity'], len(SEVERITIES)), finding['id'], finding['package']))
 
 
 def verdict(budget, found):
@@ -25,12 +45,67 @@ def verdict(budget, found):
     return over
 
 
+def advisory_link(identifier, fallback):
+    if identifier.startswith('GHSA-'):
+        return f'https://github.com/advisories/{identifier}'
+    if identifier.startswith('CVE-'):
+        return f'https://nvd.nist.gov/vuln/detail/{identifier}'
+    return fallback
+
+
+def cell(text):
+    return str(text).replace('|', '\\|').replace('\n', ' ')
+
+
+def finding_row(finding):
+    link = advisory_link(finding['id'], finding['url'])
+    name = f'[{finding["id"]}]({link})' if link else finding['id']
+    aliases = f' ({", ".join(finding["aliases"])})' if finding['aliases'] else ''
+    fixed = ', '.join(finding['fixedIn']) if finding['fixedIn'] else 'no fix released'
+    kind = f' ({finding["type"]})' if finding['type'] else ''
+    where = f'`{cell(finding["location"])}`' if finding['location'] else ''
+    return f'| {finding["severity"]} | {name}{cell(aliases)} | `{cell(finding["package"])}`{cell(kind)} | {cell(finding["version"])} | {cell(fixed)} | {where} |'
+
+
+def findings_table(rows):
+    return ['| Severity | Vulnerability | Package | Installed | Fixed in | Where |', '| --- | --- | --- | --- | --- | --- |', *[finding_row(finding) for finding in rows]]
+
+
+def short(finding):
+    return f'{finding["id"]} in {finding["package"]} {finding["version"]}'
+
+
+def summary_lines(image, reference, scanner, budget, found, over, all_findings, suppressed):
+    enforcing = budget['mode'] == 'enforce'
+    if not over:
+        headline = f'✅ **{image} is within its CVE budget.**'
+    else:
+        totals = ', '.join(f'{count} {severity}' for severity, count in over.items())
+        headline = f'{"❌" if enforcing else "⚠️"} **{image} is over its CVE budget: {totals}.**{"" if enforcing else " The budget only reports, so the job does not fail."}'
+    scanned = f'Grype {scanner} scanned `{reference}`.' if scanner else f'Grype scanned `{reference}`.'
+    lines = [f'### CVE budget: {image}', '', headline, '', scanned, '', '| Severity | Found | Budget | |', '| --- | --- | --- | --- |']
+    for severity in SEVERITIES:
+        limit = budget.get(severity, 'none')
+        mark = '❌' if severity in over else ('✅' if severity in budget else '')
+        lines.append(f'| {severity} | {found.get(severity, 0)} | {limit} | {mark} |')
+    blocking = [finding for finding in all_findings if finding['severity'] in over]
+    rest = [finding for finding in all_findings if finding['severity'] not in over]
+    if blocking:
+        lines += ['', '#### What is over the budget', '', *findings_table(blocking)]
+        lines += ['', f'To fix it: move the package to a fixed version, or remove it when the image does not need it. When no fix is released and the image never runs the vulnerable code, add a reviewed [OpenVEX statement]({VEX_GUIDE}). Never raise the budget. [CI troubleshooting]({TROUBLESHOOTING}) has the steps.']
+    if rest:
+        lines += ['', f'<details><summary>{len(rest)} other finding(s) within the budget</summary>', '', *findings_table(rest), '', '</details>']
+    lines += ['', f'{suppressed} finding(s) left out by reviewed OpenVEX statements.', '']
+    return lines
+
+
 def main(report_path, budgets_path, image, reference, output_path):
     with open(budgets_path, encoding='utf-8') as handle:
         budget = budget_for(yaml.safe_load(handle) or {}, image)
     with open(report_path, encoding='utf-8') as handle:
         report = json.load(handle)
-    found = counted(report)
+    all_findings = findings(report)
+    found = Counter(finding['severity'] for finding in all_findings)
     over = verdict(budget, found)
     predicate = {
         'image': image,
@@ -43,19 +118,19 @@ def main(report_path, budgets_path, image, reference, output_path):
     }
     with open(output_path, 'w', encoding='utf-8') as handle:
         json.dump(predicate, handle, indent=2)
-    lines = [f'### CVE budget: {image}', '', '| Severity | Found | Budget |', '| --- | --- | --- |']
-    lines += [f'| {severity} | {predicate["found"][severity]} | {budget.get(severity, "none")} |' for severity in SEVERITIES]
-    lines += ['', f'{predicate["suppressedByVex"]} finding(s) left out by reviewed OpenVEX statements.', '']
+    lines = summary_lines(image, reference, predicate['scanner']['version'], budget, found, over, all_findings, predicate['suppressedByVex'])
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
         with open(summary, 'a', encoding='utf-8') as handle:
             handle.write('\n'.join(lines) + '\n')
     print('\n'.join(lines))
+    named = '; '.join(short(finding) for finding in all_findings if finding['severity'] in over)
+    totals = ', '.join(f'{count} {severity}' for severity, count in over.items())
     if over and budget['mode'] == 'enforce':
-        print(f'::error::{image} is over its CVE budget: ' + ', '.join(f'{count} {severity}' for severity, count in over.items()))
+        print(f'::error title=CVE budget: {image}::{image} is over its CVE budget: {totals} ({named})')
         return 1
     if over:
-        print(f'::warning::{image} is over its CVE budget, which only reports: ' + ', '.join(f'{count} {severity}' for severity, count in over.items()))
+        print(f'::warning title=CVE budget: {image}::{image} is over its CVE budget, which only reports: {totals} ({named})')
     return 0
 
 

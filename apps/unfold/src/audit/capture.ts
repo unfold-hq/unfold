@@ -184,6 +184,14 @@ export function capture(request: TapRequest): Captured | undefined {
     const tenants = done === 'success' ? [defaultTenant] : undefined;
     return { actor: user, ...(tenants ? { tenants } : {}), fact: { kind: 'entity', action: 'create', entity: { type: 'Spend cap confirmation', ...(team ? { uid: team } : {}), name: `Spend cap of Team ${team ?? 'unknown'} confirmed`, data: { usd: typeof inputs.usd === 'number' ? inputs.usd : null, period: text(inputs.period, 10) ?? null } }, outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
   }
+  if (method === 'POST' && (path === '/api/onboarding/prepare' || path === '/api/onboarding/prepare/cancel')) {
+    const inputs = recordedInputs(request.inputs()) as Record<string, unknown>;
+    const target = text(inputs.target, 128);
+    const tenants = done === 'success' ? [defaultTenant] : undefined;
+    const cancel = path.endsWith('/cancel');
+    const data = cancel ? undefined : { team: text(inputs.team, 128) ?? null, budgetUsd: typeof inputs.usd === 'number' ? inputs.usd : null };
+    return { actor: user, ...(tenants ? { tenants } : {}), fact: { kind: 'entity', action: cancel ? 'deactivate' : 'create', entity: { type: 'Readiness pull request', ...(target ? { uid: target } : {}), name: `Readiness pull request for ${target ?? 'unknown'} ${cancel ? 'cancelled' : 'confirmed'}`, ...(data ? { data } : {}) }, outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
+  }
   const changed = method === 'GET' ? undefined : entityChange(request, user);
   if (changed) return changed;
   if (method === 'GET') return undefined;
