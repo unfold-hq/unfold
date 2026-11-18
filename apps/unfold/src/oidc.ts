@@ -3,8 +3,8 @@ import type { AppConfig, UserRole } from './types.ts';
 import type { SignInTokens } from './person-proof.ts';
 import { membershipsFromGroups, type Membership } from './tenancy.ts';
 
-/** Which identity-provider tokens an editor may trade for an editor credential, and how their person is found. */
-export type OidcExchange = { audiences: string[]; match: 'subject' | 'email' };
+/** Which identity-provider tokens an editor may trade for an editor credential, how their person is found, and whether a person without an account gets one. */
+export type OidcExchange = { audiences: string[]; match: 'subject' | 'email'; provision: boolean };
 export type OidcSettings = { issuer: string; subjectNamespace?: string; clientId: string; clientSecret?: string; scopes: string[]; displayName: string; roleClaim: string; groupsClaim: string; roles: Record<UserRole, string[]>; exchange?: OidcExchange };
 export type OidcIdentity = { id: string; name: string; role: UserRole; subject: string; email?: string; memberships: Membership[] };
 type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string; authorization_response_iss_parameter_supported?: boolean };

@@ -55,14 +55,17 @@ function configuredUrl(value: string, name: string): string {
   return value.replace(/\/$/, '');
 }
 
-function oidcExchange(value: any): { audiences: string[]; match: 'subject' | 'email' } {
+function oidcExchange(value: any): { audiences: string[]; match: 'subject' | 'email'; provision: boolean } {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('auth.oidc.exchange must be an object');
-  const unknown = Object.keys(value).find(key => key !== 'audiences' && key !== 'match');
-  if (unknown) throw new Error(`auth.oidc.exchange.${unknown} is not a setting; it takes audiences and match`);
+  const unknown = Object.keys(value).find(key => !['audiences', 'match', 'provision'].includes(key));
+  if (unknown) throw new Error(`auth.oidc.exchange.${unknown} is not a setting; it takes audiences, match and provision`);
   if (!Array.isArray(value.audiences) || !value.audiences.length || value.audiences.length > 20 || value.audiences.some((entry: unknown) => typeof entry !== 'string' || !/^[!-~]{1,300}$/.test(entry))) throw new Error('auth.oidc.exchange.audiences must list the 1 to 20 audiences whose tokens may be traded for an editor credential');
   const match = value.match ?? 'subject';
   if (match !== 'subject' && match !== 'email') throw new Error('auth.oidc.exchange.match must be subject or email');
-  return { audiences: [...new Set<string>(value.audiences)], match };
+  const provision = value.provision ?? false;
+  if (typeof provision !== 'boolean') throw new Error('auth.oidc.exchange.provision must be true or false');
+  if (provision && match !== 'subject') throw new Error('auth.oidc.exchange.provision needs match subject: only a token with the sub browser sign-in gets can create the account the browser would');
+  return { audiences: [...new Set<string>(value.audiences)], match, provision };
 }
 
 function gitRewrites(value: unknown): GitRewrite[] {
