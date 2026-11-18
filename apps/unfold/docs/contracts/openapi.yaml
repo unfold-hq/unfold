@@ -4151,7 +4151,8 @@ paths:
                         configured: { type: boolean }
                         configEntry: { type: string }
                         waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } }
-                        action: { type: object, properties: { label: { type: string }, href: { type: string }, kind: { type: string, enum: [link, refresh, install-values, config-entry, confirm-cap] } } }
+                        action: { $ref: '#/components/schemas/ChecklistAction' }
+                        actions: { type: array, description: 'More actions of one line, such as one **Prepare this repository** per Team whose cap is confirmed.', items: { $ref: '#/components/schemas/ChecklistAction' } }
                         checks: { type: array, items: { type: object } }
                   installValues: { type: array, items: { type: object, properties: { prerequisite: { type: string }, value: { type: string }, read: { type: string } } } }
                   storedRepositories: { type: array, description: 'Repositories added in Unfold, with `state` `active`, `shadowed` by the configuration, or `off` while the repositories.stored flag is off.', items: { type: object, properties: { id: { type: string }, name: { type: string }, url: { type: string }, state: { type: string, enum: [active, shadowed, off] } } } }
@@ -4527,6 +4528,85 @@ paths:
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '501': { $ref: '#/components/responses/NotImplemented' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/prepare:
+    post:
+      tags: [Ploeg]
+      operationId: prepareOnboardingRepository
+      summary: 'Ask Ploeg for the readiness pull request of a repository that misses only AGENTS.md'
+      description: 'Admits one `prepare_repository` Work Item (Ploeg ADR-0194) for the registered repository `target` on `team`, with `usd` as `budgetUsd`, after a signed-in Admin confirmed that cap. The cap is the lowest one Unfold can read, the Team''s spend cap; Ploeg lowers the pool further to the Team''s prepare cap and the plan''s pool, which it does not report. Nothing is estimated. The request carries the person''s token; Ploeg refuses asserted attribution for this kind (403 `ploeg_person_unproven`). 503 `ploeg_step_unavailable` while the connected Ploeg does not serve the step; 409 `budget_missing` or `spend_cap_unconfirmed` from the spend-cap gate; 409 `spend_cap_changed` when the cap Unfold reads now differs from `usd`, so the person confirms again; 409 `prepare_unavailable` unless Ploeg reports `prepareAvailable: true`; 409 `target_already_ready` and `prepare_in_progress` from Ploeg; 409 `ploeg_demo` in the demo. A repository whose readiness Work Item is live answers that one with 200 and `replayed: true`, so a double click or a retry never admits a second one. 403 for anyone who does not manage the Tenant.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target, team, usd]
+              properties:
+                target: { type: string, maxLength: 128, description: 'The registered Work Target key.' }
+                team: { type: string, maxLength: 128 }
+                usd: { type: number, exclusiveMinimum: 0, description: 'The cap in US dollars as it was shown.' }
+      responses:
+        '200':
+          description: '`{prepare, replayed: true}` for a repository whose readiness Work Item already exists'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrepareAnswer' }
+        '201':
+          description: '`{prepare, replayed}`'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PrepareAnswer' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/prepare/cancel:
+    post:
+      tags: [Ploeg]
+      operationId: cancelOnboardingRepositoryPrepare
+      summary: 'Cancel the readiness Work Item of a repository'
+      description: 'Cancels the live readiness Work Item of `target` through Ploeg''s operator cancel. It never starts another one. When the pull request had opened, Ploeg closes it and `prepare.pullRequest.state` is `closed`; when Ploeg could not close it, the state is `open` and Ploeg answers `prepare_in_progress` to a new prepare until a person closes it. 409 `prepare_not_running` when no readiness Work Item runs for the repository, 409 `ploeg_demo` in the demo, 403 for anyone who does not manage the Tenant.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: '`{prepare, cancellation}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [prepare, cancellation]
+                properties:
+                  prepare: { $ref: '#/components/schemas/PrepareRecord' }
+                  cancellation: { type: object }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/ploeg/connections:
     get:
@@ -8377,6 +8457,37 @@ components:
         period: { type: string, enum: [day, week, month] }
         by: { type: object, properties: { id: { type: string }, name: { type: string } } }
         at: { type: string, format: date-time }
+    ChecklistAction:
+      type: object
+      properties:
+        label: { type: string }
+        href: { type: string }
+        external: { type: boolean }
+        data: { type: object, additionalProperties: { type: string }, description: 'For `prepare`: `target`, `team` and `usd`; for `cancel-prepare`: `target`.' }
+        kind: { type: string, enum: [link, refresh, install-values, config-entry, confirm-cap, prepare, cancel-prepare] }
+    PrepareRecord:
+      type: object
+      description: 'One repository''s readiness Work Item as Unfold remembers it. `admitting` is stored before the Admission is sent, so a retry replays the same `requestId`.'
+      required: [target, team, attempt, requestId, budgetUsd, at, workItemId, state, pullRequest]
+      properties:
+        target: { type: string }
+        team: { type: string }
+        attempt: { type: integer, minimum: 1 }
+        requestId: { type: string }
+        budgetUsd: { type: number, description: 'The cap the person confirmed, sent to Ploeg as `budgetUsd`.' }
+        by: { type: object, properties: { id: { type: string }, name: { type: string } } }
+        at: { type: string, format: date-time }
+        workItemId: { type: [string, 'null'] }
+        state: { type: string, enum: [admitting, admitted, cancelled, ended] }
+        pullRequest: { type: [object, 'null'], properties: { url: { type: string }, state: { type: string, enum: [open, closed, unknown] } } }
+        cancelledAt: { type: string, format: date-time }
+        ploegState: { type: string }
+    PrepareAnswer:
+      type: object
+      required: [prepare, replayed]
+      properties:
+        prepare: { $ref: '#/components/schemas/PrepareRecord' }
+        replayed: { type: boolean }
     ReleaseNote:
       type: object
       required: [id, type, highlight, summary, details]

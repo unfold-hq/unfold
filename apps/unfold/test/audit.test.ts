@@ -307,6 +307,19 @@ test('webhook, intake source, billing and Tenant export administration are Entit
   }
 });
 
+test('a readiness pull request confirmation names the person, the repository and the cap, and a cancel is a deactivation', () => {
+  const signedIn = { id: 'u-ada', name: 'ada', role: 'admin' as const };
+  const tap = (path: string, status: number, inputs: Record<string, unknown>) => capture({ method: 'POST', path, query: new URLSearchParams(), status, user: () => signedIn, inputs: () => inputs, userByName: () => undefined, signedInByResponse: () => undefined, editorLabel: () => undefined });
+  const confirmed = tap('/api/onboarding/prepare', 201, { target: 'site', team: 'delivery', usd: 2 });
+  assert.deepEqual(confirmed?.fact.kind === 'entity' ? [confirmed.fact.action, confirmed.fact.entity, confirmed.fact.outcome, confirmed.actor?.id, confirmed.tenants] : null, ['create', { type: 'Readiness pull request', uid: 'site', name: 'Readiness pull request for site confirmed', data: { team: 'delivery', budgetUsd: 2 } }, 'success', 'u-ada', ['default']]);
+  const cancelled = tap('/api/onboarding/prepare/cancel', 200, { target: 'site' });
+  assert.deepEqual(cancelled?.fact.kind === 'entity' ? [cancelled.fact.action, cancelled.fact.entity.name] : null, ['deactivate', 'Readiness pull request for site cancelled']);
+  const refused = tap('/api/onboarding/prepare', 409, { target: 'site', team: 'delivery', usd: 3 });
+  assert.deepEqual(refused?.fact.kind === 'entity' ? [refused.fact.outcome, refused.tenants] : null, ['failure', undefined]);
+  const event = ocsfEvent({ fact: confirmed!.fact, actor: { user: ada }, at });
+  assert.deepEqual(ocsfErrors({ ...event, metadata: { ...event.metadata, uid: 'x', tenant_uid: 'default', sequence: 1 } }), []);
+});
+
 test('a spend cap confirmation is an Entity Management record with the confirmed cap, and a refused one a failure outside any Tenant chain', () => {
   const signedIn = { id: 'u-ada', name: 'ada', role: 'admin' as const };
   const tap = (status: number, inputs: Record<string, unknown>) => capture({ method: 'POST', path: '/api/onboarding/spend-cap', query: new URLSearchParams(), status, user: () => signedIn, inputs: () => inputs, userByName: () => undefined, signedInByResponse: () => undefined, editorLabel: () => undefined });

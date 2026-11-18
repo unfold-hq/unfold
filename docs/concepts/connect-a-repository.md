@@ -55,8 +55,8 @@ Every stage leaves Unfold. Stages 3 and 4 are the same fact written twice in two
 | 4 | Connect ClickUp | Ploeg reports a ClickUp connection as the Unfold member | built (slice S5) on **Settings → Connect ClickUp**: the member guide, the token or OAuth code relayed to Ploeg's connection flow once, no token kept in Unfold; refused with the reason until Ploeg serves Ploeg ADR-0195 |
 | 5 | Pick Lists | each List is saved | yes, through **Connect a tracker**; for a connection Ploeg holds, the picker waits for Ploeg's Scope read and takes the List's id until then |
 | 6 | Budget | an Admin confirmed a Team whose spend cap is not null | yes (slice S6): each Team's cap in USD per period as Ploeg reports it, **Confirm** records who and when; a Team without a cap is refused for readiness work and onboarding bindings with `409 budget_missing`, hand-off from configured sources never is |
-| 7 | Prepare | the readiness pull request is open | not available yet; waits for Ploeg ADR-0194 |
-| 8 | Review and merge | the repository is ready | shown from the connections read |
+| 7 | Prepare | the readiness pull request is open | built (slice S7) and off until the connected Ploeg serves Ploeg ADR-0194: **Prepare this repository** only where Ploeg reports `prepareAvailable: true`, with the cap that bounds the Run; until then not available yet |
+| 8 | Review and merge | the repository is ready | the readiness pull request's link until a person merges it, then Level 2 and the next Level 3 check (slice S7); before Ploeg ADR-0194, shown from the connections read |
 | 9 | Bind Lists | the binding is `active` | built (slice S5): ready repositories only, dry run first, `awaiting_webhook` amber with **Check again**, `conflicts_with_static` shown as configured; refused with the reason until Ploeg serves Ploeg ADR-0186 |
 | 10 | First task | a Work Item exists for it | the next action only |
 | 11 | First pull request | a Run opened it | not measured on the page yet |
