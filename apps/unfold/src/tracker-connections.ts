@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { AppConfig, User } from './types.ts';
-import type { ServiceAccountGuide, TaskProviderAdapter } from './task-providers/index.ts';
+import { findTaskProvider, type ServiceAccountGuide, type TaskProviderAdapter } from './task-providers/index.ts';
 import { request, TaskError } from './task-providers/shared.ts';
 import type { PloegRoute } from './ploeg.ts';
 import { canHandOff, validateTaskSources, type TaskSourceConfig, type TaskTarget } from './tasks.ts';
@@ -12,13 +12,17 @@ import { ClientProjects, ensureIntegrationSchema, mirrorTrackerConnection, unmir
 import { StoredRepositories } from './stored-repositories.ts';
 
 /** A tracker account Unfold acts as on one tracker origin for one Tenant: an ADR-0048 Integration Account with role `tracker`. Its token is kept apart, encrypted. */
-export type TrackerConnection = { id: string; provider: string; baseUrl: string; tenant: string; account?: string; tokenSetAt?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
+export type TrackerConnection = { id: string; provider: string; baseUrl: string; tenant: string; account?: string; tokenSetAt?: string; ploeg?: PloegHeld; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
+/** A connection Ploeg holds (system ADR-0060, Ploeg ADR-0195): Unfold keeps its id, how it was made and its account, and never a token. */
+export type PloegHeld = { connection: string; method: string; accountId: string };
+/** A saved source's Ploeg binding (Ploeg ADR-0186): its id, Team, state as last read, and the Work Target its default key resolved to. */
+export type SourceBinding = { id: string; team: string; state: 'active' | 'awaiting_webhook' | 'shadowed' | 'invalid' | 'removed' | 'unknown'; reason: string | null; default: string; allow: string[]; target: TaskTarget; checkedAt: string };
 /** A task source a person added from the screen. It reads and hands off with its connection's token. Without a Client it belongs to its Tenant's Own work. */
-export type ConnectionSource = { id: string; connection: string; name: string; project: string; repositoryId: string; executionOwner: 'interactive' | 'ploeg'; tenant: string; client?: string; clientProject?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
+export type ConnectionSource = { id: string; connection: string; name: string; project: string; repositoryId: string; executionOwner: 'interactive' | 'ploeg'; tenant: string; client?: string; clientProject?: string; binding?: SourceBinding; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
 /** Why a saved source is not in use: the server configuration already reads its project or uses its id, or its repository is no longer registered. */
 export type SourceState = 'active' | 'shadowed' | 'repository_missing';
 /** A connection as people see it: never its token, only whether one is stored. */
-export type PublicConnection = TrackerConnection & { label: string; noun: string; token: 'set' | 'missing'; manage: boolean; sources: (ConnectionSource & { state: SourceState })[] };
+export type PublicConnection = TrackerConnection & { label: string; noun: string; token: 'set' | 'missing' | 'held_by_ploeg'; manage: boolean; sources: (ConnectionSource & { state: SourceState })[] };
 /** The result of checking a connection's own token: one `service` check, as on the setup page. */
 export type ConnectionCheck = { ok: boolean; account?: string; checks: { id: 'service'; status: 'ok' | 'problem'; title: string; text: string; fix?: string; code?: string }[] };
 
@@ -138,6 +142,9 @@ export class TrackerConnections {
     return owner.tenant === source.tenant && (owner.client === undefined || owner.client === source.client) ? 'active' : 'repository_missing';
   }
 
+  /** The repositories in use that belong to `tenant`'s own work: configured, and stored ones while they join the configured list. */
+  repositoriesOf(tenant: string) { return this.config.repositories.filter(repository => { const owner = ownership(repository); return owner.tenant === tenant && owner.client === undefined; }); }
+
   /** Calls `listener` after each sync, so what reads `config.repositories` and `config.taskSources` can rebuild its indexes. */
   onSync(listener: () => void): void { this.synced.push(listener); }
 
@@ -177,7 +184,7 @@ export class TrackerConnections {
       const state = this.state(source, connection);
       if (state !== 'active') { this.log('tracker_connections.source_unused', { source: source.id, reason: state }); continue; }
       const held = this.credential(connection.id);
-      const target = this.routedTarget(source, connection);
+      const target = boundTarget(source) ?? this.routedTarget(source, connection);
       list.push({
         id: source.id, name: source.name, provider: connection.provider, baseUrl: connection.baseUrl, project: source.project, repositoryId: source.repositoryId, executionOwner: source.executionOwner,
         ...(held ? { token: held.token, ...(held.tokenType ? { tokenType: held.tokenType } : {}) } : {}),
@@ -185,6 +192,42 @@ export class TrackerConnections {
       });
     }
     for (const listener of this.synced) listener();
+  }
+
+  /**
+   * Records a tracker connection Ploeg holds, made through Ploeg's connection flow: its Ploeg id, method and account,
+   * and no token (system ADR-0060). The same Ploeg connection made again updates the row instead of adding one.
+   */
+  recordPloegConnection(user: User, input: { provider: string; baseUrl: string; tenant: string; ploeg: PloegHeld; account: string }): TrackerConnection {
+    if (!this.manages(user, input.tenant)) throw new TaskError(403, 'forbidden', `Only an administrator${this.options.enforced ? ` of Tenant ${input.tenant}` : ''} adds tracker connections.`);
+    const at = this.now();
+    const existing = this.connections().find(connection => connection.tenant === input.tenant && connection.ploeg?.connection === input.ploeg.connection);
+    const connection: TrackerConnection = existing
+      ? { ...existing, account: input.account, ploeg: input.ploeg, tokenSetAt: at, updatedAt: at, updatedBy: user.name }
+      : { id: `tc-${randomBytes(6).toString('hex')}`, provider: input.provider, baseUrl: input.baseUrl, tenant: input.tenant, account: input.account, ploeg: input.ploeg, tokenSetAt: at, createdAt: at, createdBy: user.name, updatedAt: at, updatedBy: user.name };
+    if (existing) this.db.prepare("UPDATE integration_accounts SET body=? WHERE id=? AND role='tracker'").run(JSON.stringify(connection), connection.id);
+    else this.db.prepare("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) VALUES(?,?,'tracker',?,?,?,?,?)").run(connection.id, connection.tenant, connection.provider, connection.baseUrl, `ploeg:${input.ploeg.connection}`, at, JSON.stringify(connection));
+    return connection;
+  }
+
+  /** Forgets a tracker connection Ploeg held, once Ploeg removed it. Refused while a saved source uses it. */
+  forgetPloegConnection(user: User, id: string): void {
+    const connection = this.owned(user, id);
+    if (!connection.ploeg) throw new TaskError(409, 'connection_not_ploeg', 'This connection is kept by Unfold, not Ploeg. Remove it under Connect a tracker.');
+    const using = this.sources().filter(source => source.connection === connection.id);
+    if (using.length) throw new TaskError(409, 'connection_in_use', `Remove ${using.map(source => source.name).join(', ')} first; ${using.length === 1 ? 'it uses' : 'they use'} this connection.`);
+    this.db.prepare('DELETE FROM integration_accounts WHERE id=?').run(id);
+  }
+
+  /** Stores a saved source's Ploeg binding, or drops it with null, and syncs so the source takes or loses its target. */
+  setBinding(sourceId: string, binding: SourceBinding | null): ConnectionSource {
+    const source = this.sources().find(entry => entry.id === sourceId);
+    if (!source) throw new TaskError(404, 'source_not_found', 'There is no such task source. Reload the page to see the ones there are.');
+    const { binding: _previous, clientProject: _project, ...rest } = source;
+    const updated: ConnectionSource = { ...rest, ...(binding ? { binding } : {}), updatedAt: this.now() };
+    this.db.prepare('UPDATE tracker_connection_sources SET body=? WHERE id=?').run(JSON.stringify(updated), source.id);
+    this.sync();
+    return { ...updated, ...(source.clientProject ? { clientProject: source.clientProject } : {}) };
   }
 
   private guide(provider: string): { adapter: TaskProviderAdapter; guide: ServiceAccountGuide; root: string } {
@@ -217,7 +260,7 @@ export class TrackerConnections {
   private publicConnection(user: User, connection: TrackerConnection): PublicConnection {
     const { adapter, guide } = (() => { try { return this.guide(connection.provider); } catch { return { adapter: undefined, guide: undefined }; } })();
     const sources = this.sources().filter(source => source.connection === connection.id).map(source => ({ ...source, state: this.state(source, connection) }));
-    return { ...connection, label: adapter?.label ?? connection.provider, noun: guide?.noun ?? 'account', token: this.credential(connection.id) ? 'set' : 'missing', manage: this.manages(user, connection.tenant), sources };
+    return { ...connection, label: adapter?.label ?? connection.provider, noun: guide?.noun ?? 'account', token: connection.ploeg ? 'held_by_ploeg' : this.credential(connection.id) ? 'set' : 'missing', manage: this.manages(user, connection.tenant), sources };
   }
 
   /** The connections `user` reaches, with their sources and whether `user` may change them. Never a token. */
@@ -257,6 +300,7 @@ export class TrackerConnections {
   /** Replaces a connection's token after the tracker accepted the new one. The old one is forgotten at once. */
   async replaceToken(user: User, id: string, input: Record<string, unknown>): Promise<PublicConnection> {
     const connection = this.owned(user, id);
+    if (connection.ploeg) throw heldByPloeg();
     const { credential, account } = await this.verify(connection.provider, connection.baseUrl, input.token);
     const at = this.now();
     const updated: TrackerConnection = { ...connection, ...(account ? { account } : {}), tokenSetAt: at, updatedAt: at, updatedBy: user.name };
@@ -275,6 +319,7 @@ export class TrackerConnections {
   /** Removes a connection and forgets its token. Refused while sources still use it. */
   remove(user: User, id: string): void {
     const connection = this.owned(user, id);
+    if (connection.ploeg) throw heldByPloeg();
     const using = this.sources().filter(source => source.connection === connection.id);
     if (using.length) throw new TaskError(409, 'connection_in_use', `Remove ${using.map(source => source.name).join(', ')} first; ${using.length === 1 ? 'it reads' : 'they read'} with this connection.`);
     this.store.deleteSecret(secretId(id));
@@ -286,6 +331,10 @@ export class TrackerConnections {
   async check(user: User, id: string): Promise<ConnectionCheck> {
     const connection = connectionId.test(id) ? this.connection(id) : undefined;
     if (!connection || !this.sees(user, connection.tenant)) throw new TaskError(404, 'connection_not_found', 'There is no such tracker connection. Reload Connect a tracker to see the ones there are.');
+    if (connection.ploeg) {
+      const label = findTaskProvider(connection.provider)?.label ?? connection.provider;
+      return { ok: true, ...(connection.account ? { account: connection.account } : {}), checks: [{ id: 'service', status: 'ok', title: `Unfold's ${label} member`, text: `Ploeg holds this connection's token and Unfold keeps none. Connect ${label} shows Ploeg's own check of it.` }] };
+    }
     const { adapter, guide } = this.guide(connection.provider);
     const title = `Unfold's ${guide.noun}`;
     const held = this.credential(id);
@@ -344,7 +393,8 @@ export class TrackerConnections {
   updateSource(user: User, id: string, sourceId: string, input: Record<string, unknown>): ConnectionSource {
     const connection = this.owned(user, id);
     const previous = this.savedSource(connection, sourceId);
-    const source = this.sourceInput(user, connection, input, previous.id, previous);
+    const changed = this.sourceInput(user, connection, input, previous.id, previous);
+    const source: ConnectionSource = previous.binding && changed.repositoryId === previous.repositoryId && changed.executionOwner === 'ploeg' ? { ...changed, binding: previous.binding } : changed;
     const clientProject = source.client ? undefined : previous.client || !previous.clientProject ? this.projects.ownWork(source.tenant, user, source.updatedAt).id : previous.clientProject;
     this.db.prepare('UPDATE tracker_connection_sources SET client=?, client_project_id=?, body=? WHERE id=?').run(source.client ?? null, clientProject ?? null, JSON.stringify(source), source.id);
     this.sync();
@@ -355,7 +405,15 @@ export class TrackerConnections {
   removeSource(user: User, id: string, sourceId: string): void {
     const connection = this.owned(user, id);
     const source = this.savedSource(connection, sourceId);
+    if (source.binding && source.binding.state !== 'removed') throw new TaskError(409, 'source_bound', `Ploeg still routes ${source.name} to Team ${source.binding.team}. Remove the binding on Connect ClickUp first.`);
     this.db.prepare('DELETE FROM tracker_connection_sources WHERE id=?').run(source.id);
     this.sync();
   }
+}
+
+const heldByPloeg = () => new TaskError(409, 'connection_held_by_ploeg', 'Ploeg holds this connection and its token. Replace or remove it under Connect ClickUp, which asks Ploeg.');
+
+/** The Work Target of a source's Ploeg binding while Ploeg routes its List through it: `active`, or `awaiting_webhook`, which Ploeg routes too. */
+function boundTarget(source: ConnectionSource): TaskTarget | undefined {
+  return source.executionOwner === 'ploeg' && (source.binding?.state === 'active' || source.binding?.state === 'awaiting_webhook') ? source.binding.target : undefined;
 }
