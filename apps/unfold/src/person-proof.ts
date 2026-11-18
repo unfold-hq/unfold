@@ -139,6 +139,22 @@ export class PersonProof {
     return this.sendWith(signIn, () => this.token(signIn), () => this.cache.delete(signIn), call);
   }
 
+  /**
+   * Sends a change that must carry `person`'s person token or not be sent at all, such as one whose body holds a
+   * secret: answers null, without calling, when no token can be had, and never repeats the call without the token
+   * after Ploeg refused it (HTTP 401); that answer is returned as it came.
+   */
+  async sendProven(person: string, call: (headers: Record<string, string>) => Promise<Response>): Promise<Response | null> {
+    const context = actionContext.getStore();
+    let value: string | undefined;
+    if (context?.scope === 'mcp') value = context.proof?.userId === person && context.proof.source === 'request' ? await this.carried(context.proof) : undefined;
+    else { const signIn = this.loginFor(person, context?.signIn); value = signIn ? await this.token(signIn) : undefined; }
+    if (!value) return null;
+    const response = await call({ [personTokenHeader]: value });
+    if (response.status === 401) { if (context?.scope === 'mcp' && context.proof?.source === 'request') this.carriedTokens.delete(context.proof); else { const signIn = this.loginFor(person, context?.signIn); if (signIn) this.cache.delete(signIn); } }
+    return response;
+  }
+
   private async sendWith(key: string, token: () => Promise<string | undefined>, drop: () => void, call: (headers: Record<string, string>) => Promise<Response>): Promise<Response> {
     const value = await token();
     if (!value) return call({});

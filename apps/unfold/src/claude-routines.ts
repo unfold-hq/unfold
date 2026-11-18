@@ -33,8 +33,18 @@ export const routineRefusalTable = [
   { status: 400, code: 'invalid_token', words: 'Ploeg does not accept this token. Paste the single line of 16 to 512 characters claude.ai showed when you added the API trigger.' },
   { status: 503, code: 'secret_store_unavailable', words: 'Ploeg’s secret store did not answer, so Ploeg could not keep or read your routine’s token and nothing changed. Try again later; if it keeps failing, the person who installed Ploeg checks its secret store.' },
   { status: 403, code: 'execution_forbidden', words: 'Unfold may not start Runs in this Ploeg, so it cannot connect or start a routine. The person who installed Ploeg gives Unfold’s consumer execute.' },
+  { status: 409, code: 'credential_gateway_team', words: 'Ploeg does not let a person’s own client or routine start this Team’s Runs, because the Team runs behind its credential gateway. Nothing started and the Run keeps waiting; ask whoever installed Ploeg how this Team’s Runs start.' },
+  { status: 409, code: 'forge_unavailable', words: 'Ploeg cannot let a session started outside it push to this Work Item’s repository host, so nothing started and the Run keeps waiting. Ask whoever installed Ploeg to check the forge for Claude sessions.' },
+  { status: 409, code: 'team_without_sponsor', words: 'This Team has no sponsor, the person its Runs act for, so Ploeg runs nothing for it. Ask whoever installed Ploeg to name the Team’s sponsor.' },
+  { status: 409, code: 'spend_cap_reached', words: 'Starting this Run would take the Team over its spend cap for this period, so nothing started and the Run keeps waiting. Try again in the next period, or ask whoever installed Ploeg to raise the cap.' },
+  { status: 503, code: 'unavailable', words: 'Ploeg could not read or record what this needs right now, so nothing changed. Try again in a minute.' },
 ] as const;
 const routineWords: Readonly<Record<string, string>> = Object.fromEntries(routineRefusalTable.map(entry => [entry.code, entry.words]));
+
+/** The sentence a person reads for a refusal Ploeg named: Unfold's own words, never Ploeg's message; an unknown code gets a general sentence that names it. */
+export function routineRefusalWords(code: string): string {
+  return claimFailures[code] ?? routineWords[code] ?? `Ploeg refused this (${code}), so nothing changed. Try again in a minute; if it keeps happening, ask whoever installed Ploeg what ${code} means for this installation.`;
+}
 
 const step: StepId = 'connect-claude';
 const connectClaudeHref = '#settings/claude';
@@ -46,7 +56,7 @@ const short = (value: unknown, max: number): string => typeof value === 'string'
 const list = (items: string[]) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
 
 type PloegCalls = {
-  operatorCall(user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; slow?: boolean; person?: boolean }): Promise<Record<string, unknown> | null>;
+  operatorCall(user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; slow?: boolean; person?: boolean; proven?: boolean }): Promise<Record<string, unknown> | null>;
   teams(user: User, fresh?: boolean): Promise<PloegTeam[]>;
   detail(user: User, id: string, fresh?: boolean): Promise<unknown>;
   isDemo: boolean;
@@ -90,8 +100,7 @@ export class ClaudeRoutines {
 
   private refuse(error: unknown): never {
     if (!(error instanceof PloegOperatorRefusal)) throw error;
-    const words = claimFailures[error.code] ?? routineWords[error.code] ?? (error.message || 'Ploeg refused it.');
-    throw new PloegError(error.status, error.code, words);
+    throw new PloegError(error.status, error.code, routineRefusalWords(error.code));
   }
 
   private remembered(user: User): string[] {
@@ -112,7 +121,8 @@ export class ClaudeRoutines {
     let routines: ClaudeRoutine[];
     try { routines = await this.read(user); }
     catch (error) {
-      if (error instanceof PloegError && error.status < 500) return { demo: false, served, waitsFor: null, refused: { code: error.code, message: routineWords[error.code] ?? error.message }, teams: teams.map(team => ({ team, routine: null })) };
+      if (error instanceof PloegOperatorRefusal && error.status >= 500) throw new PloegError(error.status, error.code, routineRefusalWords(error.code));
+      if (error instanceof PloegError && error.status < 500) return { demo: false, served, waitsFor: null, refused: { code: error.code, message: error instanceof PloegOperatorRefusal ? routineRefusalWords(error.code) : error.message }, teams: teams.map(team => ({ team, routine: null })) };
       throw error;
     }
     this.remember(user, routines.map(routine => routine.team));
@@ -139,7 +149,7 @@ export class ClaudeRoutines {
     if (!tokenPattern.test(token)) throw new PloegError(400, 'invalid_token', routineWords.invalid_token);
     await this.options.steps.admitPerson(user, step);
     let answer: Record<string, unknown>;
-    try { answer = object(await this.options.ploeg.operatorCall(user, `claude-routines/${encodeURIComponent(team)}`, { method: 'PUT', body: { fireUrl, token } })); }
+    try { answer = object(await this.options.ploeg.operatorCall(user, `claude-routines/${encodeURIComponent(team)}`, { method: 'PUT', body: { fireUrl, token }, proven: true })); }
     catch (error) { return this.refuse(error); }
     const routine = routineOf(answer.routine);
     if (!routine || routine.team !== team) throw new PloegError(502, 'ploeg_response', 'Ploeg answered the connection in a form this Unfold cannot read.');

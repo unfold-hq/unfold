@@ -7,7 +7,8 @@ import { hashPassword } from '../src/auth.ts';
 import { ClaudeRoutines, routineRefusalTable } from '../src/claude-routines.ts';
 import { errorCatalogue } from '../src/error-catalogue.ts';
 import { Onboarding } from '../src/onboarding.ts';
-import { claimFailures } from '../src/ploeg.ts';
+import { claimFailures, PloegClient } from '../src/ploeg.ts';
+import { personTokenHeader, type PersonProof } from '../src/person-proof.ts';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import type { User } from '../src/types.ts';
 import { linkedWorkMarkup } from '../public/core/linked-handoff.js';
@@ -15,8 +16,9 @@ import { teamMarkup } from '../public/core/connect-claude.js';
 import { application, login, request } from './api-support.ts';
 
 const fireUrl = 'https://api.anthropic.com/v1/claude_code/routines/trig_01AbCdEf/fire';
-type Call = { method: string; path: string; actor?: string; body: Record<string, unknown> | null; raw: string };
-type Refusal = { status: number; code: string };
+type Call = { method: string; path: string; actor?: string; proof?: string; body: Record<string, unknown> | null; raw: string };
+const rawPloegText = 'RAW-PLOEG-TEXT the person must never read';
+type Refusal = { status: number; code?: string };
 type FakeOptions = { list?: Refusal; put?: Refusal; remove?: Refusal; fire?: Refusal };
 
 async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
@@ -33,16 +35,16 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
     const raw = Buffer.concat(chunks).toString('utf8');
     const url = new URL(req.url!, 'http://ploeg.invalid');
     const path = url.pathname.replace('/api/v1/operator/', '');
-    calls.push({ method: req.method!, path, actor: req.headers['x-ploeg-actor'] as string | undefined, body: raw ? JSON.parse(raw) : null, raw });
+    calls.push({ method: req.method!, path, actor: req.headers['x-ploeg-actor'] as string | undefined, proof: req.headers[personTokenHeader.toLowerCase()] as string | undefined, body: raw ? JSON.parse(raw) : null, raw });
     const send = (status: number, value: object) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...value }));
-    const refuse = (refusal: Refusal) => send(refusal.status, { error: { code: refusal.code, message: `Ploeg says ${refusal.code}.` } });
+    const refuse = (refusal: Refusal) => send(refusal.status, { error: { ...(refusal.code ? { code: refusal.code } : {}), message: `Ploeg says ${refusal.code}. ${rawPloegText}` } });
     if (req.headers.authorization !== `Bearer ${bearer}`) return res.writeHead(401).end();
     if (path === 'teams') return send(200, { teams: ploegDemo.teams });
     if (path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: [] });
     if (path === 'claude-routines' && req.method === 'GET') return options.list ? refuse(options.list) : send(200, { routines: [...routines.values()] });
     const routine = /^claude-routines\/([^/]+)$/.exec(path);
     if (routine && req.method === 'PUT') {
-      if (options.put) return refuse(options.put);
+      if (options.put) return options.put.status === 401 ? res.writeHead(401, { 'content-type': 'application/json' }).end(JSON.stringify({ error: { code: 'invalid_token', message: 'The person token is not valid.' } })) : refuse(options.put);
       const body = JSON.parse(raw) as { fireUrl: string; token: string };
       const saved = { team: routine[1], fireUrl: body.fireUrl, creatorPinned: false, registeredAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z' };
       routines.set(routine[1], saved);
@@ -72,7 +74,21 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
   return { calls, routines, config: { url: `http://127.0.0.1:${address.port}`, tokenEnv: env }, routineCalls: () => calls.filter(call => call.path.startsWith('claude-routines') || call.path.endsWith('/fire-routine')) };
 }
 
-async function people(t: TestContext, options: FakeOptions = {}) {
+type ProofStub = 'proven' | 'none';
+
+function stubProof(t: TestContext, mode: ProofStub): void {
+  const original = PloegClient.prototype.usePersonProof;
+  const stub = {
+    send: (_person: string, _acting: string | undefined, call: (headers: Record<string, string>) => Promise<Response>) => call({}),
+    sendProven: async (_person: string, call: (headers: Record<string, string>) => Promise<Response>) => mode === 'none' ? null : call({ [personTokenHeader]: 'person-proof-token' }),
+    rejection: () => undefined,
+  } as unknown as PersonProof;
+  PloegClient.prototype.usePersonProof = function (this: PloegClient, _proof, attribution) { original.call(this, stub, attribution); };
+  t.after(() => { PloegClient.prototype.usePersonProof = original; });
+}
+
+async function people(t: TestContext, options: FakeOptions = {}, proof: ProofStub = 'proven') {
+  stubProof(t, proof);
   const ploeg = await fakePloeg(t, options);
   const server = await application('live', config => { config.ploeg = { ...ploeg.config, userTeams: { op: ['delivery'], watcher: ['delivery'] } }; });
   t.after(() => server.close());
@@ -116,6 +132,7 @@ test('a person connects their routine, starts a Work Item with it and removes it
   assert.equal(put.path, 'claude-routines/delivery');
   assert.deepEqual(put.body, { fireUrl, token }, 'Ploeg gets the fire URL and the token, and nothing else');
   assert.equal(put.actor, 'op');
+  assert.equal(put.proof, 'person-proof-token', 'the token goes only with the person’s proof');
 
   const after = await request(server.url, '/api/claude-routines', op);
   answers.push(after.text);
@@ -164,7 +181,7 @@ test('every refusal of firing the routine comes back in Ploeg’s status and cod
       assert.equal(answer.status, refusal.status, answer.text);
       assert.equal(answer.body.error.code, refusal.code);
       assert.equal(answer.body.error.message, refusal.words);
-      assert(!answer.text.includes('Ploeg says'), 'Ploeg’s raw message is replaced by the plain sentence');
+      assert(!answer.text.includes(rawPloegText), 'Ploeg’s raw message is replaced by the plain sentence');
     });
   }
 });
@@ -246,7 +263,54 @@ test('the Connect Claude form never puts a token back on the page', () => {
   const html = teamMarkup({ team: 'delivery', routine: { fireUrl, creatorPinned: true, registeredAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z' } });
   assert.match(html, /name="token" type="password"[^>]*autocomplete="off"/);
   assert.doesNotMatch(html, /name="token"[^>]*value=/, 'the token field has no value');
+  assert.doesNotMatch(html, /data-private/, 'no marker that nothing reads');
   assert.match(html, /Connected/);
   assert.match(html, /Remove/);
   assert.match(teamMarkup({ team: 'delivery', routine: null }), /Not connected/);
+});
+
+test('a refusal Unfold has no sentence for names its code in a general sentence and never repeats Ploeg’s message', async t => {
+  const cases: (Refusal & { shown: string })[] = [
+    { status: 404, code: 'not_found', shown: 'not_found' },
+    { status: 409, code: 'brand_new_reason', shown: 'brand_new_reason' },
+    { status: 409, shown: 'ploeg_refused' },
+    { status: 503, code: 'unavailable', shown: 'unavailable' },
+  ];
+  for (const refusal of cases) {
+    await t.test(refusal.shown, async t => {
+      const { server, op } = await people(t, { fire: refusal });
+      const answer = await request(server.url, '/api/ploeg/work-items/109/fire-routine', { method: 'POST', cookie: op.cookie });
+      assert.equal(answer.status, refusal.status, answer.text);
+      assert.equal(answer.body.error.code, refusal.shown);
+      assert(!answer.text.includes(rawPloegText), answer.text);
+      if (!routineRefusalTable.some(entry => entry.code === refusal.shown)) assert.match(answer.body.error.message, new RegExp(`Ploeg refused this \\(${refusal.shown}\\)`));
+    });
+  }
+  for (const list of [{ status: 403, code: 'brand_new_reason' }, { status: 503, code: 'unavailable' }]) {
+    await t.test(`reading routines: ${list.status}`, async t => {
+      const { server, op } = await people(t, { list });
+      const answer = await request(server.url, '/api/claude-routines', op);
+      assert(!answer.text.includes(rawPloegText), answer.text);
+    });
+  }
+});
+
+test('the token is never sent without the person’s proof, and a refused proof is not retried without it', async t => {
+  await t.test('no person token can be had', async t => {
+    const { ploeg, server, op } = await people(t, {}, 'none');
+    const answer = await request(server.url, '/api/claude-routines/delivery', { method: 'PUT', cookie: op.cookie, body: { fireUrl, token: 'n'.repeat(32) } });
+    assert.equal(answer.status, 403, answer.text);
+    assert.equal(answer.body.error.code, 'ploeg_person_unproven');
+    assert.match(answer.body.error.message, /Sign out and sign in again/);
+    assert.equal(ploeg.calls.filter(call => call.method === 'PUT').length, 0, 'the token never left Unfold');
+  });
+  await t.test('Ploeg refuses the person token', async t => {
+    const { ploeg, server, op } = await people(t, { put: { status: 401 } });
+    const answer = await request(server.url, '/api/claude-routines/delivery', { method: 'PUT', cookie: op.cookie, body: { fireUrl, token: 'r'.repeat(32) } });
+    assert.equal(answer.status, 403, answer.text);
+    assert.equal(answer.body.error.code, 'ploeg_person_unproven');
+    const puts = ploeg.calls.filter(call => call.method === 'PUT');
+    assert.equal(puts.length, 1, 'the token body is sent once, with proof, and not again without it');
+    assert.equal(puts[0].proof, 'person-proof-token');
+  });
 });

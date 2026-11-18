@@ -22,7 +22,7 @@ You need a Ploeg of 0.2.0-rc.128 or later whose installation turned routines on 
 
 Open **Settings → Connect Claude** (`#settings/claude`), or **Connect Claude** on the onboarding checklist. Each of your Teams has a line that says **Connected** or **Not connected**. Paste the fire URL and the token on your Team's line and choose **Connect**.
 
-Unfold sends both to Ploeg as you, and Ploeg keeps the token in its secret store. Unfold never stores, logs or shows the token: the action log and audit trail record it as `[redacted]`, and no page shows it again. To rotate it, paste the new token and choose **Replace**. **Remove** asks Ploeg to delete the routine and its token.
+Unfold sends both to Ploeg as you, only with the proof your single sign-on gives it: without that proof it sends nothing and asks you to sign in again. Ploeg keeps the token in its secret store. Unfold never stores, logs or shows the token: the action log and audit trail record it as `[redacted]`, and no page shows it again. To rotate it, paste the new token and choose **Replace**. **Remove** asks Ploeg to delete the routine and its token.
 
 Ploeg does not say which Teams start their Runs through a routine. Connecting a Team that does not answers that no Role of the Team starts its Runs through a Claude routine.
 
@@ -32,7 +32,7 @@ On a Work Item whose Run waits for you, the **Your Claude Code** card shows **St
 
 ## When Ploeg refuses
 
-Ploeg names each refusal and Unfold shows it in plain words. Before the claim the Run keeps waiting; after it, the Run ends stuck and the Work Item follows its retry policy. The [error codes](../../apps/unfold/docs/contracts/error-codes.md) list each one.
+Ploeg names each refusal and Unfold shows it in plain words, never Ploeg's own message; a code Unfold has no sentence for is named in a general one. Before the claim the Run keeps waiting; after it, the Run ends stuck and the Work Item follows its retry policy. The [error codes](../../apps/unfold/docs/contracts/error-codes.md) list each one.
 
 | Code | What it means | What to do |
 | --- | --- | --- |
