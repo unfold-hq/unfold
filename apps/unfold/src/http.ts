@@ -7,6 +7,7 @@ import { Onboarding } from './onboarding.ts';
 import { ClickUpOnboarding } from './clickup-onboarding.ts';
 import { clickUpRoute, isClickUpRoute } from './clickup-onboarding-http.ts';
 import { HttpPloegConnectionApi } from './ploeg-connection-api.ts';
+import { ReadinessPrepare } from './readiness-prepare.ts';
 import { Auth, signedInUser, editorCredentialDays, editorLabel, localLoginEnabled, localLoginOff, type EditorRequestView } from './auth.ts';
 import type { Engine } from './engine.ts';
 import { publicSession, type Store } from './store.ts';
@@ -336,6 +337,8 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     audit: change => audit.record({ actor: auditActor(change.user), tenants: [change.tenant], fact: { kind: 'entity', action: change.action, entity: { type: change.entity, uid: change.uid, name: change.name, data: change.data }, outcome: 'success' } }),
   });
   onboarding.useStepLines(manage => clickup.lines(manage));
+  const readinessPrepare = new ReadinessPrepare({ store, ploeg, onboarding });
+  onboarding.useReadiness(readinessPrepare);
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });
   const secrets = knownSecrets(config);
   trackerConnections.onSecret(secret => { if (!secrets.includes(secret)) secrets.push(secret); engine.redact(secret); });
@@ -750,6 +753,11 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         if (path === '/api/onboarding/spend-cap') {
           if (method === 'POST') return json(res, 200, sanitize({ confirmation: await onboarding.confirmCap(user, await body(req)) }));
           fault(405, 'method', 'Confirm a Team’s spend cap with POST.');
+        }
+        if (path === '/api/onboarding/prepare' || path === '/api/onboarding/prepare/cancel') {
+          if (method !== 'POST') fault(405, 'method', 'Prepare a repository or cancel its readiness Work Item with POST.');
+          if (path === '/api/onboarding/prepare') { const started = await readinessPrepare.start(user, await body(req)); return json(res, started.replayed ? 200 : 201, sanitize(started)); }
+          return json(res, 200, sanitize(await readinessPrepare.cancel(user, await body(req))));
         }
         if (isClickUpRoute(path)) {
           const answer = await clickUpRoute(clickup, { method, path, user, signIn: auth.scope(req) === 'browser' ? auth.signIn(req) : undefined, query: url.searchParams, body: () => body(req) });

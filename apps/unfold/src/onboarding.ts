@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { PloegError, type PloegConnections, type PloegTeam } from './ploeg.ts';
 import type { TeamSpendCap } from './hand-off-spend.ts';
+import type { ReadinessLines } from './readiness-prepare.ts';
 import { defaultTenant } from './tenancy.ts';
 import type { AppConfig, InsightEvent, User } from './types.ts';
 
@@ -44,10 +45,10 @@ export const installValues: readonly { prerequisite: string; value: string; read
 
 /** What one checklist line says: `ok` green, `problem` red, `warning` amber, `unknown` not known yet, `pending` not started, `unavailable` refused because Ploeg does not serve the step. */
 export type LineStatus = 'ok' | 'problem' | 'warning' | 'unknown' | 'pending' | 'unavailable';
-export type ChecklistAction = { label: string; href?: string; kind: 'link' | 'refresh' | 'install-values' | 'config-entry' | 'confirm-cap' };
+export type ChecklistAction = { label: string; href?: string; external?: boolean; data?: Record<string, string>; kind: 'link' | 'refresh' | 'install-values' | 'config-entry' | 'confirm-cap' | 'prepare' | 'cancel-prepare' };
 export type ChecklistLine = {
   id: string; stage: number; title: string; status: LineStatus; text: string;
-  fix?: string; action?: ChecklistAction; install?: string; reason?: string; configured?: boolean;
+  fix?: string; action?: ChecklistAction; actions?: ChecklistAction[]; install?: string; reason?: string; configured?: boolean;
   waitsFor?: { record: string; release: string | null }; configEntry?: string; checks?: ChecklistLine[];
 };
 /** `GET /api/onboarding`: the checklist one person reads on Settings → Connections. */
@@ -80,6 +81,7 @@ export type StoredEntries = { repositories(): { id: string; name: string; url: s
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
 /** The line a later slice shows for a step this Ploeg serves, from what Unfold holds; none keeps the step's "Unfold adds its screen" line. */
 export type StepLines = (manage: boolean) => Partial<Record<StepId, ChecklistLine>>;
+type Readiness = { lines(user: User, input: { connections: PloegConnections | null; teams: PloegTeam[] | null; budget: TeamBudget[]; manage: boolean; fresh: boolean }): Promise<ReadinessLines> };
 type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries; stepLines?: StepLines };
 
 const stateId = (tenant: string) => `onboarding:${tenant}`;
@@ -124,6 +126,7 @@ export class Onboarding {
   private readonly stored: StoredEntries;
   private readonly pinned: string;
   private stepLines: StepLines | undefined;
+  private readiness: Readiness | undefined;
 
   constructor(options: Options) {
     this.store = options.store; this.ploeg = options.ploeg; this.config = options.config; this.insight = options.insight;
@@ -135,6 +138,8 @@ export class Onboarding {
 
   /** Shows the lines `lines` gives for the steps this Ploeg serves, in place of their "Unfold adds its screen" line. */
   useStepLines(lines: StepLines): void { this.stepLines = lines; }
+  /** Shows the readiness pull request (slice S7) on the Prepare and Review-and-merge stages once Ploeg serves the step. */
+  useReadiness(readiness: Readiness): void { this.readiness = readiness; }
 
   /** Whether `user` connects accounts and adds repositories and Lists: an administrator, and under `tenancy.enforce` an Admin of the Tenant. */
   manages(user: User, tenant = defaultTenant): boolean {
@@ -265,13 +270,15 @@ export class Onboarding {
     const manage = this.manages(user);
     const storedRepositories = this.stored.repositories();
     const budget = (teams ?? []).map(entry => budgetOf(entry, state, manage));
-    const stages = this.stages({ connections, teams, served, state, manage, storedRepositories, budget });
+    const readiness = served['prepare-repository'] === true && this.readiness && !connections?.demo ? await this.readiness.lines(user, { connections, teams, budget, manage, fresh }).catch(() => null) : null;
+    if (readiness) Object.assign(state, this.read());
+    const stages = this.stages({ connections, teams, served, state, manage, storedRepositories, budget, readiness });
     this.track(user, state, stages);
     return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.pinned, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString(), budget };
   }
 
-  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']>; budget: TeamBudget[] }): ChecklistLine[] {
-    const { connections, teams, served, state, manage, storedRepositories, budget } = input;
+  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']>; budget: TeamBudget[]; readiness: ReadinessLines | null }): ChecklistLine[] {
+    const { connections, teams, served, state, manage, storedRepositories, budget, readiness } = input;
     const step = (id: StepId) => this.steps.steps.find(entry => entry.id === id)!;
     const repositories = connections?.repositories ?? [];
     const boards = connections?.boards ?? [];
@@ -330,17 +337,22 @@ export class Onboarding {
 
     lines.push(this.budgetLine(teams, budget, manage, Boolean(connections?.demo)));
 
-    lines.push(notServed('prepare-repository', 'Prepare a repository', 'Add an AGENTS.md at the root of the repository’s base branch by hand.', notReady.length ? ` ${list(notReady.map(repository => `${repository.owner}/${repository.repo}`))} ${notReady.length === 1 ? 'needs' : 'need'} one.` : ''));
+    const manualPrepare = connections?.demo
+      ? { id: 'prepare-repository', stage: 7, title: 'Prepare a repository', status: 'pending' as const, text: 'Demo · no readiness pull request opens, no Run starts and no money is spent.' }
+      : notServed('prepare-repository', 'Prepare a repository', 'Add an AGENTS.md at the root of the repository’s base branch by hand.', notReady.length ? ` ${list(notReady.map(repository => `${repository.owner}/${repository.repo}`))} ${notReady.length === 1 ? 'needs' : 'need'} one.` : '');
+    lines.push(readiness?.prepare ?? manualPrepare);
 
-    lines.push(!repositories.length
+    lines.push(readiness?.review ?? (!repositories.length
       ? { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: 'pending', text: 'Waits for a registered repository.' }
       : notReady.length
         ? { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: 'problem', text: `${list(notReady.map(repository => `${repository.owner}/${repository.repo}`))} ${notReady.length === 1 ? 'is' : 'are'} not ready, so Ploeg refuses work routed there.`, fix: manage ? 'Add an AGENTS.md at the root of the base branch. Ploeg checks again on the next task.' : askAdmin, action: action({ label: 'Check again', kind: 'refresh' }) }
-        : { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: 'ok', configured: true, text: 'Every repository Ploeg routes to is ready for agents.' });
+        : { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: 'ok', configured: true, text: 'Every repository Ploeg routes to is ready for agents.' }));
 
-    lines.push(boards.length
-      ? { id: 'bind-lists', stage: 9, title: 'Bind Lists', status: 'ok', configured: true, text: `Configured by the installation: Ploeg routes ${boards.length === 1 ? '1 board' : `${boards.length} boards`}, listed below.` }
-      : notServed('bind-lists', 'Bind Lists', 'Ploeg: trackers.<tracker>.projects with the List, its Team and its repository. Unfold: a taskSources entry with the same List and its ploeg target.'));
+    const prepared = readiness?.bindable.length ? ` Ready for a List now that its readiness pull request merged: ${list(readiness.bindable)}.` : '';
+    const bind = boards.length
+      ? { id: 'bind-lists', stage: 9, title: 'Bind Lists', status: 'ok' as const, configured: true, text: `Configured by the installation: Ploeg routes ${boards.length === 1 ? '1 board' : `${boards.length} boards`}, listed below.${prepared}` }
+      : notServed('bind-lists', 'Bind Lists', 'Ploeg: trackers.<tracker>.projects with the List, its Team and its repository. Unfold: a taskSources entry with the same List and its ploeg target.', prepared);
+    lines.push(prepared && !bind.text.includes(prepared) ? { ...bind, text: `${bind.text}${prepared}` } : bind);
 
     lines.push({ id: 'first-task', stage: 10, title: 'First task', status: 'pending', text: 'Assign a task in a routed board to the Team’s tracker user, or hand one off from Tasks.', ...(manage || sources.length ? { action: { label: 'Open Tasks', href: '#tasks', kind: 'link' as const } } : {}) });
     lines.push({ id: 'first-pull-request', stage: 11, title: 'First pull request', status: 'pending', text: 'Nothing to do: Now shows the Work Item moving until its Run opens a pull request.' });
@@ -403,7 +415,7 @@ export class Onboarding {
 
   private track(user: User, state: StepState, stages: ChecklistLine[]): void {
     if (!state.startedAt) return;
-    const lines = stages.flatMap(line => [line, ...(line.checks ?? [])]);
+    const lines = stages.flatMap(line => [line, ...(line.checks ?? [])]).filter(line => !line.id.includes(':'));
     const seconds = Math.max(0, Math.round((this.now().getTime() - Date.parse(state.startedAt)) / 1000));
     const events: [string, Record<string, string | number | boolean>][] = [];
     for (const line of lines) {

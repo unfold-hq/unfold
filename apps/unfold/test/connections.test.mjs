@@ -109,3 +109,14 @@ test('the Budget line offers one confirm button per unconfirmed cap, naming the 
   assert.equal(html.match(/connections-confirm-cap/g).length, 1, 'a confirmed cap and a Team without one get no button');
   assert.doesNotMatch(html, /…/);
 });
+
+test('a readiness line offers one Prepare button per Team with its cap, a cancel button, and opens the pull request in a new tab', () => {
+  const offer = { id: 'prepare:site', stage: 7, title: 'acme/site', status: 'pending', text: 'Only AGENTS.md is missing.', actions: [{ label: 'Prepare this repository · USD 20.00 on delivery', kind: 'prepare', data: { target: 'site', team: 'delivery', usd: '20' } }] };
+  const running = { id: 'prepare:app', stage: 7, title: 'acme/app', status: 'pending', text: 'Ploeg is preparing acme/app.', action: { label: 'Cancel', kind: 'cancel-prepare', data: { target: 'app' } } };
+  const review = { id: 'review:web', stage: 8, title: 'acme/web', status: 'warning', text: 'Review and merge the readiness pull request.', action: { label: 'Open the pull request', href: 'https://github.com/acme/web/pull/7', kind: 'link', external: true } };
+  const html = checklistMarkup({ manage: true, installValues: [], budget: [], stages: [{ id: 'prepare-repository', stage: 7, title: 'Prepare a repository', status: 'pending', text: 'x', checks: [offer, running] }, { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: 'warning', text: 'y', checks: [review] }] });
+  assert.match(html, /data-action="connections-prepare"[^>]*data-target="site"[^>]*data-team="delivery"[^>]*data-usd="20"/);
+  assert.match(html, /Prepare this repository · USD 20\.00 on delivery/);
+  assert.match(html, /data-action="connections-cancel-prepare"[^>]*data-target="app"/);
+  assert.match(html, /href="https:\/\/github\.com\/acme\/web\/pull\/7"[^>]*target="_blank"/);
+});

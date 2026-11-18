@@ -29,6 +29,8 @@ export type PloegItem = { id: string; provider: string; externalId: string; revi
 export type PloegClientWait = { reason: 'start_from_claude_code'; message: string; actsFor: string | null; handedBy: string | null; runId: string; role: string; round: number; writes: boolean };
 /** A manual-origin Work Item to admit (Ploeg ADR-0102): the Team, the registered target key, and what it asks for. */
 export type PloegAdmission = { requestId: string; team: string; target: string; title: string; description: string };
+/** A `prepare_repository` Work Item to admit (Ploeg ADR-0194): no title or brief, which Ploeg owns, and the cap a person confirmed as `budgetUsd`. */
+export type PloegPrepareAdmission = { requestId: string; team: string; target: string; budgetUsd: number };
 export type PloegAdmitted = { id: string; team: string; state: string; shiftId: string | null; budgetUsd: number; poolUsd: number | null; created: boolean; replayed: boolean };
 /** What a person's claim of a client-carried Run answers: the Run, what to dispatch with their own Claude Code, and the Run credential. */
 export type PloegClientClaim = { run: { id: string; workItemId: string; shiftId: string; team: string; role: string; round: number; writes: boolean; actsFor: string }; dispatch: { environmentId: string; ref: string; branch: string; baseBranch: string; repository: { forge: string; owner: string; repo: string }; title: string; reference: string; prompt: string }; credential: { runToken: string; controlToken: string | null; workerId: string | null; deadline: string } };
@@ -100,7 +102,7 @@ export type PloegRefusalCode = 'label_missing' | 'label_not_allowed' | 'label_un
 /** A tracker task Ploeg could not start because routing refused it. It is not a Work Item: none exists. `board` names the task source whose provider and project match the task, or is empty; `link` says whether `url` is the task itself, the tracker's root or absent. */
 export type PloegRefusal = { provider: string; externalId: string; externalScope: string; team: string; title: string; labels: string[]; code: PloegRefusalCode; reason: string; allowedLabels: string[]; refusedAt: string; board: string; url: string; link: 'task' | 'tracker' | 'none' };
 /** A repository Ploeg can route work to (Ploeg ADR-0129): a registered target keyed by its target key, or one a board names directly, keyed `owner/name@branch`. `lastForgeEventAt` is when its forge last sent Ploeg an event in the last `eventWindowDays`. */
-export type PloegConnectionRepository = { key: string; label: string | null; forge: string; owner: string; repo: string; baseBranch: string; readiness: 'ready' | 'not_ready' | 'unknown'; reason: string; lastForgeEventAt: string | null; boards: string[] };
+export type PloegConnectionRepository = { key: string; label: string | null; forge: string; owner: string; repo: string; baseBranch: string; readiness: 'ready' | 'not_ready' | 'unknown'; reason: string; lastForgeEventAt: string | null; boards: string[]; prepareAvailable?: boolean };
 /** An Unfold task source that shows a board's tasks, and whether its Ploeg target is one the board routes to. */
 export type PloegConnectionSource = { id: string; name: string; target: string; routed: boolean };
 /** A tracker board Ploeg routes (Ploeg ADR-0129), with its tracker webhook, whether each Team's tracker user can see it, and the Unfold task sources that show it. */
@@ -150,7 +152,9 @@ export type PloegNoteCommand = { commandId: string; text: string; expectedShiftI
 export type PloegNoted = { workItemId: string; noteId: string; commandId: string; shiftId: string | null; replayed: boolean };
 /** What guards a cancel: the command id a retry reuses and the Shift the person saw open, if any. A Ploeg that refuses a cancel body withdraws unguarded. */
 export type PloegCancelGuard = { commandId: string; expectedShiftId?: string };
-export type PloegCancellation = PloegDecisionResult & { withdrawn: boolean | null; shiftId: string | null; cancelledRuns: number | null; stoppedRuns: number | null; keysBlocked: boolean | null; message: string };
+export type PloegCancellation = PloegDecisionResult & { withdrawn: boolean | null; shiftId: string | null; cancelledRuns: number | null; stoppedRuns: number | null; keysBlocked: boolean | null; message: string; pullRequest?: PloegCancelledPullRequest | null };
+/** The pull request a cancelled `prepare_repository` Work Item had opened, and whether Ploeg closed it (Ploeg ADR-0194 section 7). */
+export type PloegCancelledPullRequest = { url: string; state: 'open' | 'closed' };
 export type PloegRunFilter = { team?: string; state?: string; outcome?: string; before?: string };
 export type RunCardStyle = { skin: string; theme: string | null };
 export type RunCardCheck = { context: string; state: string };
@@ -323,7 +327,7 @@ const webhookValues: PloegConnectionBoard['webhook'][] = ['present', 'missing', 
 function known<T extends string>(value: unknown, values: T[], fallback: T): T { const text = field(value, 64); return (values as string[]).includes(text) ? text as T : fallback; }
 function connectionRepository(value: unknown): PloegConnectionRepository {
   const data = record(value);
-  return { key: field(data.key, 512), label: nullable(data.label, entry => field(entry, 256)), forge: field(data.forge, 128), owner: field(data.owner, 256), repo: field(data.repo, 256), baseBranch: field(data.baseBranch, 256), readiness: known(data.readiness, readinessValues, 'unknown'), reason: field(data.reason, 4096), lastForgeEventAt: nullable(data.lastForgeEventAt, timestamp), boards: array(data.boards, entry => field(entry, 512), 500) };
+  return { key: field(data.key, 512), label: nullable(data.label, entry => field(entry, 256)), forge: field(data.forge, 128), owner: field(data.owner, 256), repo: field(data.repo, 256), baseBranch: field(data.baseBranch, 256), readiness: known(data.readiness, readinessValues, 'unknown'), reason: field(data.reason, 4096), lastForgeEventAt: nullable(data.lastForgeEventAt, timestamp), boards: array(data.boards, entry => field(entry, 512), 500), ...(typeof data.prepareAvailable === 'boolean' ? { prepareAvailable: data.prepareAvailable } : {}) };
 }
 function connectionBoard(value: unknown): Omit<PloegConnectionBoard, 'sources'> {
   const data = record(value);
@@ -542,7 +546,14 @@ function cancellation(data: Record<string, unknown>): Omit<PloegCancellation, ke
   const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
   const flag = (value: unknown) => typeof value === 'boolean' ? value : null;
   const shift = typeof data.shiftId === 'number' ? String(data.shiftId) : data.shiftId;
-  return { withdrawn: flag(data.withdrawn), shiftId: typeof shift === 'string' && /^[1-9][0-9]{0,19}$/.test(shift) ? shift : null, cancelledRuns: count(data.cancelledRuns), stoppedRuns: count(data.stoppedRuns), keysBlocked: flag(data.keysBlocked), message: typeof data.message === 'string' && data.message.length <= 4096 && !data.message.includes('\0') ? data.message : '' };
+  return { withdrawn: flag(data.withdrawn), shiftId: typeof shift === 'string' && /^[1-9][0-9]{0,19}$/.test(shift) ? shift : null, cancelledRuns: count(data.cancelledRuns), stoppedRuns: count(data.stoppedRuns), keysBlocked: flag(data.keysBlocked), message: typeof data.message === 'string' && data.message.length <= 4096 && !data.message.includes('\0') ? data.message : '', ...cancelledPullRequest(data.pullRequest) };
+}
+function cancelledPullRequest(value: unknown): { pullRequest?: PloegCancelledPullRequest | null } {
+  if (value === null) return { pullRequest: null };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const data = value as Record<string, unknown>;
+  const url = typeof data.url === 'string' && data.url.length <= 2048 && /^https?:\/\//.test(data.url) ? data.url : '';
+  return url && (data.state === 'open' || data.state === 'closed') ? { pullRequest: { url, state: data.state } } : {};
 }
 const requeueFailures: Record<string, string> = {
   pool_above_limit: 'Raise the Team\'s budget to try again with more.',
@@ -604,6 +615,8 @@ export const admissionFailures: Readonly<Record<string, string>> = {
   team_not_dispatched: 'That Team has no plan, so Ploeg cannot run work for it.',
   request_conflict: 'Ploeg already admitted a different Work Item under this request. Send the form again.',
   dispatch_unavailable: 'Ploeg cannot admit work right now: its dispatch is off.',
+  prepare_in_progress: 'Ploeg already has an open readiness Work Item or pull request for this repository. Review, merge or close that pull request before preparing it again.',
+  target_already_ready: 'The repository is ready already: its base branch has an AGENTS.md, so there is nothing to prepare.',
 };
 async function admissionRefusal(response: Response): Promise<PloegError | null> {
   const code = await refusalCode(response);
@@ -1960,6 +1973,22 @@ export class PloegClient {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(user.id)) throw new PloegError(403, 'ploeg_actor', 'Your account identity cannot be recorded by Ploeg. Ask an administrator.');
     if (!this.allowed(user, admission.team)) throw new PloegError(403, 'team_forbidden', 'Choose one of your Teams.');
     const data = envelope(await this.request('work-items', true, { actor: user.id, body: admission, admission: true }));
+    const entry = record(data.workItem);
+    return { id: identifier(entry.id), team: field(entry.team, 128), state: token(entry.state), shiftId: nullable(entry.shiftId, identifier), budgetUsd: numeric(entry.budgetUsd), poolUsd: nullable(entry.poolUsd, value => numeric(value)), created: data.created === true, replayed: data.replayed === true };
+  }
+  /**
+   * Admits a `prepare_repository` Work Item (Ploeg ADR-0194) as that person: one Run whose only deliverable is a pull
+   * request adding `AGENTS.md`, capped at `budgetUsd`. Ploeg owns its title and brief. The same `requestId` replays
+   * Ploeg's first answer, so a retried confirmation never admits a second one.
+   */
+  async admitPrepare(user: User, admission: PloegPrepareAdmission): Promise<PloegAdmitted> {
+    if (user.role !== 'admin') throw new PloegError(403, 'forbidden', 'Only an administrator prepares a repository.');
+    this.connected(user);
+    if (this.demo) throw new PloegError(409, 'ploeg_demo', 'The demo opens no readiness pull request: no Run starts and no money is spent.');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(user.id)) throw new PloegError(403, 'ploeg_actor', 'Your account identity cannot be recorded by Ploeg. Ask an administrator.');
+    if (!this.allowed(user, admission.team)) throw new PloegError(403, 'team_forbidden', 'Choose one of your Teams.');
+    const body = { requestId: admission.requestId, kind: 'prepare_repository', team: admission.team, target: admission.target, budgetUsd: admission.budgetUsd };
+    const data = envelope(await this.request('work-items', true, { actor: user.id, body, admission: true }));
     const entry = record(data.workItem);
     return { id: identifier(entry.id), team: field(entry.team, 128), state: token(entry.state), shiftId: nullable(entry.shiftId, identifier), budgetUsd: numeric(entry.budgetUsd), poolUsd: nullable(entry.poolUsd, value => numeric(value)), created: data.created === true, replayed: data.replayed === true };
   }
