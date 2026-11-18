@@ -224,8 +224,10 @@ paths:
         (otherwise 404 `exchange_off`). `subject_token` is a JWT from the configured `auth.oidc.issuer`, signed by one
         of its keys, whose `aud` names one of `auth.oidc.exchange.audiences`, unexpired, with `iat` and a lifetime of at
         most 24 hours; any other token answers 400 `invalid_grant`. The token must name an existing, enabled single
-        sign-on account (by `sub`, or by verified `email` when `match` is `email`), else 403 `exchange_unknown_person`;
-        it never creates one. The credential starts a new rotation family of 90 days and is named like an editor
+        sign-on account (by `sub`, or by verified `email` when `match` is `email`), else 403 `exchange_unknown_person`.
+        With `auth.oidc.exchange.provision` a token for a subject without an account creates it as browser sign-in
+        would, with the role its claims entitle, or answers 403 `oidc_not_entitled` when they entitle none. The
+        credential starts a new rotation family of 90 days and is named like an editor
         sign-in from `client` and `host`. Takes JSON or `application/x-www-form-urlencoded`. Exempt from the
         mutation header and origin checks; counts against the per-address sign-in limit.
       x-unfold-requires: [oidc]

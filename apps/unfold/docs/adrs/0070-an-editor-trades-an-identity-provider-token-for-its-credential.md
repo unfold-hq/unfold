@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-11-17
+date: 2026-11-18
 decision-makers: Ryan Grippeling
 review-by: 2027-02-17
 ---
@@ -55,7 +55,17 @@ The browser derives the account id from the configured namespace and the ID toke
 * `subject` (the default) derives the id the same way. It fits identity providers that give one person the same `sub` in every client, such as Authentik, Keycloak, Okta and Google.
 * `email` finds the single sign-on account whose name is the token's `email`, and only when `email_verified` is `true`. Browser sign-in names an account after the email address the provider sends. It fits a provider that gives each client its own `sub`, such as Microsoft Entra ID. The constraint is that the email must be the one the person signs in to Unfold with, verified by the provider. A local password account is never matched.
 
-The exchange never creates an account and never changes a role: the account must exist, so the person signed in through the browser once, and must not be turned off (SCIM or Shared Signals, [ADR 0059](0059-the-identity-provider-provisions-and-deprovisions-people-through-scim-and-pushed-shared-signals.md)). The credential acts with the account's stored role and memberships, as every editor credential does. A token for nobody answers 403 `exchange_unknown_person`.
+The exchange never changes a role, and without `provision` (below) never creates an account: the account must exist, so the person signed in through the browser once, and must not be turned off (SCIM or Shared Signals, [ADR 0059](0059-the-identity-provider-provisions-and-deprovisions-people-through-scim-and-pushed-shared-signals.md)). The credential acts with the account's stored role and memberships, as every editor credential does. A token for nobody answers 403 `exchange_unknown_person`.
+
+### Provisioning
+
+Amended on 2026-11-18 so that an installation can let the first sign-in skip the browser too.
+
+`auth.oidc.exchange.provision: true` (default `false`) creates the account when a token that passed every check above names a subject without one. It is created through the very code browser sign-in creates accounts with, so the two routes cannot drift apart: the identity comes from `Oidc.identity`, which names the account after the verified email or the preferred username, gives it the role `auth.oidc.roles` and the role claim entitle, the highest the claims match, and the memberships its groups grant; the SCIM state is consulted first, so a person the provider turned off gets no account; the account is written with `upsertUser`, which emits the same account-change audit record a browser sign-in does. The log line `editor.provisioned` records the account and role, and `editor.exchanged` carries `provisioned: true` for that one exchange. A token whose claims entitle no role creates nobody and answers 403 `oidc_not_entitled`, exactly as the browser refuses that person. An existing account is never touched: the second exchange finds it and leaves its role and memberships as they are.
+
+`provision` needs `match: subject`. Only a token whose `sub` is the one browser sign-in gets can derive the account id the browser would; under `match: email` the helper's `sub` is pairwise, so provisioning from it would create a second account next to the one the browser makes later. The configuration refuses the pair.
+
+The helper's token must carry the claims the role mapping reads, the groups claim or the role claim, which an ID token usually does and an access token may not. A token without them is refused rather than provisioned with a guessed role.
 
 ### Configuration
 
@@ -63,7 +73,7 @@ The exchange never creates an account and never changes a role: the account must
 "auth": { "oidc": { "issuer": "…", "clientId": "unfold", "exchange": { "audiences": ["<client id of the organisation's helper>"], "match": "subject" } } }
 ```
 
-Without `exchange` the route answers 404 `exchange_off`. Starts count against the per-address sign-in limit.
+Without `exchange` the route answers 404 `exchange_off`. Starts count against the per-address sign-in limit, with or without `provision`.
 
 ### The plugin
 
@@ -78,7 +88,8 @@ Without `exchange` the route answers 404 `exchange_off`. Starts count against th
 | An expired or long-lived token | Refused: unexpired, and a lifetime of at most 24 hours |
 | A stolen subject token | Its thief gets an editor credential until the token expires. That is no more than the token already grants at the application it was issued for |
 | A pairwise `sub` that matches the wrong account | `subject` derives only the browser's own id. Use `email` for such a provider; a token without a verified email matches nobody |
-| A person removed at the identity provider | Their account is off through SCIM or Shared Signals, and the exchange refuses them. Without either, their existing editor credentials live until revoked or expired, as before |
+| A person removed at the identity provider | Their account is off through SCIM or Shared Signals, and the exchange refuses them, and with `provision` creates no account for them. Without either, their existing editor credentials live until revoked or expired, as before |
+| A valid token for a person who never signed in, with `provision` on | An account with the role and memberships the token's claims entitle, as the browser would create. A token that entitles no role creates nobody. Everyone the identity provider admits to a listed audience and an Unfold role can now get an account without a person ever opening Unfold |
 | Unfold sees a token meant for another application | Unfold verifies it and drops it. It is never stored, logged or forwarded. An installation that would rather not show Unfold such tokens adds Unfold's own client id to the token's audience at the provider and lists only that |
 | The token travels to a wrong address | The plugin sends it only to `UNFOLD_URL`, over HTTPS or to this machine |
 
@@ -88,12 +99,13 @@ Without `exchange` the route answers 404 `exchange_off`. Starts count against th
 * Good, because the result is an ordinary editor credential: visible and revocable in Settings, rotated, and signed out with the person.
 * Good, because it is one standard route that any helper can use, not a client for one vendor.
 * Bad, because the installation now trusts every token its identity provider issues for the listed audiences, and so trusts the helper's client registration as much as its own.
-* Bad, because the first sign-in still needs the browser, since the exchange never creates an account.
+* Bad, because the first sign-in still needs the browser, since the exchange never creates an account. Since 2026-11-18 an installation can turn `provision` on and skip that too.
 * Neutral: there is no audit fact for an exchange yet, only the `editor.exchanged` log line. Rotation is recorded as a credential issue.
 
 ### Confirmation
 
-* [`test/api-editor-exchange.test.ts`](../../test/api-editor-exchange.test.ts) runs the route against a test identity provider. An exchange works by subject and by verified email, as JSON and as a form. It refuses a token from another issuer, for another audience, expired, living longer than a day, without `iat`, signed by a stranger's key, or for a subject without an account. It answers 404 while unconfigured.
+* [`test/api-editor-exchange.test.ts`](../../test/api-editor-exchange.test.ts) runs the route against a test identity provider. An exchange works by subject and by verified email, as JSON and as a form. It refuses a token from another issuer, for another audience, expired, living longer than a day, without `iat`, signed by a stranger's key, or for a subject without an account. It answers 404 while unconfigured. With `provision` a first exchange creates the account with the entitled role and memberships, a second exchange finds it and leaves its role alone, browser sign-in still works beside it, and a token that entitles no role or fails the issuer, audience or expiry check creates nobody; without `provision` an entitled stranger is still refused.
+* [`test/config.test.ts`](../../test/config.test.ts) keeps `provision` off unless set, refuses a non-boolean, and refuses it together with `match: email`.
 * [`test/claude-code-sign-in.test.ts`](../../test/claude-code-sign-in.test.ts) runs the plugin's command, falls back after a refused rotation, never sends a token over plain HTTP, waits after a failed exchange, and signs a first session in with no browser.
 * Mutating the issuer, audience, expiry or lifetime check, the email verification, the subject namespace or the plugin's HTTPS rule fails these tests.
 
@@ -122,3 +134,4 @@ Without `exchange` the route answers 404 `exchange_off`. Starts count against th
 ### History
 
 * 2026-11-17: proposed with the implementation. The owner decided the goal and the opt-in configuration on 2026-11-17; the mechanism awaits review.
+* 2026-11-18 — Owner decided: an installation may let the exchange create the account a verified token names when none exists, behind `auth.oidc.exchange.provision` (default off), through the same code browser sign-in creates accounts with, with the role its claims entitle, and only with `match: subject`. Amended with the implementation.
