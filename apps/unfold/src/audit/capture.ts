@@ -178,6 +178,12 @@ export function capture(request: TapRequest): Captured | undefined {
     const tenants = namedTenant(request, 'body');
     return { actor: user, ...(tenants ? { tenants } : {}), fact: { kind: 'download', activity: 'export', resource: { type: 'Tenant export', name: `Tenant export of Tenant ${tenant}` }, outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
   }
+  if (method === 'POST' && path === '/api/onboarding/spend-cap') {
+    const inputs = recordedInputs(request.inputs()) as Record<string, unknown>;
+    const team = text(inputs.team, 100);
+    const tenants = done === 'success' ? [defaultTenant] : undefined;
+    return { actor: user, ...(tenants ? { tenants } : {}), fact: { kind: 'entity', action: 'create', entity: { type: 'Spend cap confirmation', ...(team ? { uid: team } : {}), name: `Spend cap of Team ${team ?? 'unknown'} confirmed`, data: { usd: typeof inputs.usd === 'number' ? inputs.usd : null, period: text(inputs.period, 10) ?? null } }, outcome: done, ...(reason(status) ? { reason: reason(status) } : {}) } };
+  }
   const changed = method === 'GET' ? undefined : entityChange(request, user);
   if (changed) return changed;
   if (method === 'GET') return undefined;

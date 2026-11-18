@@ -150,9 +150,25 @@ export function connectionsMarkup(model, { now = Date.now() } = {}) {
   return `${head}${unrouted}${group('connections-boards', 'Boards', 'Where tasks are handed to a Team.', model.boards)}${group('connections-repositories', 'Repositories', 'Where agents open pull requests.', model.repositories)}`;
 }
 
-function stageAction(line, values) {
+/**
+ * A Team's spend cap as Ploeg reports it, in US dollars per UTC period, as the Budget line states it.
+ * @param {{ usd: number, period: string }} cap
+ * @returns {string}
+ */
+export function capWording(cap) {
+  return `USD ${Number.isInteger(cap.usd) ? cap.usd : cap.usd.toFixed(2)} a ${cap.period}`;
+}
+
+function confirmCaps(budget) {
+  const open = budget.filter(entry => entry.spendCap && !entry.confirmed);
+  if (!open.length) return '';
+  return `<p class="checklist-entry-note">Ploeg starts no Run that would take the Team’s spend this period (UTC) over its cap. Confirming records your name and the time.</p><div class="checklist-confirm">${open.map(entry => button({ label: `Confirm ${capWording(entry.spendCap)} for ${entry.team}`, size: 'sm', icon: 'check', action: 'connections-confirm-cap', data: { team: entry.team, usd: String(entry.spendCap.usd), period: entry.spendCap.period } })).join('')}</div>`;
+}
+
+function stageAction(line, values, budget = []) {
   const action = line.action;
   if (!action) return '';
+  if (action.kind === 'confirm-cap') return confirmCaps(budget);
   if (action.kind === 'link') return button({ label: action.label, href: action.href, size: 'sm', icon: 'arrow' });
   if (action.kind === 'refresh') return button({ label: action.label, size: 'sm', icon: 'refresh', action: 'connections-refresh' });
   if (action.kind === 'config-entry' && line.configEntry) return disclosure({ summary: action.label, plain: true, body: `<p class="checklist-entry">${escape(line.configEntry)}</p><p class="checklist-entry-note">The configuration wins over anything added on this page later, and Unfold never rewrites it.</p>` });
@@ -160,7 +176,7 @@ function stageAction(line, values) {
   return '';
 }
 
-function stageRow(line, values, nested = false) {
+function stageRow(line, values, nested = false, budget = []) {
   const look = stageLooks[line.status] || stageLooks.pending;
   const heading = nested ? 'h4' : 'h3';
   const id = escape(`checklist-${line.id}`);
@@ -170,8 +186,8 @@ function stageRow(line, values, nested = false) {
   const waits = line.waitsFor ? `<p class="checklist-waits">Waits for ${escape(line.waitsFor.record)}${line.waitsFor.release ? ` (Ploeg ${escape(line.waitsFor.release)})` : ''}.</p>` : '';
   const install = line.install && line.status !== 'ok' ? `<p class="checklist-install">Install value: <code>${escape(line.install)}</code></p>` : '';
   const fix = line.fix && line.status !== 'ok' ? `<p class="health-next">${icon('arrow')}<span>${escape(line.fix)}</span></p>` : '';
-  const action = stageAction(line, values);
-  const checks = line.checks?.length ? `<ol class="health-list checklist-checks" aria-labelledby="${id}">${line.checks.map(check => stageRow(check, values, true)).join('')}</ol>` : '';
+  const action = stageAction(line, values, budget);
+  const checks = line.checks?.length ? `<ol class="health-list checklist-checks" aria-labelledby="${id}">${line.checks.map(check => stageRow(check, values, true, budget)).join('')}</ol>` : '';
   return `<li class="health-check checklist-line" data-tone="${look.tone}" data-status="${line.status}">${number || `<span class="health-icon" aria-hidden="true">${icon(look.glyph)}</span>`}<div class="health-main"><div class="health-heading"><${heading} class="health-title" id="${id}">${escape(line.title)}</${heading}>${badge({ tone: look.tone, glyph: look.glyph, label: look.label, size: 'sm' })}${configured}${optIn}</div><p class="health-detail">${escape(line.text)}</p>${install}${waits}${fix}${action ? `<div class="checklist-action">${action}</div>` : ''}${checks}</div></li>`;
 }
 
@@ -199,6 +215,7 @@ export function checklistMarkup(checklist) {
   const stages = Array.isArray(checklist?.stages) ? checklist.stages : [];
   if (!stages.length) return '';
   const values = Array.isArray(checklist.installValues) ? checklist.installValues : [];
+  const budget = Array.isArray(checklist.budget) ? checklist.budget : [];
   const intro = checklist.manage ? 'From signing in to the first agent pull request. Each line is checked against Ploeg, not against what was submitted.' : 'You can read these lines. Ask an administrator to connect what is missing.';
-  return `<section class="card settings-card checklist" aria-labelledby="checklist-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="checklist-title">Onboarding checklist</h2><p class="card-subtitle">${escape(intro)}</p></div></header><p class="checklist-headline">${escape(checklistHeadline(checklist))}</p><ol class="health-list checklist-stages">${stages.map(line => stageRow(line, values)).join('')}</ol></section>`;
+  return `<section class="card settings-card checklist" aria-labelledby="checklist-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="checklist-title">Onboarding checklist</h2><p class="card-subtitle">${escape(intro)}</p></div></header><p class="checklist-headline">${escape(checklistHeadline(checklist))}</p><ol class="health-list checklist-stages">${stages.map(line => stageRow(line, values, false, budget)).join('')}</ol></section>`;
 }

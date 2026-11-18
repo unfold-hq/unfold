@@ -1,6 +1,6 @@
 import { state, onForget, disconnect } from '../core/state.js';
 import { api } from '../core/api.js';
-import { escape, renderHtml, announce } from '../core/dom.js';
+import { escape, renderHtml, announce, notify } from '../core/dom.js';
 import { button, callout, demoNote, ploegUnconfigured, skeleton } from '../core/ui.js';
 import { shell } from '../shell.js';
 import { checklistHeadline, checklistMarkup, connectionsMarkup, connectionsModel } from '../connections.js';
@@ -44,11 +44,25 @@ async function enterConnections() {
   await load();
 }
 
+async function confirmCap(control) {
+  const { team, usd, period } = control.dataset;
+  control.disabled = true;
+  try {
+    await api('/api/onboarding/spend-cap', { method: 'POST', body: JSON.stringify({ team, usd: Number(usd), period }) });
+    notify(`Team ${team}’s spend cap is confirmed.`);
+  } catch (error) {
+    if (error.status !== 401) notify(error.message || 'Unfold could not record the confirmation.', true);
+  } finally {
+    control.disabled = false;
+  }
+  await load(true);
+}
+
 /** Connections (`#settings/connections`): the onboarding checklist, then every board and repository Ploeg routes to with each wiring check and its fix. */
 export default {
   id: 'connections',
   match: hash => hash === 'settings/connections' ? {} : null,
   enter: enterConnections,
   render: renderConnections,
-  actions: { 'connections-refresh': () => load(true) },
+  actions: { 'connections-refresh': () => load(true), 'connections-confirm-cap': confirmCap },
 };

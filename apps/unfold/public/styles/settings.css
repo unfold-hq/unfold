@@ -1455,6 +1455,17 @@
   margin-block-start: var(--space-1);
 }
 
+.checklist-action > .checklist-entry-note {
+  inline-size: 100%;
+}
+
+.checklist-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  inline-size: 100%;
+}
+
 .checklist-values {
   display: grid;
   gap: var(--space-2);
