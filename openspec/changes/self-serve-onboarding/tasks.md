@@ -13,6 +13,7 @@ output pasted in the pull request.
 - [ ] 0.5 Raise asks 4 and 5 of design.md section 4 in ploeg-hq, in its words: an onboarding values profile in Ploeg's chart, and active forges per installation in `/operator/connections`
 - [ ] 0.6 Open the tickets for S1 to S11, each naming the Ploeg change it waits for
 - [ ] 0.7 Propose ask 6 of design.md section 4 in ploeg-hq as a record, in its words: an operator consumer reads a tracker connection's Scopes and their items, and assigns an item in a bound Scope to a hand-over agent with a note
+- [ ] 0.8 **[owner]** Decide D13 to D18 and answer design.md Open Questions 5 to 10, proposed by [user-journeys.md](user-journeys.md); the P1 to P7 tickets reference them, and asks 7 and 8 (user-journeys.md section 7) are raised in ploeg-hq once decided
 
 ## 1. S1 Checklist backbone
 
