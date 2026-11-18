@@ -144,6 +144,15 @@ export const clickup: TaskProviderAdapter = {
       tokenLabel: 'API token of that ClickUp user',
       tokenPattern: /^pk_[A-Za-z0-9_]{8,200}$/,
       tokenShape: 'a ClickUp personal API token, which starts with pk_',
+      member: {
+        why: 'ClickUp has no bot accounts. Unfold works in ClickUp as a normal member called Unfold, which takes one seat. A token always acts as the person who created it, and ClickUp stops a webhook when the person who made it leaves, so using your own account would make Unfold’s comments look like yours and break when you leave. Assigning a task to Unfold is how you hand it over.',
+        steps: [
+          'Invite an address you control, such as unfold@your-agency.example, to your ClickUp Workspace as a Member, not a guest or an admin, and give it the Spaces or Lists Unfold should work in.',
+          'Open the invitation in a private browser window and finish signing up as that member.',
+          'In that window, open the avatar menu, then Settings › Apps, choose Generate under API Token and copy the token. It starts with pk_.',
+          'Paste the token here. Unfold hands it to Ploeg once and keeps no copy; Ploeg checks it with ClickUp and stores it in its own secret store.',
+        ],
+      },
     },
   },
   handoff: {

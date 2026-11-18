@@ -234,6 +234,16 @@ export function contractRefusal(gate: PloegContractGate | undefined): PloegContr
   return status?.state === 'incompatible' ? new PloegContractIncompatible(status) : undefined;
 }
 
+/**
+ * Ploeg's own refusal of an operator call made for an onboarding step, as Ploeg answered it: its status, code and
+ * message, and the rest of its `error` object in `detail` (failed checks, the static entry that routes a Scope, the
+ * binding that already exists), so the step can show what Ploeg checked.
+ */
+export class PloegOperatorRefusal extends PloegError {
+  readonly detail: Record<string, unknown>;
+  constructor(status: number, code: string, message: string, detail: Record<string, unknown>) { super(status, code, message); this.name = 'PloegOperatorRefusal'; this.detail = detail; }
+}
+
 /** Ploeg refused an Ask because the scope's Ask Allowance cannot cover another one (system ADR-0031, Ploeg ADR-0082). `resetAt` is when the next period opens. */
 export class AskAllowanceUsedUp extends PloegError {
   readonly resetAt: string;
@@ -552,6 +562,25 @@ async function refusalCode(response: Response): Promise<string> {
 async function refusalOf(response: Response): Promise<{ code: string; message: string }> {
   if (!response.body || Number(response.headers.get('content-length')) > 65_536) return { code: '', message: '' };
   try { const data = JSON.parse(await response.text()); return { code: typeof data?.error?.code === 'string' ? data.error.code : '', message: typeof data?.error?.message === 'string' ? data.error.message.slice(0, 4096) : '' }; } catch { return { code: '', message: '' }; }
+}
+/**
+ * Ploeg's answer to an operator call made for an onboarding step: the JSON body of a success, null for a `204`, and a
+ * {@link PloegOperatorRefusal} carrying Ploeg's whole `error` object otherwise. Any echo of the consumer token is redacted.
+ */
+async function operatorAnswer(response: Response, token: string): Promise<Record<string, unknown> | null> {
+  const limit = 1_048_576;
+  const text = !response.body || Number(response.headers.get('content-length')) > limit ? '' : (await response.text()).slice(0, limit).split(token).join('[redacted]');
+  let data: unknown = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  if (response.ok) {
+    if (response.status === 204 || data === null) return null;
+    if (typeof data !== 'object' || Array.isArray(data)) throw invalid();
+    return data as Record<string, unknown>;
+  }
+  const error = data && typeof data === 'object' && !Array.isArray(data) && (data as { error?: unknown }).error && typeof (data as { error?: unknown }).error === 'object' ? (data as { error: Record<string, unknown> }).error : {};
+  const { code, message, ...detail } = error;
+  const fallback = response.status === 404 ? 'not_found' : response.status >= 500 ? 'ploeg_unavailable' : 'ploeg_refused';
+  return Promise.reject(new PloegOperatorRefusal(response.status, typeof code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : fallback, typeof message === 'string' ? message.slice(0, 2000) : `Ploeg answered HTTP ${response.status}.`, detail));
 }
 /** Ploeg's refusal of a take-over (Ploeg ADR-0142) in plain words; an older Ploeg without the route answers 501. */
 async function takeOverRefusalOf(response: Response): Promise<PloegError | null> {
@@ -1141,7 +1170,7 @@ export function validatePloeg(raw: unknown, mode: AppConfig['mode']): AppConfig[
   return { url: url.href.replace(/\/+$/, ''), ...(data.tokenEnv ? { tokenEnv: data.tokenEnv as string } : {}), ...(personTokens ? { personTokens } : {}), ...(data.teams !== undefined ? { teams: parseTeams(data.teams) } : {}), ...(userTeams ? { userTeams: Object.fromEntries(Object.entries(userTeams).map(([id, value]) => [id, parseTeams(value)])) } : {}), ...(forgeLogins ? { forgeLogins: { ...forgeLogins } as Record<string, string> } : {}), ...(trackerUrl ? { trackerUrl } : {}), ...(data.demo ? { demo: true } : {}) };
 }
 
-type PloegRequestOptions = { added?: boolean; actor?: string; body?: unknown; raw?: Uint8Array; versions?: unknown[]; context?: boolean; comment?: boolean; ask?: boolean; chat?: boolean; requeue?: boolean; takeOver?: boolean; actingUser?: string; admission?: boolean; claim?: boolean; note?: string; questionAnswer?: string; cancel?: string; method?: 'PUT' | 'DELETE'; answer?: { status: number }; contractProbe?: boolean };
+type PloegRequestOptions = { added?: boolean; actor?: string; body?: unknown; raw?: Uint8Array; versions?: unknown[]; context?: boolean; comment?: boolean; ask?: boolean; chat?: boolean; requeue?: boolean; takeOver?: boolean; actingUser?: string; admission?: boolean; claim?: boolean; note?: string; questionAnswer?: string; cancel?: string; method?: 'PUT' | 'DELETE'; answer?: { status: number }; contractProbe?: boolean; operator?: boolean };
 type PloegRequest = (path: string, fresh: boolean, options?: PloegRequestOptions) => Promise<unknown>;
 
 /** Ploeg's operator API as a Ploeg adapter (Unfold ADR 0063): each operation is one request, read against the contract. */
@@ -1282,6 +1311,7 @@ export class PloegClient {
       logPloegWarning(response, path.split('?')[0]);
       const unproven = post ? await unprovenAnswer(response, options.actingUser ?? options.actor!, this.attribution, this.proof?.rejection?.(response)) : undefined;
       if (unproven) { await response.body?.cancel().catch(() => undefined); throw new PloegError(403, personUnprovenCode, unprovenMessage(unproven)); }
+      if (options.operator) return await operatorAnswer(response, token);
       if (!response.ok) {
         const refusal = options.context ? await contextRefusal(response, token) : options.comment ? await commentRefusal(response, token) : options.ask ? await askRefusal(response) : options.chat ? await chatRefusal(response) : options.requeue ? await requeueRefusal(response) : options.takeOver ? await takeOverRefusalOf(response) : options.admission ? await admissionRefusal(response) : options.claim ? await claimRefusal(response) : options.note !== undefined ? await noteRefusal(response, options.note) : options.questionAnswer !== undefined ? await answerRefusal(response, options.questionAnswer) : options.cancel !== undefined ? await cancelRefusal(response, options.cancel) : null;
         await response.body?.cancel().catch(() => undefined);
@@ -1684,6 +1714,19 @@ export class PloegClient {
       if (error instanceof PloegError && error.code === 'ploeg_unsupported') return false;
       return null;
     }
+  }
+
+  /**
+   * Sends one operator call of an onboarding step (Ploeg ADR-0186, ADR-0195) and returns Ploeg's answer as it came,
+   * or throws a {@link PloegOperatorRefusal} with Ploeg's own code and detail. A change carries the person's proof; a read is
+   * never served from the cache. The caller admits the step first, so nothing reaches a Ploeg that does not serve it.
+   */
+  async operatorCall(user: User, path: string, options: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown } = {}): Promise<Record<string, unknown> | null> {
+    this.connected(user);
+    if (this.demo) throw new PloegError(409, 'ploeg_demo', 'The demo connects nothing: it holds no tracker connection and sends Ploeg nothing.');
+    const change = options.method !== undefined && options.method !== 'GET';
+    const method = options.method === 'PUT' || options.method === 'DELETE' ? options.method : undefined;
+    return await this.request(path, true, { operator: true, ...(change ? { actor: user.id } : {}), ...(method ? { method } : {}), ...(options.body !== undefined ? { body: options.body } : change ? { body: {} } : {}) }) as Record<string, unknown> | null;
   }
 
   private async refusals(user: User, fresh: boolean): Promise<PloegRefusal[]> {

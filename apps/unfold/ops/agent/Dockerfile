@@ -39,6 +39,8 @@ ARG IMAGE_VERSION=dev
 ARG IMAGE_REVISION=unknown
 RUN apk add --no-cache bash git ca-certificates-bundle ripgrep \
  && rm /usr/libexec/git-core/git-http-push \
+ && rm -rf /usr/lib/node_modules/node-gyp /usr/bin/node-gyp \
+ && ! command -v node-gyp \
  && install -d -o node -g node -m 0755 /workspace /etc/opencode
 COPY --from=fetch /opencode /usr/local/bin/opencode
 RUN install -d -m 0755 /usr/local/lib/unfold

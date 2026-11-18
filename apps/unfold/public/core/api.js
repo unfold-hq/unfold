@@ -36,6 +36,8 @@ export async function api(path, options = {}) {
     const error = new Error(data.error?.message || unexplained(response.status));
     error.status = response.status;
     error.code = data.error?.code || (response.status >= 502 && response.status <= 504 ? 'gateway_unavailable' : response.status >= 500 ? 'internal_error' : 'request_failed');
+    if (Array.isArray(data.error?.checks)) error.checks = data.error.checks;
+    if (data.error?.staticEntry || data.error?.entry) { const entry = data.error.staticEntry ?? data.error.entry; error.staticEntry = typeof entry === 'string' ? entry : JSON.stringify(entry); }
     throw error;
   }
   return response.json();

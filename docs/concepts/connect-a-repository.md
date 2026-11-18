@@ -52,12 +52,12 @@ Every stage leaves Unfold. Stages 3 and 4 are the same fact written twice in two
 | 1 | Installation | every install value Unfold can read is set: a Team, its spend cap, webhooks reaching Ploeg; the opt-ins Ploeg does not report turn red when a dry run answers that the installation has not opted in | yes, with **Show the install values** |
 | 2 | Connect GitHub | Ploeg reports a GitHub forge that reaches a repository | shown as configured or not available yet; waits for Ploeg's connection contract, and on an installation on another forge for Ploeg ADR-0192 |
 | 3 | Register repositories | each repository is registered | shown as configured or not available yet; waits for Ploeg ADR-0193 |
-| 4 | Connect ClickUp | Ploeg reports a ClickUp connection as the Unfold member | shown as configured or not available yet; waits for the connection contract |
-| 5 | Pick Lists | each List is saved | yes, through **Connect a tracker** |
+| 4 | Connect ClickUp | Ploeg reports a ClickUp connection as the Unfold member | built (slice S5) on **Settings → Connect ClickUp**: the member guide, the token or OAuth code relayed to Ploeg's connection flow once, no token kept in Unfold; refused with the reason until Ploeg serves Ploeg ADR-0195 |
+| 5 | Pick Lists | each List is saved | yes, through **Connect a tracker**; for a connection Ploeg holds, the picker waits for Ploeg's Scope read and takes the List's id until then |
 | 6 | Budget | an Admin confirmed a Team whose spend cap is not null | yes (slice S6): each Team's cap in USD per period as Ploeg reports it, **Confirm** records who and when; a Team without a cap is refused for readiness work and onboarding bindings with `409 budget_missing`, hand-off from configured sources never is |
 | 7 | Prepare | the readiness pull request is open | not available yet; waits for Ploeg ADR-0194 |
 | 8 | Review and merge | the repository is ready | shown from the connections read |
-| 9 | Bind Lists | the binding is `active` | shown as configured or not available yet; waits for Ploeg ADR-0186 |
+| 9 | Bind Lists | the binding is `active` | built (slice S5): ready repositories only, dry run first, `awaiting_webhook` amber with **Check again**, `conflicts_with_static` shown as configured; refused with the reason until Ploeg serves Ploeg ADR-0186 |
 | 10 | First task | a Work Item exists for it | the next action only |
 | 11 | First pull request | a Run opened it | not measured on the page yet |
 
