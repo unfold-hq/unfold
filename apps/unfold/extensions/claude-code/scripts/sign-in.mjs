@@ -58,9 +58,23 @@ export function rotationDue(credential, now = Date.now()) {
   return !Number.isFinite(family) || expires < family;
 }
 
-/** The identity-provider token `UNFOLD_IDP_TOKEN_COMMAND` prints on its first line, or empty when none is configured or it prints no JWT within `tokenCommandTimeoutMs`. */
+const telemetryHelper = fileURLToPath(new URL('./otel-headers.mjs', import.meta.url));
+const quoted = text => `'${String(text).replace(/'/g, `'\\''`)}'`;
+
+/**
+ * The command that prints the identity-provider token: `UNFOLD_IDP_TOKEN_COMMAND` when set, otherwise this plugin's
+ * telemetry helper (`otel-headers.mjs token`, run by this same Node) when `UNFOLD_TELEMETRY_ISSUER` names an issuer, otherwise empty.
+ */
+export function idpTokenCommand(env = process.env) {
+  const explicit = String(env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim();
+  if (explicit) return explicit;
+  if (!String(env.UNFOLD_TELEMETRY_ISSUER ?? '').trim()) return '';
+  return `${quoted(process.execPath)} ${quoted(telemetryHelper)} token`;
+}
+
+/** The identity-provider token `idpTokenCommand` prints on its first line, or empty when none is configured or it prints no JWT within `tokenCommandTimeoutMs`. */
 export function idpToken(env = process.env, run = execSync) {
-  const command = String(env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim();
+  const command = idpTokenCommand(env);
   if (!command) return '';
   let printed;
   try { printed = String(run(command, { encoding: 'utf8', timeout: tokenCommandTimeoutMs, maxBuffer: 65_536, stdio: ['ignore', 'pipe', 'ignore'], env })); } catch { return ''; }
@@ -99,7 +113,7 @@ const none = { token: '', source: 'none', expiresAt: '', user: '' };
 
 /**
  * Renews `credential` without the person: rotates it at Unfold when `rotationDue`, and otherwise, when it is missing or
- * due for a browser renewal and `UNFOLD_IDP_TOKEN_COMMAND` is set, trades the identity-provider token that command
+ * due for a browser renewal and `idpTokenCommand` names a command, trades the identity-provider token that command
  * prints for a new one. Each is tried at most once per `silentRetryMs` and only by one hook at a time. Resolves with
  * the credential to use now: the new one, the old one when nothing changed, or none when Unfold refused the old one.
  */
@@ -130,7 +144,7 @@ export async function renewSilently({ url, credential, env = process.env, fetche
     }
   }
   const reason = signInReason(current, now);
-  if (!reason || !String(env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim() || !mayCarryIdpToken(base) || !attempted(base, 'exchange', env, now)) return current;
+  if (!reason || !idpTokenCommand(env) || !mayCarryIdpToken(base) || !attempted(base, 'exchange', env, now)) return current;
   const subjectToken = idpToken(env, run);
   if (!subjectToken) return current;
   const response = await fetcher(`${base}/api/auth/editor/exchange`, { method: 'POST', headers, body: JSON.stringify({ grant_type: tokenExchangeGrant, subject_token: subjectToken, subject_token_type: jwtTokenType, client: 'claude-code', host }), signal: AbortSignal.timeout(timeoutMs) }).catch(() => null);

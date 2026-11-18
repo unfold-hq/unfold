@@ -1,7 +1,7 @@
 {
   "name": "unfold",
-  "version": "0.20.0",
-  "description": "Reports your Claude Code sessions to Unfold, links them to Work Items, records Agent Trace attribution for their commits, and brings Unfold's messages into the session.",
+  "version": "0.21.0",
+  "description": "Reports your Claude Code sessions to Unfold, links them to Work Items, records Agent Trace attribution for their commits, brings Unfold's messages into the session, and can send Claude Code's usage metrics with the person's identity through its OpenTelemetry headers helper.",
   "author": {
     "name": "Unfold",
     "url": "https://unfoldhq.dev"
