@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { rmSync } from 'node:fs';
 import { credentialKey, credentialStore, redacted, resolveCredential, unfoldAddress } from './credentials.mjs';
-import { readSignIn, renewSilently, signInFile, startSignIn, waitForApproval } from './sign-in.mjs';
+import { idpTokenCommand, readSignIn, renewSilently, signInFile, startSignIn, waitForApproval } from './sign-in.mjs';
 
 const unfoldUrl = unfoldAddress(process.env.UNFOLD_URL);
 const say = line => process.stdout.write(`${line}\n`);
@@ -10,7 +10,7 @@ const noAddress = 'UNFOLD_URL is not set. Your organisation sets it in Claude Co
 async function login() {
   const credential = resolveCredential(unfoldUrl);
   if (credential.source === 'env') say('UNFOLD_TOKEN is set in your environment, so the plugin uses it and keeps no sign-in of its own. Remove it to let the plugin sign you in and renew itself.');
-  if (credential.source !== 'env' && String(process.env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim()) {
+  if (credential.source !== 'env' && idpTokenCommand()) {
     const exchanged = await renewSilently({ url: unfoldUrl, credential: { token: '', source: 'none', expiresAt: '', user: '' }, timeoutMs: 10_000 });
     if (exchanged.token) {
       say(`Signed in to ${unfoldUrl}${exchanged.user ? ` as ${exchanged.user}` : ''} with your identity provider's sign-in; no browser approval was needed.`);
@@ -47,7 +47,7 @@ function status() {
   const credential = resolveCredential(unfoldUrl);
   const last = readSignIn(unfoldUrl);
   if (credential.source === 'env') say(`Reporting to ${unfoldUrl} with UNFOLD_TOKEN from your environment.`);
-  else if (credential.source === 'stored') say(`Signed in to ${unfoldUrl}${credential.user ? ` as ${credential.user}` : ''} until ${credential.expiresAt.slice(0, 10) || 'Unfold says otherwise'}; kept in ${credentialStore().where}. ${credential.familyExpiresAt ? ` The plugin renews it by itself until ${credential.familyExpiresAt.slice(0, 10)}, then asks you to approve once more` : ' The plugin renews it by itself while you use it'}${String(process.env.UNFOLD_IDP_TOKEN_COMMAND ?? '').trim() ? ', or signs in again with your identity provider without asking' : ''}.`);
+  else if (credential.source === 'stored') say(`Signed in to ${unfoldUrl}${credential.user ? ` as ${credential.user}` : ''} until ${credential.expiresAt.slice(0, 10) || 'Unfold says otherwise'}; kept in ${credentialStore().where}. ${credential.familyExpiresAt ? ` The plugin renews it by itself until ${credential.familyExpiresAt.slice(0, 10)}, then asks you to approve once more` : ' The plugin renews it by itself while you use it'}${idpTokenCommand() ? ', or signs in again with your identity provider without asking' : ''}.`);
   else say(`Not signed in to ${unfoldUrl}. Run /unfold:login.`);
   if (last?.status === 'waiting' && Date.parse(last.expiresAt) > Date.now()) say(`A sign-in waits for your approval (code ${last.userCode}): ${last.page}`);
   else if (last && last.status !== 'approved' && last.status !== 'waiting') say(`The last sign-in ended ${last.status}${last.message ? `: ${last.message}` : ''}.`);

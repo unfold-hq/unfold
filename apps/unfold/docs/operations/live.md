@@ -444,7 +444,7 @@ Unfold refuses to start with local sign-in off and no `auth.oidc`, because nobod
 
 ### One sign-in for editors
 
-Editors sign in through the browser and approve it once ([ADR 0037](../adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md)). The Claude Code plugin then rotates its credential by itself for ninety days. To spare people even that approval, Unfold can trade a token from the same identity provider for an editor credential ([ADR 0070](../adrs/0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). That fits an organisation that already signs its people in on their machines with a command-line helper of its own. It is off until `auth.oidc.exchange` is set:
+Editors sign in through the browser and approve it once ([ADR 0037](../adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md)). The Claude Code plugin then rotates its credential by itself for ninety days. To spare people even that approval, Unfold can trade a token from the same identity provider for an editor credential ([ADR 0070](../adrs/0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). That fits an organisation that already signs its people in on their machines with a command-line helper of its own, and the Claude Code plugin's own telemetry helper, which exchanges its telemetry session at the identity provider for a token with the audience `unfold` (`UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE`, [ADR 0073](../adrs/0073-the-plugin-carries-the-opentelemetry-headers-helper-that-signs-usage-metrics-with-the-identity-provider.md)); list that audience here. It is off until `auth.oidc.exchange` is set:
 
 ```json
 "auth": {
