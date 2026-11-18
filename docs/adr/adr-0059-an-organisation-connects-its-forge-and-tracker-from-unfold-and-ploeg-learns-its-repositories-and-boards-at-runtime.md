@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-11-17
+date: 2026-11-18
 decision-makers: Ryan Grippeling
 ---
 
@@ -82,3 +82,4 @@ Proposed, none of these exist yet:
 * Answers application ADR-0064 open question 2 (only an Admin, for now) and question 5 (Ploeg ADR-0186).
 * 2026-11-17 — Proposed. The owner decided the design questions D1 to D11 recorded in the change's design.md; the record stays proposed until he signs it.
 * 2026-11-17 — Corrected after an independent review against the Ploeg sources, still proposed: two clocks, with the 15-minute goal on the first agent pull request of any kind; the journey order for a repository that is not ready (prepare, merge, re-inspect, then bind); a repository missing only `AGENTS.md` is registered with `prepareAvailable`; no cost estimate, the confirmed cap becomes the Run's budget; the one-time install values named; the shared GitHub App key moved to the GitHub Issues slice; ADR-0192 support gated on the pinned bundle version.
+* 2026-11-18 — Amended by [ADR-0060](adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md), still proposed: Ploeg owns every tracker and forge connection and Unfold holds none. The named self-hosted exceptions of decision 4 are withdrawn: the one ClickUp paste goes to Ploeg's store only and Unfold keeps no sealed copy, Unfold never reads the GitHub App key, and Unfold's tracker reads and hand-off go through Ploeg. The change's slices S5, S9 and S10 follow.

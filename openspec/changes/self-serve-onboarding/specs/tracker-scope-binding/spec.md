@@ -5,29 +5,56 @@
 ### Requirement: ClickUp is connected through a dedicated member
 
 The ClickUp connect step SHALL explain why Unfold needs its own ClickUp member
-and how to create it, and SHALL take that member's token once in a write-only
-field. Unfold MUST check the token's shape and that ClickUp accepts it before
-relaying it to Ploeg, MUST refuse a token that belongs to the signed-in
-Admin's own linked ClickUp account, and MUST never show, log or export it.
-The paste rests on the proposed amendment of Ploeg ADR-0184 rule 1.
+and take that member's token once in a write-only field. Unfold MUST check
+the token's shape and relay it only to Ploeg's connection flow (Ploeg
+ADR-0195), MUST keep no copy (system ADR-0060), and MUST never show, log or
+export it.
 
 #### Scenario: The member's token is pasted
 
 - **WHEN** an Admin pastes a valid token of the member "Unfold"
-- **THEN** Unfold relays it to Ploeg's store, shows the account name and when
-  it was set, and never returns the token in any response
+- **THEN** Unfold relays it to Ploeg's connection flow, shows the account name
+  Ploeg reports and when it was set, and never returns the token in any
+  response
+
+#### Scenario: Nothing is kept in Unfold
+
+- **WHEN** Ploeg has stored the member's token
+- **THEN** Unfold's database, logs, action records and product events hold
+  the Ploeg connection id and no token
 
 #### Scenario: The Admin pastes their own token
 
-- **WHEN** the token's account equals the Admin's own linked ClickUp account
-- **THEN** Unfold answers 400 `connection_token_personal`, explains why a
-  separate member is needed, and stores and relays nothing
+- **WHEN** the account Ploeg reports for the token has the signed-in Admin's
+  email address
+- **THEN** Unfold asks Ploeg to remove the connection, answers 400
+  `connection_token_personal`, and explains why a separate member is needed
 
 #### Scenario: A malformed token
 
 - **WHEN** the value does not have the shape ClickUp's adapter declares
 - **THEN** Unfold answers 400 `connection_token_invalid` before any request
   leaves Unfold
+
+### Requirement: Lists and their tasks are read through Ploeg
+
+Unfold SHALL read a Ploeg connection's Lists and their tasks through
+Ploeg's Scope read (design.md section 4, ask 6) and MUST NOT call the tracker
+itself for them. Until the pinned Ploeg serves that read, Unfold SHALL refuse
+the step with the release that adds it. The demo SHALL answer from fixtures.
+
+#### Scenario: Picking Lists
+
+- **WHEN** an Admin opens the List picker for a ClickUp connection made
+  through Ploeg, and the pinned Ploeg serves the Scope read
+- **THEN** the picker shows the Lists Ploeg returns, and no request leaves
+  Unfold for a ClickUp host
+
+#### Scenario: Ploeg does not serve the read yet
+
+- **WHEN** the pinned Ploeg answers 404 on the Scope read
+- **THEN** the picker answers 503 `ploeg_step_unavailable` with the Ploeg
+  release that adds it, and sends no request to the tracker
 
 ### Requirement: A List is bound to a Team and repositories through Ploeg
 
