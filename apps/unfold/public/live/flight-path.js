@@ -10,7 +10,7 @@ const maxGrow = 40;
 /** How each way a Run can end is drawn: its glyph, tone and words. Machine endings are neutral: not the agent's fault. */
 export const hopEndings = Object.freeze({
   machine: Object.freeze({ glyph: 'zap', tone: 'machine', words: 'stopped by an infrastructure fault' }),
-  stuck: Object.freeze({ glyph: 'pause-circle', tone: 'stuck', words: 'stopped answering' }),
+  stuck: Object.freeze({ glyph: 'pause-circle', tone: 'stuck', words: 'stopped and asked for a person' }),
   failed: Object.freeze({ glyph: 'x', tone: 'failed', words: 'failed' }),
   budget: Object.freeze({ glyph: 'coins', tone: 'failed', words: 'ran out of budget' }),
   timeout: Object.freeze({ glyph: 'clock', tone: 'failed', words: 'ran out of time' }),
