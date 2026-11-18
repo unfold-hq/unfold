@@ -6,7 +6,7 @@ import type { AppConfig, InsightEvent, User } from './types.ts';
 
 /** One onboarding step a later slice builds, with the Ploeg read route that tells whether Ploeg serves it and the release that adds it. */
 export type PloegStep = { id: StepId; stage: number; record: string; read: string | null; release: string | null };
-export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'prepare-repository' | 'bind-lists';
+export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'read-scopes' | 'prepare-repository' | 'bind-lists';
 /** `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding checklist that need a Ploeg route, and the release that ships Ploeg ADR-0192 for the second-forge gate. */
 export type PloegSteps = { schemaVersion: 1; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null } };
 
@@ -22,7 +22,8 @@ export function pinnedRelease(url = new URL('../ploeg-release.json', import.meta
 export const optInRefusals = {
   registration_not_accepted: { id: 'install-registration', title: 'Ploeg accepts repositories from the screen', value: 'targetRegistration.enabled: true, with targetRegistration.connections naming the GitHub connection and targetRegistration.requireClaims' },
   bindings_not_accepted: { id: 'install-bindings', title: 'The Team accepts Lists from the screen', value: 'teams.<team>.trackerBindings.connections naming the ClickUp connection, and trackerBindings.max' },
-  permission_required: { id: 'install-consumer', title: 'Unfold may connect, register and bind', value: 'the unfold entry in consumers[] with execute, bindScopes: true, registerTargets: true and the Team in its teams' },
+  permission_required: { id: 'install-consumer', title: 'Unfold may connect, register and bind', value: 'the unfold entry in consumers[] with execute, bindScopes: true, registerTargets: true, manageConnections: true with Unfold’s callback in connectionRedirectUris, and the Team in its teams' },
+  connections_not_accepted: { id: 'install-connections', title: 'Ploeg accepts connections from the screen', value: 'connections.enabled: true with an allow entry for clickup and its methods (token, or oauth with the instance’s ClickUp OAuth application), connections.requireClaims, and a SecretStore' },
   person_claim_required: { id: 'install-claims', title: 'Your sign-in carries the claims Ploeg asks for', value: 'the claims targetRegistration.requireClaims names, issued to the Admin by the identity provider' },
 } as const;
 export type OptInRefusal = keyof typeof optInRefusals;
@@ -77,7 +78,9 @@ type PloegReads = {
 /** What Unfold's own store holds for the Tenant: repositories Admins added from the screen with their state, and how many saved task sources. */
 export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off' }[]; sources(): number };
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
-type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries };
+/** The line a later slice shows for a step this Ploeg serves, from what Unfold holds; none keeps the step's "Unfold adds its screen" line. */
+export type StepLines = (manage: boolean) => Partial<Record<StepId, ChecklistLine>>;
+type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries; stepLines?: StepLines };
 
 const stateId = (tenant: string) => `onboarding:${tenant}`;
 const askAdmin = 'Ask an administrator to connect this.';
@@ -120,13 +123,18 @@ export class Onboarding {
   private readonly steps: PloegSteps;
   private readonly stored: StoredEntries;
   private readonly pinned: string;
+  private stepLines: StepLines | undefined;
 
   constructor(options: Options) {
     this.store = options.store; this.ploeg = options.ploeg; this.config = options.config; this.insight = options.insight;
     this.now = options.now ?? (() => new Date()); this.steps = options.steps ?? ploegSteps;
     this.stored = options.stored ?? { repositories: () => [], sources: () => 0 };
     this.pinned = options.pinned ?? pinnedRelease();
+    this.stepLines = options.stepLines;
   }
+
+  /** Shows the lines `lines` gives for the steps this Ploeg serves, in place of their "Unfold adds its screen" line. */
+  useStepLines(lines: StepLines): void { this.stepLines = lines; }
 
   /** Whether `user` connects accounts and adds repositories and Lists: an administrator, and under `tenancy.enforce` an Admin of the Tenant. */
   manages(user: User, tenant = defaultTenant): boolean {
@@ -273,9 +281,11 @@ export class Onboarding {
     const otherForges = forges.filter(forge => forge !== pair.forge);
     const action = (value: ChecklistAction): ChecklistAction | undefined => manage ? value : undefined;
     const readOnly = manage ? {} : { fix: askAdmin };
+    const own = this.stepLines?.(manage) ?? {};
     const notServed = (id: StepId, title: string, configEntry: string, extra = ''): ChecklistLine => {
       const record = step(id);
       const known = served[id];
+      if (known === true && own[id]) return own[id];
       if (known === null) return { id, stage: record.stage, title, status: 'unknown', text: `Ploeg could not be asked whether it serves this step.${extra}`, fix: manage ? 'Check again in a minute.' : askAdmin, action: action({ label: 'Check again', kind: 'refresh' }) };
       const text = known ? `This Ploeg serves the step; Unfold adds its screen in a later release.${extra}` : `${unavailableText(record, this.pinned)}${extra}`;
       return { id, stage: record.stage, title, status: 'unavailable', text, reason: known ? 'unfold_step_pending' : 'ploeg_step_unavailable', waitsFor: { record: known ? 'a later Unfold release' : record.record, release: known ? null : record.release }, configEntry, fix: manage ? 'Until then, add it to the configuration the person who installed Ploeg and Unfold keeps.' : askAdmin, action: action({ label: 'Show the configuration entry', kind: 'config-entry' }) };
@@ -446,6 +456,7 @@ export function unavailableText(step: PloegStep, pinned: string): string {
     'connect-github': 'connect GitHub from the screen',
     'register-repositories': 'register repositories at runtime',
     'connect-clickup': 'connect ClickUp from the screen',
+    'read-scopes': 'list a tracker connection’s Lists for Unfold',
     'prepare-repository': 'open a readiness pull request',
     'bind-lists': 'bind Lists to a Team at runtime',
   };

@@ -4173,6 +4173,259 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup:
+    get:
+      tags: [Ploeg]
+      operationId: getConnectClickUp
+      summary: 'Connect ClickUp: the member guide, which steps this Ploeg serves, and the connections and bound Lists'
+      description: 'The member guide comes from the ClickUp adapter''s setup capability. `steps` says whether this Ploeg serves connecting (its `tracker-connections` read), the List read (gated on the pinned Ploeg release) and binding (its `tracker-bindings` read): true, false, or null when Ploeg could not be asked. Each connection is one Ploeg holds (system ADR-0060, Ploeg ADR-0195), with Ploeg''s own state of it, and each saved List with its binding and checklist line. When Ploeg serves binding, every bound List''s state is read again first. Never a token.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: '`{manage, demo, guide, steps, connections}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [manage, demo, guide, steps, connections]
+                properties:
+                  manage: { type: boolean }
+                  demo: { type: boolean }
+                  guide: { type: [object, 'null'], properties: { why: { type: string }, steps: { type: array, items: { type: string } }, docs: { type: string }, tokenLabel: { type: string }, tokenShape: { type: string } } }
+                  steps: { type: object, properties: { connect: { type: [boolean, 'null'] }, lists: { type: [boolean, 'null'] }, bind: { type: [boolean, 'null'] } } }
+                  connections: { type: array, items: { type: object, required: [id, account, method, setAt, ploeg, sources], properties: { id: { type: string }, account: { type: string }, method: { type: string }, setAt: { type: [string, 'null'] }, ploeg: { type: [object, 'null'] }, sources: { type: array, items: { type: object } } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/token:
+    post:
+      tags: [Ploeg]
+      operationId: connectClickUpWithToken
+      summary: 'Hand the Unfold member''s ClickUp token to Ploeg once'
+      description: 'Checks the token''s shape (400 `connection_token_invalid`, before any request leaves Unfold), then starts Ploeg''s `token` connection flow and completes it with the token (`POST /api/v1/operator/connection-flows` and `.../complete`, Ploeg ADR-0195). Ploeg checks it with ClickUp and stores it; Unfold keeps the Ploeg connection id and the account name, never the token. When the account Ploeg names is the signed-in Admin''s own, Unfold asks Ploeg to remove the connection again and answers 400 `connection_token_personal`. 503 `ploeg_step_unavailable` while this Ploeg does not serve the step; Ploeg''s own refusals pass through with their code (`connections_not_accepted`, `oauth_required`, `probe_failed`, `already_connected`).'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [token], properties: { token: { type: string, writeOnly: true } } }
+      responses:
+        '201':
+          description: '`{connection}`'
+          content:
+            application/json:
+              schema: { type: object, required: [connection], properties: { connection: { type: object } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/oauth:
+    post:
+      tags: [Ploeg]
+      operationId: startClickUpSignIn
+      summary: 'Start signing in to ClickUp as the Unfold member, through the installation''s ClickUp OAuth application'
+      description: 'Starts Ploeg''s `oauth` connection flow with Unfold''s callback as the redirect URI and answers where to send the person. Unfold keeps a hash of Ploeg''s `state` with the person and their browser sign-in for ten minutes. 409 `onboarding_base_url_missing` without `baseUrl`; 409 `method_not_allowed` when the installation has no ClickUp OAuth application; 503 `ploeg_step_unavailable` while this Ploeg does not serve the step.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{authorizeUrl}`'
+          content:
+            application/json:
+              schema: { type: object, required: [authorizeUrl], properties: { authorizeUrl: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/callback:
+    get:
+      tags: [Ploeg]
+      operationId: completeClickUpSignIn
+      summary: 'ClickUp''s redirect target after signing in as the Unfold member'
+      description: 'Relays the `code` and `state` to Ploeg''s flow completion once, only for the same signed-in person in the same browser within ten minutes of the start; neither is stored or logged. Redirects to `/?clickup=connected#settings/connect-clickup`, or to `/?clickup_error=<code>#settings/connect-clickup` (for example `onboarding_state_invalid` or `connection_token_personal`).'
+      x-unfold-role: admin
+      parameters:
+        - { name: code, in: query, schema: { type: string } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: error, in: query, schema: { type: string } }
+      responses:
+        '303': { description: Redirect back to Connect ClickUp. }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/onboarding/clickup/map:
+    get:
+      tags: [Ploeg]
+      operationId: getClickUpMapOptions
+      summary: 'What a List can be bound to: Teams and the repositories Ploeg reports ready'
+      description: 'Teams from Ploeg''s Teams read, each `bindable` only while its spend cap is not null. Repositories are Ploeg''s Work Targets that it reports `ready` and that match a repository of the Tenant''s own work by owner/name and base branch; `waiting` names the ones that are registered but not ready yet. Changes nothing.'
+      x-unfold-role: admin
+      responses:
+        '200':
+          description: '`{teams, repositories, waiting}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [teams, repositories, waiting]
+                properties:
+                  teams: { type: array, items: { type: object, required: [id, bindable], properties: { id: { type: string }, bindable: { type: boolean } } } }
+                  repositories: { type: array, items: { type: object, required: [key, repositoryId, name, target], properties: { key: { type: string }, repositoryId: { type: string }, name: { type: string }, target: { type: object } } } }
+                  waiting: { type: array, items: { type: string } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/connections/{connectionId}:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+    delete:
+      tags: [Ploeg]
+      operationId: removeClickUpConnection
+      summary: 'Remove a ClickUp connection Ploeg holds'
+      description: '409 `connection_in_use` while a saved List uses it, before anything is sent. Otherwise asks Ploeg to remove it (`DELETE /api/v1/operator/tracker-connections/{id}`; Ploeg refuses with 409 `connection_in_use` while a binding uses it) and forgets it. Removing one that is already gone succeeds.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{removed}`'
+          content:
+            application/json:
+              schema: { type: object, required: [removed], properties: { removed: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/connections/{connectionId}/lists:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionId'
+    get:
+      tags: [Ploeg]
+      operationId: listClickUpLists
+      summary: 'The Lists a ClickUp connection Ploeg holds can see, read through Ploeg'
+      description: 'Proposed: Ploeg''s Scope read (design.md section 4, ask 6) is not served by any released Ploeg, so this answers 503 `ploeg_step_unavailable` until the pinned Ploeg release adds it. Unfold never asks ClickUp itself.'
+      x-unfold-role: admin
+      parameters:
+        - { name: after, in: query, schema: { type: string, maxLength: 512 } }
+      responses:
+        '200':
+          description: '`{scopes, next}`'
+          content:
+            application/json:
+              schema: { type: object, required: [scopes, next], properties: { scopes: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, path: { type: array, items: { type: string } } } } }, next: { type: [string, 'null'] } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/bindings:
+    post:
+      tags: [Ploeg]
+      operationId: bindClickUpList
+      summary: 'Bind a List to a Team and ready repositories through Ploeg'
+      description: 'Passes the spend-cap gate (409 `budget_missing`), refuses a repository Ploeg does not report ready with 409 `repository_not_ready` before anything is sent, then runs Ploeg''s dry run (`POST /api/v1/operator/teams/{team}/tracker-bindings?dryRun=true`, Ploeg ADR-0186). With `dryRun: true`, or when a check fails, it answers the checks and stops. Otherwise it creates the binding, saves the List as a task source in Own work and stores the binding on it. A create Ploeg answers with the binding that already exists stores that one, so a retry leaves one binding. 409 `conflicts_with_static` (the installation''s configuration routes the List; nothing stored) and 422 `probe_failed` carry Ploeg''s `checks` and the static entry; `bindings_not_accepted` turns the Installation line red.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connection, list, team, default]
+              properties:
+                connection: { type: string, pattern: '^tc-[a-f0-9]{12}$' }
+                list: { type: object, required: [id], properties: { id: { type: string, pattern: '^[A-Za-z0-9_-]{1,64}$' }, name: { type: string, maxLength: 100 } } }
+                team: { type: string, maxLength: 128 }
+                default: { type: string, description: 'The Work Target key of the default repository.' }
+                allow: { type: array, maxItems: 20, items: { type: string } }
+                dryRun: { type: boolean }
+      responses:
+        '200':
+          description: '`{dryRun, checks, binding, source?, created}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [dryRun, checks, binding, created]
+                properties:
+                  dryRun: { type: boolean }
+                  checks: { type: array, items: { type: object, properties: { id: { type: string }, status: { type: string, enum: [ok, problem, unknown] }, text: { type: string } } } }
+                  binding: { type: [object, 'null'] }
+                  source: { $ref: '#/components/schemas/ConnectionSource' }
+                  created: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/bindings/{sourceId}:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionSourcePath'
+    delete:
+      tags: [Ploeg]
+      operationId: unbindClickUpList
+      summary: 'Remove a List''s binding in Ploeg'
+      description: 'Asks Ploeg to remove the binding (`DELETE /api/v1/operator/teams/{team}/tracker-bindings/{id}`), drops it from the saved List, which loses its Ploeg target, and writes one OCSF delete record. A List without a binding answers `{removed: null}`, so a retry succeeds and records nothing twice.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{removed}`'
+          content:
+            application/json:
+              schema: { type: object, required: [removed], properties: { removed: { type: [string, 'null'] } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/bindings/{sourceId}/check:
+    parameters:
+      - $ref: '#/components/parameters/ConnectionSourcePath'
+    post:
+      tags: [Ploeg]
+      operationId: checkClickUpBinding
+      summary: 'Check again: read a bound List''s state from Ploeg'
+      description: 'Reads Ploeg''s bindings again and stores each bound List''s state; a binding Ploeg no longer holds becomes `removed` and its List loses its Ploeg target. 404 `binding_not_found` for a List without a binding.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{source}`'
+          content:
+            application/json:
+              schema: { type: object, required: [source], properties: { source: { $ref: '#/components/schemas/ConnectionSource' } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/onboarding/spend-cap:
     post:
       tags: [Ploeg]
@@ -7949,6 +8202,12 @@ components:
       required: true
       schema: { type: string, pattern: '^tc-[a-f0-9]{12}$' }
       example: tc-0123456789ab
+    ConnectionSourcePath:
+      name: sourceId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,63}$' }
+      example: sprint-12
     TaskId:
       name: taskId
       in: path
@@ -8086,8 +8345,9 @@ components:
         baseUrl: { type: string }
         tenant: { type: string }
         account: { type: string, description: 'The name of the account the token belongs to.' }
-        token: { type: string, enum: [set, missing] }
+        token: { type: string, enum: [set, missing, held_by_ploeg], description: '`held_by_ploeg` for a connection made through Connect ClickUp: Ploeg holds its token and Unfold keeps none (system ADR-0060).' }
         tokenSetAt: { type: string, format: date-time }
+        ploeg: { type: object, description: 'The Ploeg connection this one mirrors, for a connection Ploeg holds: its id, how it was made and the vendor account id.', required: [connection, method, accountId], properties: { connection: { type: string }, method: { type: string }, accountId: { type: string } } }
         manage: { type: boolean, description: 'Whether the caller may change or remove it.' }
         createdAt: { type: string, format: date-time }
         createdBy: { type: string }
@@ -8150,10 +8410,24 @@ components:
         tenant: { type: string }
         client: { type: string }
         clientProject: { type: string, description: 'The Client Project a source without a Client belongs to: its Tenant''s Own work until it is moved.' }
+        binding: { $ref: '#/components/schemas/SourceBinding' }
         createdAt: { type: string, format: date-time }
         createdBy: { type: string }
         updatedAt: { type: string, format: date-time }
         updatedBy: { type: string }
+    SourceBinding:
+      type: object
+      description: 'The Ploeg binding of a saved List (Ploeg ADR-0186), as Unfold last read it. While `state` is `active` or `awaiting_webhook` the source carries `target` as its Ploeg target; `removed` means Ploeg no longer holds it.'
+      required: [id, team, state, reason, default, allow, target, checkedAt]
+      properties:
+        id: { type: string }
+        team: { type: string }
+        state: { type: string, enum: [active, awaiting_webhook, shadowed, invalid, removed, unknown] }
+        reason: { type: [string, 'null'] }
+        default: { type: string, description: 'The Work Target key of the default repository.' }
+        allow: { type: array, items: { type: string } }
+        target: { type: object, required: [forge, owner, repo, baseBranch], properties: { forge: { type: string }, owner: { type: string }, repo: { type: string }, baseBranch: { type: string } } }
+        checkedAt: { type: string, format: date-time }
     SetupCheck:
       type: object
       description: 'One finding of a connection check, worded for a person.'
