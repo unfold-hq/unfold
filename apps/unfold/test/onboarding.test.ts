@@ -102,7 +102,8 @@ test('a first-time Tenant sees every later stage grey or refused with its reason
   onboarding.landing(admin);
   const checklist = await onboarding.checklist(admin);
   assert.equal(checklist.manage, true);
-  assert.deepEqual(checklist.stages.map(entry => entry.stage), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(checklist.stages.map(entry => entry.stage), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11]);
+  assert.deepEqual(checklist.stages.map(entry => entry.id).slice(-3), ['connect-claude', 'first-task', 'first-pull-request'], 'Connect Claude comes just before the first task, the first work a person starts with it');
   assert.deepEqual(checklist.stages.filter(entry => entry.status === 'ok').map(entry => entry.id), ['sign-in']);
   for (const entry of checklist.stages.filter(stage => stage.status !== 'ok')) assert(entry.fix || entry.action || entry.status === 'pending', `${entry.id} names its fix`);
   const team = line(checklist.stages, 'install-team');

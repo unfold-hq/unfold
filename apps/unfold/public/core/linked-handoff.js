@@ -108,7 +108,26 @@ function startInClaudeMarkup(detail, model) {
   const command = `/unfold:start ${detail.item.id}`;
   const yours = wait.actsFor && String(wait.actsFor) === String(model.userId);
   if (!yours) return callout({ tone: 'neutral', icon: 'info', title: 'Waits for its person’s Claude Code', body: `<p>${escape(wait.message || 'A Run of this Work Item waits for the person it acts for to start it from their own Claude Code.')}</p>` });
+  const routines = model.claudeRoutines;
+  if (Array.isArray(routines) && routines.includes(detail.item.team)) return startWithRoutineMarkup(detail, wait, model);
+  const hint = Array.isArray(routines) ? `<p class="meta">${escape('If this Team starts its Runs through your own Claude routine, connect it once on Settings → Connect Claude and start it here instead.')} <a href="#settings/claude">Connect Claude</a></p>` : '';
+  return `${startWithCommandMarkup(wait, command)}${hint}`;
+}
+
+function startWithCommandMarkup(wait, command) {
   return `<div class="linked-start-claude"><p class="field-label">Start in my Claude</p><p>${escape(`Ploeg's ${wait.role} Run (round ${wait.round}) waits for you. Run this in Claude Code, in a clone of the repository: it claims the Run through Unfold and starts it in the Team's Claude environment on your own Claude seat.`)}</p><p><code class="mono">${escape(command)}</code> ${button({ label: 'Copy', icon: 'copy', size: 'sm', action: 'linked-session-copy', data: { text: command } })}</p></div>`;
+}
+
+/** Start with my Claude: Ploeg fires the person's own routine for the Run that waits for them (Ploeg ADR-0197 section 7). */
+function startWithRoutineMarkup(detail, wait, model) {
+  const result = model.routineFire?.id === detail.item.id ? model.routineFire : null;
+  const outcome = result?.error
+    ? `<p class="meta" role="alert">${escape(result.error)}${result.code ? ` (${escape(result.code)})` : ''}</p>`
+    : result?.session
+      ? `<p class="meta" role="status">${escape(`Your routine started session ${result.session.id} for the ${wait.role} Run.`)}${result.session.url ? ` <a href="${escape(result.session.url)}" target="_blank" rel="noopener noreferrer">Open it in Claude</a>` : ''}</p>`
+      : '';
+  const start = button({ label: 'Start with my Claude', icon: 'play', variant: 'primary', size: 'sm', action: 'work-fire-routine', data: { id: detail.item.id }, busy: Boolean(model.routineBusy), disabled: Boolean(result?.session) });
+  return `<div class="linked-start-claude"><p class="field-label">Start with my Claude</p><p>${escape(`Ploeg's ${wait.role} Run (round ${wait.round}) waits for you. Ploeg starts it by firing your own Claude routine for ${detail.item.team}, in the Team's self-hosted environment, on your own Claude account and limits.`)}</p><p>${start}</p>${outcome}</div>`;
 }
 
 function takeOverMarkup(detail, model) {
