@@ -7,6 +7,7 @@ import { hashPassword } from '../src/auth.ts';
 import { githubRefusalTable } from '../src/forge-connections.ts';
 import { errorCatalogue } from '../src/error-catalogue.ts';
 import { application, login, request } from './api-support.ts';
+import { testTimeout } from './timeframes.ts';
 
 const manifestCode = `mc${randomBytes(12).toString('hex')}`;
 const installationId = '918273645546372819';
@@ -286,7 +287,7 @@ test('a completion Ploeg could not answer keeps the state, so reloading the call
   assert.equal((await navigate(api.url, `/api/onboarding/github/callback?installation_id=${installationId}&setup_action=install&state=${secondState}`, cookie)).status, 400, 'after Ploeg completed it the state is used up');
 });
 
-test('a completion that takes Ploeg longer than five seconds still completes', { timeout: 30_000 }, async t => {
+test('a completion that takes Ploeg longer than five seconds still completes', { timeout: testTimeout(30_000) }, async t => {
   const { api, cookie } = await live(t, { completeDelayMs: 5_500 });
   const done = await connect(api, cookie);
   assert.equal(done.headers.get('location'), '/?github=connected#settings/connections/github');
