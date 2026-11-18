@@ -6,8 +6,10 @@ import { TaskError } from './task-providers/shared.ts';
 import { defaultTenant, ownership, repositoryKey, validTenancyId } from './tenancy.ts';
 import type { ClientProject, ClientProjects } from './integration-store.ts';
 
+/** What Ploeg reported when it registered a repository as a runtime Work Target (Ploeg ADR-0193): the target key, the forge connection that holds the grant, and the readiness of its last inspection. */
+export type PloegRegistration = { target: string; connection: string; readiness: 'ready' | 'not_ready' | 'unknown'; reasons: string[]; prepareAvailable: boolean; registeredAt: string };
 /** A repository an Admin added from the screen (system ADR-0048): owned by the Tenant, keyed by forge host and `owner/name`. */
-export type StoredRepository = { id: string; key: string; url: string; name: string; description: string; baseBranch: string; tenant: string; integrationAccount?: string; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
+export type StoredRepository = { id: string; key: string; url: string; name: string; description: string; baseBranch: string; tenant: string; integrationAccount?: string; ploeg?: PloegRegistration; createdAt: string; createdBy: string; updatedAt: string; updatedBy: string };
 /**
  * Whether a stored repository is in use; `shadowed` when a configured repository has its key or id, another Tenant's
  * repository has its `owner/name`, or its forge host is not one the configuration uses; `off` while the
@@ -107,13 +109,13 @@ export class StoredRepositories {
   /**
    * Whether `repository` is in use. It is `shadowed` when a configured repository has its key or id, when a repository
    * of another Tenant, configured or stored, has its `owner/name` on any forge, since a Work Item's target names no
-   * host, or when its forge host is not one the configuration uses.
+   * host, or when its forge host is not one the configuration uses and Ploeg did not register it.
    */
   state(repository: StoredRepository): RepositoryState {
     if (!this.joined) return 'off';
     const path = pathOf(repository.key);
     const host = hostOf(repository.key);
-    if (!host || internalHost(host) || !this.forgeHosts().has(host)) return 'shadowed';
+    if (!host || internalHost(host) || (!this.forgeHosts().has(host) && !repository.ploeg)) return 'shadowed';
     if (this.configured().some(entry => entry.id === repository.id || repositoryKey(entry.url) === repository.key || (pathOf(repositoryKey(entry.url)) === path && ownership(entry).tenant !== repository.tenant))) return 'shadowed';
     return this.repositories().some(other => other.id !== repository.id && other.tenant !== repository.tenant && pathOf(other.key) === path) ? 'shadowed' : 'active';
   }
@@ -167,8 +169,24 @@ export class StoredRepositories {
     return name;
   }
 
+  /**
+   * Stores a repository Ploeg registered as a runtime Work Target and grants it to Own work, or records the new
+   * registration on the one the Tenant already has. Its forge host comes from Ploeg's forge connection, so it need not
+   * be one the configuration uses.
+   */
+  register(user: User, input: { tenant?: string; url: string; baseBranch: string; integrationAccount?: string }, registration: PloegRegistration): PublicRepository {
+    const tenant = input.tenant ?? defaultTenant;
+    const { key } = forgeUrl(input.url);
+    const existing = this.repositories().find(entry => entry.tenant === tenant && entry.key === key);
+    if (!existing) return this.create(user, { tenant, url: input.url, baseBranch: input.baseBranch, ...(input.integrationAccount ? { integrationAccount: input.integrationAccount } : {}) }, registration);
+    if (!this.access.manages(user, tenant)) throw new TaskError(403, 'forbidden', `Only an administrator${this.access.enforced ? ` of Tenant ${tenant}` : ''} adds repositories.`);
+    const repository: StoredRepository = { ...existing, ploeg: registration, ...(input.integrationAccount ? { integrationAccount: this.forgeAccount(input.integrationAccount, tenant) } : {}), updatedAt: this.access.now(), updatedBy: user.name };
+    this.db.prepare('UPDATE repositories SET body=?, integration_account_id=? WHERE id=?').run(JSON.stringify(repository), repository.integrationAccount ?? null, repository.id);
+    return this.publicRepository(user, repository);
+  }
+
   /** Stores a repository for `tenant` and grants it to the Tenant's Own work, which is created when it does not exist yet. */
-  create(user: User, input: Record<string, unknown>): PublicRepository {
+  create(user: User, input: Record<string, unknown>, registration?: PloegRegistration): PublicRepository {
     const tenant = input.tenant === undefined || input.tenant === null || input.tenant === '' ? defaultTenant : input.tenant;
     if (!validTenancyId(tenant)) throw new TaskError(400, 'repository_invalid', 'Tenant must be a Tenant id: lower-case letters, digits and inner hyphens.');
     if (!this.access.manages(user, tenant)) throw new TaskError(403, 'forbidden', `Only an administrator${this.access.enforced ? ` of Tenant ${tenant}` : ''} adds repositories.`);
@@ -176,7 +194,7 @@ export class StoredRepositories {
     const stored = this.repositories();
     if (stored.length >= maxRepositories) throw new TaskError(409, 'repository_invalid', `Unfold keeps at most ${maxRepositories} repositories added from the screen. Remove one first.`);
     if (stored.some(entry => entry.tenant === tenant && entry.key === key) || this.configured().some(entry => ownership(entry).tenant === tenant && repositoryKey(entry.url) === key)) throw new TaskError(409, 'repository_exists', `This Tenant already has ${key}.`);
-    if (!this.forgeHosts().has(hostOf(key)!)) throw new TaskError(400, 'repository_invalid', `Repository URL must be on a forge host the server configuration uses: ${[...this.forgeHosts()].sort().join(', ') || 'none is configured yet'}.`);
+    if (!registration && !this.forgeHosts().has(hostOf(key)!)) throw new TaskError(400, 'repository_invalid', `Repository URL must be on a forge host the server configuration uses: ${[...this.forgeHosts()].sort().join(', ') || 'none is configured yet'}.`);
     const name = input.name === undefined ? key.split('/').slice(1).join('/') : text(input.name, 'Name', 100);
     const description = input.description === undefined || input.description === '' ? '' : text(input.description, 'Description', 500);
     const baseBranch = this.baseBranch(input.baseBranch);
@@ -184,7 +202,7 @@ export class StoredRepositories {
     const taken = new Set([...this.config.repositories.map(entry => entry.id), ...stored.map(entry => entry.id)]);
     const id = storedId(key.split('/').at(-1)!, candidate => taken.has(candidate));
     const at = this.access.now();
-    const repository: StoredRepository = { id, key, url, name, description, baseBranch, tenant, ...(integrationAccount ? { integrationAccount } : {}), createdAt: at, createdBy: user.name, updatedAt: at, updatedBy: user.name };
+    const repository: StoredRepository = { id, key, url, name, description, baseBranch, tenant, ...(integrationAccount ? { integrationAccount } : {}), ...(registration ? { ploeg: registration } : {}), createdAt: at, createdBy: user.name, updatedAt: at, updatedBy: user.name };
     let project: ClientProject;
     this.db.exec('BEGIN IMMEDIATE');
     try {

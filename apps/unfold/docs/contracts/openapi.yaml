@@ -4535,6 +4535,137 @@ paths:
       operationId: prepareOnboardingRepository
       summary: 'Ask Ploeg for the readiness pull request of a repository that misses only AGENTS.md'
       description: 'Admits one `prepare_repository` Work Item (Ploeg ADR-0194) for the registered repository `target` on `team`, with `usd` as `budgetUsd`, after a signed-in Admin confirmed that cap. The cap is the lowest one Unfold can read, the Team''s spend cap; Ploeg lowers the pool further to the Team''s prepare cap and the plan''s pool, which it does not report. Nothing is estimated. The request carries the person''s token; Ploeg refuses asserted attribution for this kind (403 `ploeg_person_unproven`). 503 `ploeg_step_unavailable` while the connected Ploeg does not serve the step; 409 `budget_missing` or `spend_cap_unconfirmed` from the spend-cap gate; 409 `spend_cap_changed` when the cap Unfold reads now differs from `usd`, so the person confirms again; 409 `prepare_unavailable` unless Ploeg reports `prepareAvailable: true`; 409 `target_already_ready` and `prepare_in_progress` from Ploeg; 409 `ploeg_demo` in the demo. A repository whose readiness Work Item is live answers that one with 200 and `replayed: true`, so a double click or a retry never admits a second one. 403 for anyone who does not manage the Tenant.'
+  /api/onboarding/github:
+    get:
+      tags: [Ploeg]
+      operationId: getConnectGithub
+      summary: 'What the Connect GitHub page shows'
+      description: 'Whether this Ploeg serves the connect and register steps (from its `forge-connections` and `targets` read routes, Ploeg ADR-0195 and ADR-0193), the GitHub Apps and forge connections Ploeg holds (never a secret), the second-forge state, and the Integration Accounts Unfold stored, each carrying only the Ploeg connection id. It asks Ploeg only reads. `callbackUrl` is shown only to someone who manages the Tenant.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: '`{demo, manage, served, secondForge, callbackUrl, apps, connections, accounts}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [demo, manage, served, secondForge, callbackUrl, apps, connections, accounts]
+                properties:
+                  demo: { type: boolean }
+                  manage: { type: boolean }
+                  served: { type: object, required: [connect, register], properties: { connect: { type: [boolean, 'null'] }, register: { type: [boolean, 'null'] } } }
+                  secondForge: { type: [object, 'null'], properties: { forges: { type: array, items: { type: string } }, waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } } } }
+                  callbackUrl: { type: [string, 'null'] }
+                  apps: { type: array, items: { type: object, required: [id, slug, owner], properties: { id: { type: string }, slug: { type: string }, owner: { type: [string, 'null'] } } } }
+                  connections: { type: array, items: { type: object, required: [id, kind, instance, method, source, state, invalidReason, account], properties: { id: { type: string }, kind: { type: string }, instance: { type: string }, method: { type: string }, source: { type: string, enum: [runtime, static] }, state: { type: string }, invalidReason: { type: [string, 'null'] }, account: { type: [string, 'null'] } } } }
+                  accounts: { type: array, items: { type: object, required: [id, connection, account, state, createdAt, createdBy], properties: { id: { type: string }, connection: { type: string }, account: { type: [string, 'null'] }, state: { type: string }, createdAt: { type: string }, createdBy: { type: string } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/github/flows:
+    post:
+      tags: [Ploeg]
+      operationId: startGithubConnection
+      summary: 'Start connecting GitHub through Ploeg'
+      description: 'Starts a Ploeg connection flow (Ploeg ADR-0195): `{method: "manifest", owner?}` creates a GitHub App from a manifest Ploeg builds, `{method: "install", app}` installs an App Ploeg already holds. Ploeg issues the `state`; Unfold keeps only its hash, tied to this browser sign-in for ten minutes, and answers a one-time `continue` address on Unfold that sends the person to GitHub. Refused before anything is sent: 403 for someone who does not manage the Tenant or a credential that is not a browser sign-in, 503 `ploeg_step_unavailable` when this Ploeg does not serve the step, 409 `second_forge_unsupported` on an installation that already pushes to another forge before the Ploeg release with ADR-0192, 409 `onboarding_base_url_missing` without a `baseUrl`. Ploeg''s refusals come back as 422 `connections_not_accepted`, 403 `permission_required` or `person_claim_required`, 409 `github_flow_refused` and 503 `connection_unavailable`.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method: { type: string, enum: [manifest, install] }
+                app: { type: string, maxLength: 128 }
+                owner: { type: string, maxLength: 39 }
+      responses:
+        '201':
+          description: '`{flow, continue}`; the response carries no `state`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flow, continue]
+                properties:
+                  flow: { type: object, required: [id, method, expiresAt], properties: { id: { type: string }, method: { type: string, enum: [github_app_manifest, github_app_installation] }, expiresAt: { type: string } } }
+                  continue: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/github/continue/{handoff}:
+    parameters:
+      - { name: handoff, in: path, required: true, example: 'AbCdEfGhIjKlMnOpQrStUvWxYz012345', schema: { type: string, pattern: '^[A-Za-z0-9_-]{32}$' } }
+    get:
+      tags: [Ploeg]
+      operationId: continueToGithub
+      summary: 'The one-time step from Unfold to GitHub'
+      description: 'For the person and browser sign-in that started the flow, once, within ten minutes: a page whose one form posts the App manifest to GitHub (its content security policy lets it post only to GitHub), or a redirect to the App''s install page. 404 otherwise.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [] }
+      responses:
+        '200': { description: 'The page that posts the App manifest to GitHub.', content: { text/html: { schema: { type: string } } } }
+        '303': { description: 'Redirect to the GitHub App''s install page.' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/onboarding/github/callback:
+    get:
+      tags: [Ploeg]
+      operationId: completeGithubConnection
+      summary: 'Where GitHub sends the person back after creating or installing the App'
+      description: 'GitHub''s `redirect_url` and `setup_url`. The `state` must be one Unfold tied to this browser sign-in in the last ten minutes and not used before; Unfold forgets it, then relays the manifest `code`, or the `installation_id` and `setup_action`, to Ploeg once, in a request body, and stores and logs none of them. After the App is created, it redirects straight to its install page; after an install, back to `/?github=<outcome>#settings/connections/github` or `/?github_error=<code>#settings/connections/github`. A `state` that fails a check answers 400 `onboarding_state_invalid` as a page, and nothing is relayed.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [] }
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string } }
+        - { name: code, in: query, required: false, schema: { type: string } }
+        - { name: installation_id, in: query, required: false, schema: { type: string } }
+        - { name: setup_action, in: query, required: false, schema: { type: string } }
+      responses:
+        '303': { description: 'Redirect to GitHub''s install page or back into the workbench.' }
+        '400': { description: 'onboarding_state_invalid: nothing was relayed.', content: { text/html: { schema: { type: string } } } }
+  /api/onboarding/github/connections/{connection}/repositories:
+    parameters:
+      - { name: connection, in: path, required: true, example: github-acme, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' } }
+    get:
+      tags: [Ploeg]
+      operationId: listGithubGrantedRepositories
+      summary: 'The repositories a GitHub connection reaches'
+      description: 'Ploeg''s `GET /api/v1/operator/forge-connections/{connection}/repositories` (Ploeg ADR-0193): each repository the installation was granted, whether Ploeg registered it and under which key, and whether Unfold stored it. 403 for someone who does not manage the Tenant.'
+      x-unfold-role: admin
+      responses:
+        '200':
+          description: '`{connection, repositories}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection, repositories]
+                properties:
+                  connection: { type: string }
+                  repositories: { type: array, items: { type: object, required: [repository, registered, key, source, stored], properties: { repository: { type: string }, registered: { type: boolean }, key: { type: [string, 'null'] }, source: { type: [string, 'null'] }, stored: { type: boolean } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '501': { $ref: '#/components/responses/NotImplemented' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/github/targets:
+    post:
+      tags: [Ploeg]
+      operationId: registerGithubRepository
+      summary: 'Check, then register, a repository through Ploeg'
+      description: 'Always runs Ploeg''s dry run first (`POST /api/v1/operator/targets?dryRun=true`, Ploeg ADR-0193). With `dryRun` true or left out it answers 200 with each check and `outcome` accepted or refused. With `dryRun: false` and an accepted dry run it registers the repository under the explicit lower-case `key`, stores it in Unfold (needs the `repositories.stored` flag, else 404 `repositories_off`), grants it to Own work and answers 201 with `repository`; a refused registration is 422 `target_refused` and stores nothing. `prepareAvailable` is Ploeg''s, never derived from reason text. 422 `registration_not_accepted` when the installation has not opted in.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }
@@ -4561,6 +4692,20 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PrepareAnswer' }
+              required: [connection, repository, key]
+              properties:
+                connection: { type: string, maxLength: 128 }
+                repository: { type: string, description: '`owner/name`.' }
+                key: { type: string, pattern: '^[a-z0-9][a-z0-9_.:-]{0,127}$' }
+                branch: { type: string, maxLength: 255 }
+                dryRun: { type: boolean }
+      responses:
+        '200':
+          description: 'The dry run, or a refused dry run before registering.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/GithubTargetOutcome' } } }
+        '201':
+          description: 'Registered and stored.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/GithubTargetOutcome' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -8447,6 +8592,20 @@ components:
               receiptId: { type: string }
               policySha256: { type: string }
   schemas:
+    GithubTargetOutcome:
+      type: object
+      required: [dryRun, outcome, reason, message, checks, target, readiness, reasons, prepareAvailable]
+      properties:
+        dryRun: { type: boolean }
+        outcome: { type: string, enum: [accepted, refused] }
+        reason: { type: [string, 'null'], description: 'Ploeg''s refusal code.' }
+        message: { type: string }
+        checks: { type: array, items: { type: object, required: [name, passed, text], properties: { name: { type: string }, passed: { type: boolean }, text: { type: string } } } }
+        target: { type: [object, 'null'], properties: { key: { type: string }, repository: { type: string }, branch: { type: string }, state: { type: string } } }
+        readiness: { type: string, enum: [ready, not_ready, unknown] }
+        reasons: { type: array, items: { type: string } }
+        prepareAvailable: { type: boolean }
+        repository: { type: object, description: 'The stored repository, after a registration.' }
     SpendCapConfirmation:
       type: object
       description: 'An Admin''s confirmation of a Team''s spend cap: the cap in US dollars per UTC period as Ploeg reported it, who confirmed it and when.'

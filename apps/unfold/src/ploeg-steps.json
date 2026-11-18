@@ -10,8 +10,8 @@
     {
       "id": "connect-github",
       "stage": 2,
-      "record": "Ploeg's connection contract (ADR-0184 amendment)",
-      "read": null,
+      "record": "Ploeg ADR-0195",
+      "read": "forge-connections",
       "release": null
     },
     {
