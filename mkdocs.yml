@@ -30,6 +30,7 @@ nav:
       - Journeys: concepts/journeys.md
       - Who Unfold is for: concepts/who-unfold-is-for.md
       - Run Cards (mostly proposed): concepts/run-cards.md
+      - Billing AI work to Clients (mostly proposed): concepts/billing-ai-work.md
   - How-to:
       - Assign work to an agent: how-to/assign-work-to-an-agent.md
       - Review an agent pull request: how-to/review-an-agent-pr.md
