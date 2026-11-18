@@ -63,9 +63,9 @@ output pasted in the pull request.
 
 ## 7. S7 Readiness pull request
 
-- [ ] 7.1 Offer only where Ploeg reports `prepareAvailable: true`; the cap that bounds the Run shown, no estimate
-- [ ] 7.2 Confirmation bound to the cap, sent as `budgetUsd`; re-ask on a changed cap; one Work Item per repository on retry; cancel never restarts; a cancel after the pull request opened closes or tracks it before a second prepare
-- [ ] 7.3 Review-and-merge line with the pull request link; after merge (`target.readiness_changed`): show Level 2 and the next Level 3 check (ADR-0047 part 4), and offer the repository for binding
+- [x] 7.1 Offer only where Ploeg reports `prepareAvailable: true`; the cap that bounds the Run shown, no estimate
+- [x] 7.2 Confirmation bound to the cap, sent as `budgetUsd`; re-ask on a changed cap; one Work Item per repository on retry; cancel never restarts; a cancel after the pull request opened closes or tracks it before a second prepare
+- [x] 7.3 Review-and-merge line with the pull request link; after merge (`target.readiness_changed`): show Level 2 and the next Level 3 check (ADR-0047 part 4), and offer the repository for binding
 - [ ] 7.4 Move the Ploeg pin to the release with ADR-0194
 
 ## 8. S8 First task to first pull request, measured
