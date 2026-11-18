@@ -1170,7 +1170,7 @@ export function validatePloeg(raw: unknown, mode: AppConfig['mode']): AppConfig[
   return { url: url.href.replace(/\/+$/, ''), ...(data.tokenEnv ? { tokenEnv: data.tokenEnv as string } : {}), ...(personTokens ? { personTokens } : {}), ...(data.teams !== undefined ? { teams: parseTeams(data.teams) } : {}), ...(userTeams ? { userTeams: Object.fromEntries(Object.entries(userTeams).map(([id, value]) => [id, parseTeams(value)])) } : {}), ...(forgeLogins ? { forgeLogins: { ...forgeLogins } as Record<string, string> } : {}), ...(trackerUrl ? { trackerUrl } : {}), ...(data.demo ? { demo: true } : {}) };
 }
 
-type PloegRequestOptions = { added?: boolean; actor?: string; body?: unknown; raw?: Uint8Array; versions?: unknown[]; context?: boolean; comment?: boolean; ask?: boolean; chat?: boolean; requeue?: boolean; takeOver?: boolean; actingUser?: string; admission?: boolean; claim?: boolean; note?: string; questionAnswer?: string; cancel?: string; method?: 'PUT' | 'DELETE'; answer?: { status: number }; contractProbe?: boolean; operator?: boolean };
+type PloegRequestOptions = { added?: boolean; actor?: string; body?: unknown; raw?: Uint8Array; versions?: unknown[]; context?: boolean; comment?: boolean; ask?: boolean; chat?: boolean; requeue?: boolean; takeOver?: boolean; actingUser?: string; admission?: boolean; claim?: boolean; note?: string; questionAnswer?: string; cancel?: string; method?: 'PUT' | 'DELETE'; answer?: { status: number }; contractProbe?: boolean; operator?: boolean; slow?: boolean };
 type PloegRequest = (path: string, fresh: boolean, options?: PloegRequestOptions) => Promise<unknown>;
 
 /** Ploeg's operator API as a Ploeg adapter (Unfold ADR 0063): each operation is one request, read against the contract. */
@@ -1305,7 +1305,7 @@ export class PloegClient {
     if (!post && !fresh && cached && cached.until > Date.now()) return structuredClone(cached.value);
     try {
       const headers: Record<string, string> = { accept: 'application/json', authorization: `Bearer ${token}`, ...(post ? { 'X-Ploeg-Actor': options.actor!, 'X-Ploeg-Acting-User': options.actingUser ?? options.actor!, ...ploegAttribution() } : {}), ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(options.raw !== undefined ? { 'content-type': 'application/octet-stream' } : {}) };
-      const send = (extra: Record<string, string>) => fetch(`${this.config!.url}/api/v1/operator/${path}`, { method: options.method ?? (post ? 'POST' : 'GET'), headers: { ...headers, ...extra }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), ...(options.raw !== undefined ? { body: new Uint8Array(options.raw) } : {}), signal: AbortSignal.timeout(options.raw !== undefined ? 60_000 : options.comment ? 45_000 : 5000), redirect: 'manual' });
+      const send = (extra: Record<string, string>) => fetch(`${this.config!.url}/api/v1/operator/${path}`, { method: options.method ?? (post ? 'POST' : 'GET'), headers: { ...headers, ...extra }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), ...(options.raw !== undefined ? { body: new Uint8Array(options.raw) } : {}), signal: AbortSignal.timeout(options.raw !== undefined ? 60_000 : options.comment || options.slow ? 45_000 : 5000), redirect: 'manual' });
       const response = post && this.proof ? await this.proof.send(options.actor!, options.actingUser, send) : await send({});
       if (post) this.cache.clear();
       logPloegWarning(response, path.split('?')[0]);
@@ -1720,13 +1720,15 @@ export class PloegClient {
    * Sends one operator call of an onboarding step (Ploeg ADR-0186, ADR-0195) and returns Ploeg's answer as it came,
    * or throws a {@link PloegOperatorRefusal} with Ploeg's own code and detail. A change carries the person's proof; a read is
    * never served from the cache. The caller admits the step first, so nothing reaches a Ploeg that does not serve it.
+   * A `slow` call, such as completing a connection flow while Ploeg exchanges a code and probes the vendor, waits 45
+   * seconds instead of 5.
    */
-  async operatorCall(user: User, path: string, options: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown } = {}): Promise<Record<string, unknown> | null> {
+  async operatorCall(user: User, path: string, options: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; slow?: boolean } = {}): Promise<Record<string, unknown> | null> {
     this.connected(user);
     if (this.demo) throw new PloegError(409, 'ploeg_demo', 'The demo connects nothing: it holds no tracker connection and sends Ploeg nothing.');
     const change = options.method !== undefined && options.method !== 'GET';
     const method = options.method === 'PUT' || options.method === 'DELETE' ? options.method : undefined;
-    return await this.request(path, true, { operator: true, ...(change ? { actor: user.id } : {}), ...(method ? { method } : {}), ...(options.body !== undefined ? { body: options.body } : change ? { body: {} } : {}) }) as Record<string, unknown> | null;
+    return await this.request(path, true, { operator: true, ...(options.slow ? { slow: true } : {}), ...(change ? { actor: user.id } : {}), ...(method ? { method } : {}), ...(options.body !== undefined ? { body: options.body } : change ? { body: {} } : {}) }) as Record<string, unknown> | null;
   }
 
   private async refusals(user: User, fresh: boolean): Promise<PloegRefusal[]> {

@@ -22,7 +22,7 @@ export function pinnedRelease(url = new URL('../ploeg-release.json', import.meta
 export const optInRefusals = {
   registration_not_accepted: { id: 'install-registration', title: 'Ploeg accepts repositories from the screen', value: 'targetRegistration.enabled: true, with targetRegistration.connections naming the GitHub connection and targetRegistration.requireClaims' },
   bindings_not_accepted: { id: 'install-bindings', title: 'The Team accepts Lists from the screen', value: 'teams.<team>.trackerBindings.connections naming the ClickUp connection, and trackerBindings.max' },
-  permission_required: { id: 'install-consumer', title: 'Unfold may connect, register and bind', value: 'the unfold entry in consumers[] with execute, bindScopes: true, registerTargets: true, manageConnections: true with Unfold’s callback in connectionRedirectUris, and the Team in its teams' },
+  permission_required: { id: 'install-consumer', title: 'Unfold may connect, register and bind', value: 'the unfold entry in consumers[] with execute, bindScopes: true, registerTargets: true, manageConnections: true with Unfold’s callback in connectionRedirectUris, readTrackers naming the ClickUp connection (or ["*"]), and the Team in its teams' },
   connections_not_accepted: { id: 'install-connections', title: 'Ploeg accepts connections from the screen', value: 'connections.enabled: true with an allow entry for clickup and its methods (token, or oauth with the instance’s ClickUp OAuth application), connections.requireClaims, and a SecretStore' },
   person_claim_required: { id: 'install-claims', title: 'Your sign-in carries the claims Ploeg asks for', value: 'the claims targetRegistration.requireClaims names, issued to the Admin by the identity provider' },
 } as const;

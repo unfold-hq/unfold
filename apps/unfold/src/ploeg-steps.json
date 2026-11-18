@@ -31,7 +31,7 @@
     {
       "id": "read-scopes",
       "stage": 5,
-      "record": "Ploeg's tracker Scope read (design.md section 4, ask 6)",
+      "record": "Ploeg ADR-0196",
       "read": null,
       "release": null
     },
