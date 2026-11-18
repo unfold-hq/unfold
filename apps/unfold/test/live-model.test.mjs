@@ -163,3 +163,17 @@ test('a transcript the demo or Ploeg cannot give says why, instead of asking to 
   assert.equal(liveModel({ ...input, transcriptMissing: 'demo' }).transcriptMissing, null, 'a loaded transcript wins');
   assert.equal(liveModel({ ...scenarios.landed.input(), transcriptKnown: false }).transcriptMissing, null, 'nothing loads when no Run works');
 });
+
+test('a stuck Run without a failure reason reads as stuck, never as a worker that stopped responding', () => {
+  const stuckOnly = input => { input.detail.item.state = 'needs_human'; input.detail.runs = input.detail.runs.filter(run => run.id === '6').map(run => ({ ...run, failureReason: null })); return input; };
+  const live = model('running', stuckOnly);
+  const [run] = live.runs;
+  assert.deepEqual([run.status, run.failure, run.machine], ['stuck', null, false]);
+  assert.deepEqual([live.lost.runs, live.lost.agentFailures, live.time.lost], [0, 0, 0], 'Ploeg reported no failure, so nothing is lost to infrastructure');
+  assert.deepEqual(liveSentence(live), { head: 'Stopped. It needs you.', sub: 'Ploeg stopped and asks a person to decide.', tone: 'attention' });
+  assert.deepEqual(flightLegs(live).filter(leg => leg.kind === 'attempt').flatMap(leg => leg.hops.map(hop => hop.end)), ['stuck']);
+  const reported = model('running', input => { input.detail.runs = input.detail.runs.filter(run => run.id === '6'); return input; });
+  assert.deepEqual([reported.runs[0].status, reported.runs[0].failure.key, reported.runs[0].machine, reported.lost.runs], ['stuck', 'lease_lost', true, 1], 'a failure reason Ploeg did report still counts as infrastructure');
+  const lostLease = model('running', input => { input.detail.runs = input.detail.runs.filter(run => run.id === '6').map(run => ({ ...run, outcome: 'failed' })); return input; });
+  assert.deepEqual([lostLease.runs[0].status, lostLease.runs[0].machine], ['failed', true], 'a lost lease is a failed Run, not a stuck one');
+});

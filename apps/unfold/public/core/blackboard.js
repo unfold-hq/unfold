@@ -50,10 +50,11 @@ export function detailQuestions(detail) {
  * The question a stopped Work Item waits on a person for, or null. In order: the newest question to a person that
  * Ploeg marks `waitingForPerson` (it has an `id` to answer); the close message of a `question_for_person` Shift when
  * the detail lists no questions; and, for an older ploegd, the stuck reason of the Run that stopped the item, because
- * there an agent that needs a person says so. Only a `needs_human` Work Item waits on a question. `reason` is the
+ * there an agent that needs a person says so. A stuck Run whose clone failed (`variant` `clone_failed`) asks nothing,
+ * so its git output is never a question. Only a `needs_human` Work Item waits on a question. `reason` is the
  * detail's `detailReason`.
  * @param {object | null | undefined} detail
- * @param {{ code?: string, headline?: string | null, run?: { id: string, role?: string, round?: number | null, text?: string } | null } | null} reason
+ * @param {{ code?: string, variant?: string | null, headline?: string | null, run?: { id: string, role?: string, round?: number | null, text?: string } | null } | null} reason
  * @returns {{ id: string, text: string, typed: boolean, runId: string, role: string, round: number | null, at: string | null } | null}
  */
 export function waitingQuestion(detail, reason) {
@@ -67,7 +68,7 @@ export function waitingQuestion(detail, reason) {
     const headline = text(reason.headline, 4096);
     return headline ? { id: '', text: headline, typed: true, runId: '', role: '', round: null, at: null } : null;
   }
-  if (reason?.code !== 'run_stuck' || !reason.run?.text) return null;
+  if (reason?.code !== 'run_stuck' || reason.variant === 'clone_failed' || !reason.run?.text) return null;
   return { id: '', text: reason.run.text, typed: false, runId: String(reason.run.id), role: reason.run.role || '', round: Number.isInteger(reason.run.round) ? reason.run.round : null, at: when(reason.run.id) };
 }
 

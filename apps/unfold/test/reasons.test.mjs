@@ -1,7 +1,7 @@
 import './trackers-support.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { approvedToMerge, closeReasonLabel, detailReason, listReason, needsYouBlocks, parseBudgetReason, parseStuckReason, routingWarning, sessionDriven, withdrawnReason } from '../public/core/reasons.js';
+import { approvedToMerge, cloneFailure, closeReasonLabel, detailReason, listReason, needsYouBlocks, parseBudgetReason, parseStuckReason, routingWarning, sessionDriven, withdrawnReason } from '../public/core/reasons.js';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import { waitingGroup } from '../public/core/reasons.js';
 
@@ -386,4 +386,43 @@ test('an approved Work Item whose pull request is still open waits for your merg
   const approved = { item: item('review_approved'), shifts: [], runs: [], events: [{ id: '9', action: 'work_item.needs_human', detail: { reason: 'the reviewer approved; a person is asked to merge' } }] };
   assert.equal(detailReason(approved).chip, 'Approved: merge it', 'the Work Item page reads Ploeg\'s own words');
   assert.equal(detailReason(approved).headline, null);
+});
+
+const cloneOutput = 'Cloning into \'/mnt/ci-shared/work/28\'...\nfatal: unable to access \'https://forge.test/acme/unfold.git/\': Resolving timed out after 300003 milliseconds';
+const cloneDetail = (stuckReason, { summary = 'git clone failed', headline = 'shift stopped: builder reported stuck in round 1 — git clone failed' } = {}) => ({
+  item: item('run stuck: builder round 1'),
+  shifts: [shift('run stuck: builder round 1')],
+  runs: [{ id: '51', shiftId: '9', role: 'builder', round: 1, writes: true, state: 'finished', outcome: 'stuck', stuckReason, summary, failureReason: null }],
+  events: headline ? [{ id: '3', action: 'work_item.needs_human', detail: { reason: headline } }] : [],
+});
+
+test('a clone failure is told from Ploeg’s own words only, and its cause from the git output', () => {
+  assert.equal(cloneFailure({ stuckReason: cloneOutput, summary: 'git clone failed' }), 'unreachable');
+  assert.equal(cloneFailure({ stuckReason: cloneOutput, summary: '' }), 'unreachable', 'git’s own Cloning into … fatal: output is enough');
+  assert.equal(cloneFailure({ stuckReason: 'fatal: unable to access …: Could not resolve host: forge.test', summary: '' }, 'shift stopped: builder reported stuck in round 1 — git clone failed'), 'unreachable', 'Ploeg’s sentence is enough when the output tail lost its first line');
+  for (const words of ['Failed to connect to forge.test port 443: Connection refused', 'Connection timed out after 300001 milliseconds']) assert.equal(cloneFailure({ stuckReason: `fatal: unable to access: ${words}`, summary: 'git clone failed' }), 'unreachable', words);
+  for (const words of ['fatal: Authentication failed for \'https://forge.test/acme/unfold.git/\'', 'fatal: could not read Username for \'https://forge.test\': terminal prompts disabled', 'remote: Repository not found.', 'fatal: unable to access: The requested URL returned error: 403']) assert.equal(cloneFailure({ stuckReason: words, summary: 'git clone failed' }), 'access', words);
+  assert.equal(cloneFailure({ stuckReason: 'fatal: destination path already exists and is not an empty directory.', summary: 'git clone failed' }), 'unknown');
+  assert.equal(cloneFailure({ stuckReason: '', summary: 'git clone failed' }), 'unknown');
+  assert.equal(cloneFailure({ stuckReason: 'I tried to vendor the submodule but git clone failed with Could not resolve host. Should I skip it?', summary: 'The submodule cannot be fetched.' }, 'shift stopped: builder reported stuck in round 1 — The submodule cannot be fetched.'), null, 'an agent’s own prose about a clone stays a question');
+  assert.equal(cloneFailure({ stuckReason: 'The acceptance criteria contradict each other.', summary: '' }), null);
+  assert.equal(cloneFailure(null), null);
+});
+
+test('a stuck Run whose clone failed says the Work Item is not at fault, names the cause and keeps the list’s chip', () => {
+  const unreachable = detailReason(cloneDetail(cloneOutput));
+  assert.deepEqual([unreachable.code, unreachable.chip, unreachable.variant], ['run_stuck', 'Agent is stuck', 'clone_failed']);
+  assert.equal(unreachable.sentence, 'Not the Work Item’s fault: the cluster could not reach the repository’s host, so the builder’s Run stopped in Round 1 before any agent work was tried. It asks you nothing, and an answer cannot fix it.');
+  assert.equal(unreachable.fix, 'Check DNS and the network from the cluster to the repository’s host, not the ticket.');
+  assert.equal(unreachable.action, `${unreachable.fix} Then assign the task to the Team again in Vikunja.`);
+  assert.equal(unreachable.run.text, cloneOutput, 'the git output stays the Run’s own words');
+  assert.equal(unreachable.headline, null, 'Ploeg’s sentence only repeats the cause');
+  const access = detailReason(cloneDetail('remote: Repository not found.\nfatal: repository \'https://forge.test/acme/unfold.git/\' not found'));
+  assert.equal(access.sentence, 'Not the Work Item’s fault: the forge refused the bot’s access to the repository, so the builder’s Run stopped in Round 1 before any agent work was tried. It asks you nothing, and an answer cannot fix it.');
+  assert.equal(access.fix, 'Give the bot user read access to the repository and check the Secret reference for its token, not the ticket.');
+  const other = detailReason(cloneDetail('fatal: early EOF'));
+  assert.equal(other.sentence, 'Not the Work Item’s fault: the repository could not be cloned, so the builder’s Run stopped in Round 1 before any agent work was tried. It asks you nothing, and an answer cannot fix it.');
+  assert.equal(other.fix, 'Read the git output on that Run and fix what stopped the clone, not the ticket.');
+  const asked = detailReason(cloneDetail('Should the export include archived rows?', { summary: 'Needs a decision on archived rows.', headline: 'shift stopped: builder reported stuck in round 1 — Needs a decision on archived rows.' }));
+  assert.deepEqual([asked.variant, asked.sentence], [null, 'The builder reported that it cannot finish in Round 1 without a person.']);
 });

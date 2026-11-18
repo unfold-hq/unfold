@@ -38,15 +38,15 @@ function runStatus(run) {
   if (run.state === 'pending') return 'pending';
   if (run.state === 'running') return 'running';
   if (run.outcome === 'cancelled' || (!run.startedAt && !run.outcome && !run.failureReason)) return 'cancelled';
-  if (run.outcome === 'stuck' || run.failureReason === 'lease_lost') return 'stuck';
+  if (run.outcome === 'stuck') return 'stuck';
   if (run.outcome === 'failed' || run.failureReason) return 'failed';
   return 'done';
 }
 
 function runFailure(run) {
-  if (!run.failureReason && run.outcome !== 'stuck') return null;
-  const meta = failureReason(run.failureReason ?? 'lease_lost');
-  return { key: run.failureReason ?? 'lease_lost', label: meta?.label ?? 'The Run failed', infra: meta?.infra === true };
+  if (!run.failureReason) return null;
+  const meta = failureReason(run.failureReason);
+  return { key: run.failureReason, label: meta?.label ?? 'The Run failed', infra: meta?.infra === true };
 }
 
 function runSeconds(run, now) {

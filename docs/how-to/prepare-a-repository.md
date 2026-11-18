@@ -112,7 +112,8 @@ Assign a small test ticket. Expect `target resolved` with your repository in the
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| Run `stuck`: `git clone failed` | Bot has no read access, or the token is wrong | Grant access; check the Secret reference |
+| Run `stuck`: `git clone failed`, git output names authentication, a 403 or a repository that was not found | Bot has no read access, or the token is wrong | Grant access; check the Secret reference |
+| Run `stuck`: `git clone failed`, git output says it could not resolve or reach the host, or timed out | The cluster cannot reach the repository's host | Check DNS and the network from the cluster, not the ticket |
 | Push rejected | Bot lacks write access, or protection covers `agent/*` | Allow the bot on `agent/*` |
 | Outcome is not `pr_opened` although a pull request exists | The pull request's head is not Ploeg's branch name | Keep Ploeg's branch name |
 | Agent skipped the checks | No Docker (`dind: false`) or no verify command in `AGENTS.md` | Enable DinD or add the tools to the image; document the command |

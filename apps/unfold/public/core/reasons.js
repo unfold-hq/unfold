@@ -461,6 +461,53 @@ function ciCancelled(headline) {
   return { sentence, fix };
 }
 
+const cloneSummary = /^\s*git clone failed\.?\s*$/i;
+const cloneHeadline = /— git clone failed\.?\s*$/i;
+const cloneOutput = /^\s*(?:git clone failed\b|Cloning into '[^\n]*\n(?:[^\n]*\n)*?fatal: )/i;
+const forgeUnreachable = /could not resolve host|resolving timed out|connection timed out|connection refused|failed to connect to|network is unreachable/i;
+const forgeRefused = /authentication failed|could not read username|repository not found|returned error: 40[13]\b/i;
+
+/**
+ * Whether a stuck Run stopped because its workspace could not clone the repository, and why, from Ploeg's free text.
+ * It answers only for Ploeg's own words: a Run summary that is exactly "git clone failed", a needs-human sentence that
+ * ends with it, or a stuck reason that starts with it or with git's "Cloning into" followed by a `fatal:` line. An
+ * agent's own prose that mentions a clone returns null. `unreachable` means the cluster could not reach the
+ * repository's host, `access` that the forge refused the bot, `unknown` every other clone failure.
+ * @param {{ stuckReason?: string | null, summary?: string | null } | null | undefined} run the stuck Run
+ * @param {string | null | undefined} [headline] Ploeg's needs-human sentence
+ * @returns {'unreachable' | 'access' | 'unknown' | null}
+ */
+export function cloneFailure(run, headline = '') {
+  const said = String(run?.stuckReason ?? '');
+  const summarised = cloneSummary.test(String(run?.summary ?? ''));
+  if (!summarised && !cloneHeadline.test(String(headline ?? '')) && !cloneOutput.test(said)) return null;
+  if (forgeUnreachable.test(said)) return 'unreachable';
+  if (forgeRefused.test(said)) return 'access';
+  return 'unknown';
+}
+
+const cloneCauses = {
+  unreachable: {
+    cause: 'the cluster could not reach the repository’s host',
+    fix: 'Check DNS and the network from the cluster to the repository’s host, not the ticket.',
+  },
+  access: {
+    cause: 'the forge refused the bot’s access to the repository',
+    fix: 'Give the bot user read access to the repository and check the Secret reference for its token, not the ticket.',
+  },
+  unknown: {
+    cause: 'the repository could not be cloned',
+    fix: 'Read the git output on that Run and fix what stopped the clone, not the ticket.',
+  },
+};
+
+function cloneFailed(kind, run) {
+  const { cause, fix } = cloneCauses[kind];
+  const who = run?.role ? `the ${run.role}’s Run` : 'the Run';
+  const sentence = `Not the Work Item’s fault: ${cause}, so ${who} stopped${run?.round ? ` in Round ${run.round}` : ''} before any agent work was tried. It asks you nothing, and an answer cannot fix it.`;
+  return { sentence, fix };
+}
+
 const budgetCodes = new Set(['budget_exhausted', 'budget_exhausted_before_fix_round', 'budget_held']);
 
 function heldDetail(detail, shift, reason) {
@@ -481,12 +528,14 @@ function heldDetail(detail, shift, reason) {
  * The detail-level reason: the list reason, with the same `code` and `chip` as every list shows, refined with what the
  * detail shows. It carries Ploeg's own sentence from the latest `work_item.needs_human` event as a quote (`headline`,
  * null when absent; always null for `plan_exhausted`, whose Ploeg sentence reads as if the work were ready to
- * merge, and for the budget reasons, whose Ploeg sentence only repeats Unfold's) and, for stuck or failing Runs, the matching Run (`run`: its id, Role, Round, `text` from its stuck reason or
+ * merge, and for the budget reasons and a failed clone, whose Ploeg sentence only repeats Unfold's) and, for stuck or failing Runs, the matching Run (`run`: its id, Role, Round, `text` from its stuck reason or
  * summary, and its failure reason meta). For `plan_exhausted` it tells the two causes apart with `variant`
  * (`no_pull_request`: no writer reported one; `changes_unresolved`: the last reviewer asked for changes), which
  * changes the sentence and the fix but not the chip. For `budget_held` it names the failure that came first and
  * whether Ploeg has released the hold since, and points the fix at that failure instead of the budget. For `ci_not_passed`
- * whose every named check was cancelled it sets `variant` `ci_cancelled` and points the fix at re-running CI. Returns null
+ * whose every named check was cancelled it sets `variant` `ci_cancelled` and points the fix at re-running CI. For `run_stuck`
+ * whose Run could not clone the repository (`cloneFailure`) it sets `variant` `clone_failed`: the sentence says the Work Item
+ * is not at fault and no agent work was tried, and the fix points at the network or the bot's access. Returns null
  * unless the item is `needs_human` or `stale`.
  */
 export function detailReason(detail) {
@@ -525,6 +574,13 @@ export function detailReason(detail) {
   if (cancelled) {
     variant = 'ci_cancelled';
     reason = { ...reason, ...cancelled, action: `${cancelled.fix} ${reason.requeue}` };
+  }
+  const clone = reason.code === 'run_stuck' ? cloneFailure(run, headline) : null;
+  if (clone) {
+    variant = 'clone_failed';
+    headline = null;
+    const refined = cloneFailed(clone, run);
+    reason = { ...reason, ...refined, action: `${refined.fix} ${reason.requeue}` };
   }
   if (reason.code === 'plan_exhausted') {
     headline = null;

@@ -650,7 +650,8 @@ function evidenceBody(run, reason) {
   const raw = !split.output && logLike.test(split.reason);
   const said = raw ? '' : split.reason;
   const printed = split.output || (raw ? split.reason : '');
-  return `${said ? `<p class="work-evidence-text">${escape(said)}</p>` : ''}${printed ? ui.disclosure({ summary: split.outputLabel || 'What the agent printed', body: `<p class="work-log">${escape(printed)}</p>`, plain: true }) : ''}`;
+  const clone = reason.variant === 'clone_failed';
+  return `${said ? `<p class="work-evidence-text">${escape(said)}</p>` : ''}${printed ? ui.disclosure({ summary: split.outputLabel || (clone ? 'What git printed' : 'What the agent printed'), body: `<p class="work-log">${escape(printed)}</p>`, plain: true, open: clone }) : ''}`;
 }
 
 function evidenceLine(run, reason) {
@@ -709,7 +710,7 @@ export function decisionPlan(detail, model, reason) {
   };
   const question = model.canWrite ? waitingQuestion(detail, reason) : null;
   if (question) primary = { kind: 'answer', html: ui.button({ label: 'Answer', icon: 'send', variant: 'primary', action: 'work-answer-open' }) };
-  const prKind = reason.variant === 'changes_unresolved' || (reason.code === 'plan_exhausted' && !reason.variant && pr) ? 'pr' : reasonLinks[reason.code];
+  const prKind = reason.variant === 'changes_unresolved' || (reason.code === 'plan_exhausted' && !reason.variant && pr) ? 'pr' : reason.variant === 'clone_failed' ? undefined : reasonLinks[reason.code];
   const main = { text: escape(reason.fix), actions: [] };
   const requeue = { text: escape(reason.requeue), actions: [] };
   const entries = [];

@@ -901,3 +901,26 @@ test('the Needs you lane says Now also counts the tasks Ploeg could not start, a
   assert.doesNotMatch(workMarkup(model({ data, lane: 'queued', refused: 2 })), /work-list-note/, 'only the Needs you lane explains the gap');
   assert.match(workMarkup(model({ data, lane: 'stale' })), /data-action="ploeg-lane" data-id="stale"[^>]*>[^]*?Stopped retrying/);
 });
+
+test('a stuck Run whose clone failed is shown as a cause to fix, never as a question to answer', () => {
+  const gitOutput = 'Cloning into \'/mnt/ci-shared/work/111\'...\nfatal: unable to access \'https://forge.test/acme/unfold.git/\': Resolving timed out after 300003 milliseconds';
+  const detail = { ...demoDetail('111'), demo: false };
+  Object.assign(detail.runs.find(run => run.id === '28'), { summary: 'git clone failed', stuckReason: gitOutput });
+  for (const event of detail.events) if (event.action === 'work_item.needs_human') event.detail = { ...event.detail, reason: 'shift stopped: builder reported stuck in round 2 — git clone failed' };
+  const reason = detailReason(detail);
+  assert.equal(reason.variant, 'clone_failed');
+  const html = detailMarkup(detail, model({ detailId: '111', canWrite: true }));
+  const box = html.slice(html.indexOf('id="work-decision"'), html.indexOf('</section>', html.indexOf('id="work-decision"')));
+  assert.match(box, /Not the Work Item’s fault: the cluster could not reach the repository’s host, so the builder’s Run stopped in Round 2 before any agent work was tried\./);
+  assert.match(box, /Check DNS and the network from the cluster to the repository’s host, not the ticket\./);
+  assert.match(box, /Then assign the task to the Team again in/);
+  assert.doesNotMatch(html, /data-action="work-answer-open"/, 'answering cannot fix a clone, so no Answer is offered anywhere on the page');
+  assert.doesNotMatch(html, /needs from you|class="work-question"|cannot finish in Round 2 without a person|Or answer in/);
+  assert.match(box, /<details class="disclosure plain" open><summary><span class="disclosure-summary">What git printed<\/span>[^]*Resolving timed out after 300003 milliseconds/, 'the git output is the Run’s evidence, open and labelled as git’s');
+  assert.match(box, /data-action="work-run" data-id="28"[^>]*>Show this Run/);
+  assert.doesNotMatch(box, /shift stopped: builder reported stuck/, 'Ploeg’s sentence only repeats the cause, so it is left out');
+  const plan = decisionPlan(detail, model({ detailId: '111', canWrite: true }), reason);
+  assert.equal(plan.entries.length, 2);
+  assert.deepEqual(plan.entries[0].actions, [], 'the cause is fixed in the cluster, so its step links nowhere');
+  assert.doesNotMatch(plan.primary, /work-answer-open/);
+});
