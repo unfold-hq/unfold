@@ -236,7 +236,7 @@ export function formatWork(core: Core, detail: PloegDetail, card: RunCard | unde
   const said = (detail.events ?? []).find(entry => entry.action === `work_item.${item.state}` && typeof entry.detail?.reason === 'string');
   if (said) blocks.push(`Ploeg's record says: ${quote(said.detail.reason, 500)}`);
   if (reason?.headline) blocks.push(fence("Ploeg's headline", reason.headline, 600));
-  if (reason?.run?.text) blocks.push(fence(`What the ${reason.run.role} said in Round ${reason.run.round}`, reason.run.text, 800));
+  if (reason?.run?.text) blocks.push(fence(reason.variant === 'clone_failed' ? `What git printed for the ${reason.run.role} in Round ${reason.run.round}` : `What the ${reason.run.role} said in Round ${reason.run.round}`, reason.run.text, 800));
 
   const { play, url } = pullRequest(detail, card);
   const reviewer = (detail.runs ?? []).find(run => /review/i.test(run.role) && run.verdict);

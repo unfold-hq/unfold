@@ -199,3 +199,12 @@ test('when Ploeg offers to resume, answering every question of the Round resumes
   assert.match(page, /One more question from the same Round[^]*Answer all/);
   assert.match(page, /can resume Round 3 on the same branch: this Round up to US\$\s0,40, in total up to US\$\s2,25/);
 });
+
+test('the git output of a failed clone is never the question a Work Item waits on', () => {
+  const stuck = demoDetail('111');
+  Object.assign(stuck.runs.find(run => run.id === '28'), { summary: 'git clone failed', stuckReason: 'Cloning into \'/work\'...\nfatal: unable to access \'https://forge.test/acme/unfold.git/\': Could not resolve host: forge.test' });
+  const reason = detailReason(stuck);
+  assert.equal(reason.variant, 'clone_failed');
+  assert.equal(waitingQuestion(stuck, reason), null);
+  assert.equal(waitingQuestion(stuck, { ...reason, variant: null })?.typed, false, 'only the clone variant drops the stand-in question');
+});
