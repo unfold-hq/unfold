@@ -6,6 +6,7 @@ import { trackerDisplay } from './tracker-display.ts';
 import { Onboarding, pinnedRelease, ploegSteps } from './onboarding.ts';
 import { GithubConnections, invalidStatePage, manifestPage } from './forge-connections.ts';
 import { ClickUpOnboarding } from './clickup-onboarding.ts';
+import { ClaudeRoutines } from './claude-routines.ts';
 import { clickUpRoute, isClickUpRoute } from './clickup-onboarding-http.ts';
 import { HttpPloegConnectionApi } from './ploeg-connection-api.ts';
 import { ReadinessPrepare } from './readiness-prepare.ts';
@@ -376,7 +377,8 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
     baseUrl: config.baseUrl, pinned: pinnedRelease(), plan: ploegSteps,
   });
-  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...github.lines(manage, context) }));
+  const claudeRoutines = new ClaudeRoutines({ ploeg, steps: onboarding, store });
+  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...github.lines(manage, context), 'connect-claude': claudeRoutines.line(context.user) }));
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
@@ -818,6 +820,16 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           if (outcome.repository) { await storedRepositories(); trackerConnections.sync(); }
           return json(res, outcome.repository ? 201 : 200, sanitize(outcome));
         }
+        if (path === '/api/claude-routines') {
+          if (method === 'GET') return json(res, 200, sanitize(await claudeRoutines.overview(user)));
+          fault(405, 'method', 'Read your Claude routines with GET.');
+        }
+        const claudeRoutine = path.match(/^\/api\/claude-routines\/([A-Za-z0-9][A-Za-z0-9_.-]{0,127})$/);
+        if (claudeRoutine) {
+          if (method === 'PUT') return json(res, 200, sanitize(await claudeRoutines.connect(user, claudeRoutine[1], await body(req))));
+          if (method === 'DELETE') return json(res, 200, sanitize(await claudeRoutines.remove(user, claudeRoutine[1])));
+          fault(405, 'method', 'Connect your Claude routine for a Team with PUT, or remove it with DELETE.');
+        }
         if (method === 'GET' && path === '/api/onboarding') { await storedRepositories(); return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1'))); }
         if (method === 'GET' && path === '/api/bootstrap') return json(res, 200, sanitize({
           user, mode: config.mode, version: applicationVersion, onboarding: onboarding.landing(user), sharedExecution: Boolean(config.execution), agentHost: Boolean(agentHost), deliveryRepositories: config.delivery?.policies.map(policy => policy.repositoryId) ?? [], deliveryPublisher: Boolean(config.delivery?.publisher), gateway: config.litellm ? new URL(config.litellm.baseUrl).host : undefined,
@@ -1219,6 +1231,16 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           const health = /^\/api\/ploeg\/work-items\/([^/]+)\/runs\/([^/]+)\/health$/.exec(path);
           const wrong = /^\/api\/ploeg\/work-items\/([^/]+)\/runs\/([^/]+)\/health\/judgements\/([A-Za-z0-9-]{1,64})\/wrong$/.exec(path);
           const tripwireRead = /^\/api\/ploeg\/work-items\/([^/]+)\/tripwire$/.exec(path);
+          const fireRoutine = /^\/api\/ploeg\/work-items\/([^/]+)\/fire-routine$/.exec(path);
+          if (fireRoutine) {
+            try {
+              if (method !== 'POST') fault(405, 'method', 'Start a Work Item with your Claude routine with POST.');
+              return json(res, 200, sanitize(await claudeRoutines.fire(user, fireRoutine[1])));
+            } catch (error) {
+              if (error instanceof PloegError) return json(res, error.status, { error: { code: error.code, message: error.message } });
+              throw error;
+            }
+          }
           const tripwireVerdict = /^\/api\/ploeg\/work-items\/([^/]+)\/tripwire\/([A-Za-z0-9_-]{1,160})\/verdict$/.exec(path);
           if (tripwireRead || tripwireVerdict) {
             try {

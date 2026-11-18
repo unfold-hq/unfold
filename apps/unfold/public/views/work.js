@@ -37,9 +37,9 @@ const transcriptInterval = 4000;
 const healthInterval = 30_000;
 const transcriptPages = 10;
 const transcriptPanel = /^work-run-transcript-([1-9][0-9]{0,19})$/;
-const work = { writeBusy: false, team: '', teams: [], loadedTeam: null, listRequest: 0, detailRequest: 0, detailId: null, pendingRun: null, runNotice: '', loadingMore: false, refreshing: false, cancelBusy: false, cancelResult: null, briefOpen: new Set(), sessionsLoaded: false, listScroll: 0, registered: false, reviewFacts: new Map(), reviewPending: new Set(), stickyObserver: null, savedTeam: false, pickLane: null, card: null, cardRequest: 0, stream: null, streamRequest: 0, streamZoom: 'all', tracksRange: null, trace: null, traceRequest: 0, traceBusy: false, traceResult: null, context: null, contextRequest: 0, contextBusy: false, contextResult: null, asks: null, askRequest: 0, linked: null, linkedRequest: 0, actions: null, actionsRequest: 0, askBusy: false, askDraft: '', logs: null, transcripts: null, health: null, tab: null, intent: null, attaching: null, sessionFailed: null, tripwire: null, landing: null, takeOverBusy: false, takeOverResult: null };
+const work = { writeBusy: false, team: '', teams: [], loadedTeam: null, listRequest: 0, detailRequest: 0, detailId: null, pendingRun: null, runNotice: '', loadingMore: false, refreshing: false, cancelBusy: false, cancelResult: null, briefOpen: new Set(), sessionsLoaded: false, listScroll: 0, registered: false, reviewFacts: new Map(), reviewPending: new Set(), stickyObserver: null, savedTeam: false, pickLane: null, card: null, cardRequest: 0, stream: null, streamRequest: 0, streamZoom: 'all', tracksRange: null, trace: null, traceRequest: 0, traceBusy: false, traceResult: null, context: null, contextRequest: 0, contextBusy: false, contextResult: null, asks: null, askRequest: 0, linked: null, linkedRequest: 0, actions: null, actionsRequest: 0, askBusy: false, askDraft: '', logs: null, transcripts: null, health: null, tab: null, intent: null, attaching: null, sessionFailed: null, tripwire: null, landing: null, takeOverBusy: false, takeOverResult: null, routines: undefined, routinesRequest: 0, routineBusy: false, routineFire: null };
 
-onForget(() => Object.assign(work, { writeBusy: false, team: '', teams: [], loadedTeam: null, listRequest: work.listRequest + 1, detailRequest: work.detailRequest + 1, detailId: null, pendingRun: null, runNotice: '', loadingMore: false, refreshing: false, cancelBusy: false, cancelResult: null, briefOpen: new Set(), sessionsLoaded: false, listScroll: 0, reviewFacts: new Map(), reviewPending: new Set(), pickLane: null, card: null, cardRequest: work.cardRequest + 1, stream: null, streamRequest: work.streamRequest + 1, streamZoom: 'all', tracksRange: null, trace: null, traceRequest: work.traceRequest + 1, traceBusy: false, traceResult: null, context: null, contextRequest: work.contextRequest + 1, contextBusy: false, contextResult: null, asks: null, askRequest: work.askRequest + 1, linked: null, linkedRequest: work.linkedRequest + 1, askBusy: false, askDraft: '', logs: null, transcripts: null, health: null, tab: null, intent: null, attaching: null, sessionFailed: null, tripwire: null, landing: null, takeOverBusy: false, takeOverResult: null }));
+onForget(() => Object.assign(work, { writeBusy: false, team: '', teams: [], loadedTeam: null, listRequest: work.listRequest + 1, detailRequest: work.detailRequest + 1, detailId: null, pendingRun: null, runNotice: '', loadingMore: false, refreshing: false, cancelBusy: false, cancelResult: null, briefOpen: new Set(), sessionsLoaded: false, listScroll: 0, reviewFacts: new Map(), reviewPending: new Set(), pickLane: null, card: null, cardRequest: work.cardRequest + 1, stream: null, streamRequest: work.streamRequest + 1, streamZoom: 'all', tracksRange: null, trace: null, traceRequest: work.traceRequest + 1, traceBusy: false, traceResult: null, context: null, contextRequest: work.contextRequest + 1, contextBusy: false, contextResult: null, asks: null, askRequest: work.askRequest + 1, linked: null, linkedRequest: work.linkedRequest + 1, askBusy: false, askDraft: '', logs: null, transcripts: null, health: null, tab: null, intent: null, attaching: null, sessionFailed: null, tripwire: null, landing: null, takeOverBusy: false, takeOverResult: null, routines: undefined, routinesRequest: work.routinesRequest + 1, routineBusy: false, routineFire: null }));
 
 const laneOfState = { needs_human: 'needs_human', stale: 'stale', awaiting_review: 'awaiting_review', leased: 'leased', queued: 'queued', done: 'closed', withdrawn: 'closed' };
 const laneFor = item => laneOfState[item?.state] || 'open';
@@ -122,6 +122,9 @@ function model() {
     userRole: state.bootstrap?.user?.role,
     takeOverBusy: work.takeOverBusy,
     takeOverResult: work.takeOverResult?.id === work.detailId ? work.takeOverResult : null,
+    claudeRoutines: work.routines ?? null,
+    routineBusy: work.routineBusy,
+    routineFire: work.routineFire?.id === work.detailId ? work.routineFire : null,
   };
 }
 
@@ -419,6 +422,35 @@ async function loadLinked(id) {
   if (visible() && !state.ploegDetailLoading) renderWork();
 }
 
+async function loadRoutines() {
+  const request = ++work.routinesRequest;
+  let teams = null;
+  try {
+    const answer = await api('/api/claude-routines');
+    if (answer.served === true && !answer.refused) teams = answer.teams.filter(entry => entry.routine).map(entry => entry.team);
+  } catch { teams = null; }
+  if (request !== work.routinesRequest) return;
+  work.routines = teams;
+  if (visible() && !state.ploegDetailLoading) renderWork();
+}
+
+async function fireRoutine(control) {
+  const id = control.dataset.id;
+  if (!id || work.routineBusy) return;
+  work.routineBusy = true; work.routineFire = null; renderWork();
+  try {
+    const fired = await api(`/api/ploeg/work-items/${encodeURIComponent(id)}/fire-routine`, { method: 'POST', body: '{}' });
+    work.routineFire = { id, session: fired.session };
+    announce('Your Claude routine started the Run.');
+    notify('Your Claude routine started the Run.');
+  } catch (error) {
+    if (error.status !== 401) work.routineFire = { id, error: error.message || 'Ploeg did not start the Run.', code: error.code || '' };
+  }
+  work.routineBusy = false;
+  renderWork();
+  if (work.detailId === id) void loadDetail(id, { fresh: true, quiet: true });
+}
+
 if (globalThis.window) window.addEventListener(linkedChangedEvent, event => { if (work.detailId && String(event.detail?.workItem) === String(work.detailId)) void loadLinked(work.detailId); });
 
 async function loadAsks(id) {
@@ -611,6 +643,7 @@ async function loadDetail(id, { fresh = false, quiet = false } = {}) {
     if (signature(detail) !== signature(state.ploegDetail)) changed = true;
     state.ploegDetail = detail;
     state.ploegDetailError = '';
+    if (detail.item.waitingForClient && String(detail.item.waitingForClient.actsFor) === String(state.bootstrap?.user?.id) && work.routines === undefined) void loadRoutines();
     if (work.pickLane === id) { work.pickLane = null; state.ploegLane = laneFor(detail.item); keepFiltersInHash(); changed = true; void loadReviewFacts(); }
     if (detail.item.state === 'awaiting_review') work.reviewFacts.set(id, reviewFacts(detail));
   } catch (error) {
@@ -1509,6 +1542,7 @@ export default {
     'work-answer-open': () => openAnswer(),
     'work-note-open': () => openNote(),
     'work-take-control': () => openTakeControl(),
+    'work-fire-routine': fireRoutine,
     'work-ask-model': askModelAnyway,
     'work-ask-again': askAgain,
     'work-actions-retry': () => { if (work.detailId) { work.actions = null; renderWork(); void loadActions(work.detailId); } },

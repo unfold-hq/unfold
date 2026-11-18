@@ -385,6 +385,56 @@
     {
       "contract": "operator-api",
       "method": "GET",
+      "path": "/api/v1/operator/claude-routines",
+      "response": "claudeRoutinesResponse",
+      "reads": [
+        {"pointer": "/routines", "types": ["array"], "required": true},
+        {"pointer": "/routines/*/team", "types": ["string"], "required": true},
+        {"pointer": "/routines/*/fireUrl", "types": ["string"], "required": true},
+        {"pointer": "/routines/*/creatorPinned", "types": ["boolean"], "required": true},
+        {"pointer": "/routines/*/registeredAt", "types": ["string"], "required": true},
+        {"pointer": "/routines/*/updatedAt", "types": ["string"], "required": true}
+      ]
+    },
+    {
+      "contract": "operator-api",
+      "method": "PUT",
+      "path": "/api/v1/operator/claude-routines/{team}",
+      "request": {"definition": "claudeRoutineRequest", "example": {"fireUrl": "https://api.anthropic.com/v1/claude_code/routines/trig_example/fire", "token": "example-trigger-token"}},
+      "response": "claudeRoutineResponse",
+      "reads": [
+        {"pointer": "/routine", "types": ["object"], "required": true},
+        {"pointer": "/routine/team", "types": ["string"], "required": true},
+        {"pointer": "/routine/fireUrl", "types": ["string"], "required": true}
+      ]
+    },
+    {
+      "contract": "operator-api",
+      "method": "DELETE",
+      "path": "/api/v1/operator/claude-routines/{team}",
+      "response": "claudeRoutineResponse",
+      "reads": [
+        {"pointer": "/routine", "types": ["object"], "required": true}
+      ]
+    },
+    {
+      "contract": "operator-api",
+      "method": "POST",
+      "path": "/api/v1/operator/work-items/{id}/fire-routine",
+      "response": "routineFireResponse",
+      "reads": [
+        {"pointer": "/run/id", "types": ["string"], "required": true},
+        {"pointer": "/run/workItemId", "types": ["string"], "required": true},
+        {"pointer": "/run/team", "types": ["string"], "required": true},
+        {"pointer": "/run/role", "types": ["string"], "required": true},
+        {"pointer": "/run/round", "types": ["integer"], "required": true},
+        {"pointer": "/session/id", "types": ["string"], "required": true},
+        {"pointer": "/session/url", "types": ["string"]}
+      ]
+    },
+    {
+      "contract": "operator-api",
+      "method": "GET",
       "path": "/api/v1/operator/work-items/{id}/context"
     },
     {

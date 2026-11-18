@@ -48,6 +48,13 @@
       "record": "Ploeg ADR-0186",
       "read": "tracker-bindings",
       "release": null
+    },
+    {
+      "id": "connect-claude",
+      "stage": 10,
+      "record": "Ploeg ADR-0197",
+      "read": null,
+      "release": "0.2.0-rc.128"
     }
   ],
   "secondForge": {

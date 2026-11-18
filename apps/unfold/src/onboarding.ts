@@ -7,7 +7,7 @@ import type { AppConfig, InsightEvent, User } from './types.ts';
 
 /** One onboarding step a later slice builds, with the Ploeg read route that tells whether Ploeg serves it and the release that adds it. */
 export type PloegStep = { id: StepId; stage: number; record: string; read: string | null; release: string | null };
-export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'read-scopes' | 'prepare-repository' | 'bind-lists';
+export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'read-scopes' | 'prepare-repository' | 'bind-lists' | 'connect-claude';
 /** `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding checklist that need a Ploeg route, and the release that ships Ploeg ADR-0192 for the second-forge gate. */
 export type PloegSteps = { schemaVersion: 1; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null } };
 
@@ -81,7 +81,7 @@ type PloegReads = {
 export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off' }[]; sources(): number };
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
 /** The line a later slice shows for a step this Ploeg serves, from what Unfold holds; none keeps the step's "Unfold adds its screen" line. */
-export type StepLines = (manage: boolean, context: { otherForges: string[] }) => Partial<Record<StepId, ChecklistLine>>;
+export type StepLines = (manage: boolean, context: { otherForges: string[]; user: User }) => Partial<Record<StepId, ChecklistLine>>;
 type Readiness = { lines(user: User, input: { connections: PloegConnections | null; teams: PloegTeam[] | null; budget: TeamBudget[]; manage: boolean; fresh: boolean }): Promise<ReadinessLines> };
 type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries; stepLines?: StepLines };
 
@@ -187,8 +187,22 @@ export class Onboarding {
    */
   async admit(user: User, id: StepId, team?: string): Promise<void> {
     if (!this.manages(user)) throw new PloegError(403, 'forbidden', 'Only an administrator connects accounts and adds repositories and Lists.');
+    await this.served(user, id);
+    if (capGatedSteps.has(id)) await this.capGate(user, id, team);
+  }
+
+  /**
+   * Admits a step each person takes for themselves, such as connecting their own Claude routine: anyone but a viewer,
+   * with the same `503 ploeg_step_unavailable` refusal as {@link admit} when this Ploeg does not serve the step.
+   */
+  async admitPerson(user: User, id: StepId): Promise<void> {
+    if (user.role === 'viewer') throw new PloegError(403, 'forbidden', 'Viewers cannot connect accounts or start work.');
+    await this.served(user, id);
+  }
+
+  private async served(user: User, id: StepId): Promise<void> {
     const { step, served } = await this.available(user, id, true);
-    if (served === true) return capGatedSteps.has(id) ? this.capGate(user, id, team) : undefined;
+    if (served === true) return;
     if (served === null) throw new PloegError(503, 'ploeg_unavailable', 'Ploeg could not be reached to check this step. Try again in a minute.');
     this.refused(user, step.id, step.release ?? 'unreleased', 'not_served');
     throw new PloegError(503, 'ploeg_step_unavailable', `${unavailableText(step, this.pinned)} Use the configuration entry for this step instead.`);
@@ -278,13 +292,13 @@ export class Onboarding {
     const budget = (teams ?? []).map(entry => budgetOf(entry, state, manage));
     const readiness = served['prepare-repository'] === true && this.readiness && !connections?.demo ? await this.readiness.lines(user, { connections, teams, budget, manage, fresh }).catch(() => null) : null;
     if (readiness) Object.assign(state, this.read());
-    const stages = this.stages({ connections, teams, served, state, manage, storedRepositories, budget, readiness });
+    const stages = this.stages({ user, connections, teams, served, state, manage, storedRepositories, budget, readiness });
     this.track(user, state, stages);
     return { demo: Boolean(connections?.demo), manage, onboarding: Boolean(state.startedAt) && this.empty(), pinnedBundle: this.pinned, stages, installValues: manage ? installValues : [], storedRepositories, connections, reads, fetchedAt: this.now().toISOString(), budget };
   }
 
-  private stages(input: { connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']>; budget: TeamBudget[]; readiness: ReadinessLines | null }): ChecklistLine[] {
-    const { connections, teams, served, state, manage, storedRepositories, budget, readiness } = input;
+  private stages(input: { user: User; connections: PloegConnections | null; teams: PloegTeam[] | null; served: Record<StepId, boolean | null>; state: StepState; manage: boolean; storedRepositories: ReturnType<StoredEntries['repositories']>; budget: TeamBudget[]; readiness: ReadinessLines | null }): ChecklistLine[] {
+    const { user, connections, teams, served, state, manage, storedRepositories, budget, readiness } = input;
     const step = (id: StepId) => this.steps.steps.find(entry => entry.id === id)!;
     const repositories = connections?.repositories ?? [];
     const boards = connections?.boards ?? [];
@@ -294,7 +308,7 @@ export class Onboarding {
     const otherForges = forges.filter(forge => forge !== pair.forge);
     const action = (value: ChecklistAction): ChecklistAction | undefined => manage ? value : undefined;
     const readOnly = manage ? {} : { fix: askAdmin };
-    const own = this.stepLines?.(manage, { otherForges }) ?? {};
+    const own = this.stepLines?.(manage, { otherForges, user }) ?? {};
     const notServed = (id: StepId, title: string, configEntry: string, extra = ''): ChecklistLine => {
       const record = step(id);
       const known = served[id];
@@ -360,6 +374,7 @@ export class Onboarding {
       : notServed('bind-lists', 'Bind Lists', 'Ploeg: trackers.<tracker>.projects with the List, its Team and its repository. Unfold: a taskSources entry with the same List and its ploeg target.', prepared);
     lines.push(prepared && !bind.text.includes(prepared) ? { ...bind, text: `${bind.text}${prepared}` } : bind);
 
+    lines.push(notServed('connect-claude', 'Connect Claude', 'Ploeg: carrier: routine on the Team’s claude-environment Role, PLOEG_CLAUDE_ROUTINES and the credential gateway (Ploeg ADR-0197). Until then the Team runs on unattended: api.'));
     lines.push({ id: 'first-task', stage: 10, title: 'First task', status: 'pending', text: 'Assign a task in a routed board to the Team’s tracker user, or hand one off from Tasks.', ...(manage || sources.length ? { action: { label: 'Open Tasks', href: '#tasks', kind: 'link' as const } } : {}) });
     lines.push({ id: 'first-pull-request', stage: 11, title: 'First pull request', status: 'pending', text: 'Nothing to do: Now shows the Work Item moving until its Run opens a pull request.' });
     return lines;
@@ -477,6 +492,7 @@ export function unavailableText(step: PloegStep, pinned: string): string {
     'read-scopes': 'list a tracker connection’s Lists for Unfold',
     'prepare-repository': 'open a readiness pull request',
     'bind-lists': 'bind Lists to a Team at runtime',
+    'connect-claude': 'start Runs through your own Claude routine',
   };
   return `This Ploeg does not ${what[step.id]} yet (Unfold is built against Ploeg ${pinned}). ${step.release ? `Ploeg ${step.release} adds it.` : `It waits for ${step.record}, not released yet.`}`;
 }

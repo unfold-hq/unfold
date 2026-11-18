@@ -4775,6 +4775,106 @@ paths:
         '422': { $ref: '#/components/responses/UnprocessableContent' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/claude-routines:
+    get:
+      tags: [Ploeg]
+      operationId: getClaudeRoutines
+      summary: 'Your Claude routines per Team'
+      description: 'What Settings → Connect Claude shows (Ploeg ADR-0197 section 7): whether this Ploeg serves the step, which Ploeg read as the proven person through the person-token exchange, and each of your Teams with the routine Ploeg holds for it. No answer carries a routine''s token. `served` is false while the pinned Ploeg predates the routes, null when Ploeg could not be asked; `refused` carries Ploeg''s named refusal, such as `routines_not_accepted`, in plain words.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: '`{demo, served, waitsFor, refused, teams}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [demo, served, waitsFor, refused, teams]
+                properties:
+                  demo: { type: boolean }
+                  served: { type: [boolean, 'null'] }
+                  waitsFor: { type: [object, 'null'], properties: { record: { type: string }, release: { type: [string, 'null'] } } }
+                  refused: { type: [object, 'null'], properties: { code: { type: string }, message: { type: string } } }
+                  teams: { type: array, items: { type: object, required: [team, routine], properties: { team: { type: string }, routine: { oneOf: [{ type: object, required: [team, fireUrl, creatorPinned, registeredAt, updatedAt], properties: { team: { type: string }, fireUrl: { type: string }, creatorPinned: { type: boolean }, registeredAt: { type: string }, updatedAt: { type: string } } }, { type: 'null' }] } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/claude-routines/{team}:
+    parameters:
+      - name: team
+        in: path
+        required: true
+        description: 'One of your Ploeg Teams.'
+        schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$' }
+        example: silver
+    put:
+      tags: [Ploeg]
+      operationId: connectClaudeRoutine
+      summary: 'Connect or replace your Claude routine for a Team'
+      description: 'Sends the fire URL and token of your own claude.ai routine, whose API trigger runs on the installation''s self-hosted environment, to Ploeg''s `PUT /api/v1/operator/claude-routines/{team}` as the proven person. The token is write-only: Unfold relays it once, only with the person''s proof, and never stores, logs or returns it; without a person token, or when Ploeg refuses the one sent, it answers 403 `ploeg_person_unproven` and does not send the token again; the action log and audit trail record it as `[redacted]`. Refused with 400 `invalid_fire_url` or `invalid_token` before anything is sent, 403 for a viewer, 503 `ploeg_step_unavailable` while the pinned Ploeg predates the step. Ploeg''s refusals pass through with their code in plain words: 422 `routines_not_accepted`, 409 `no_routine_team`, 503 `secret_store_unavailable`, 403 `execution_forbidden` or `ploeg_person_unproven`.'
+      x-unfold-role: operator
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fireUrl, token]
+              properties:
+                fireUrl: { type: string, maxLength: 2048 }
+                token: { type: string, minLength: 16, maxLength: 512, writeOnly: true }
+      responses:
+        '200':
+          description: '`{routine}` as Ploeg holds it, without the token.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routine]
+                properties:
+                  routine: { type: object, required: [team, fireUrl, creatorPinned, registeredAt, updatedAt], properties: { team: { type: string }, fireUrl: { type: string }, creatorPinned: { type: boolean }, registeredAt: { type: string }, updatedAt: { type: string } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      tags: [Ploeg]
+      operationId: removeClaudeRoutine
+      summary: 'Remove your Claude routine for a Team'
+      description: 'Asks Ploeg''s `DELETE /api/v1/operator/claude-routines/{team}` as the proven person to delete your routine and its token. 404 `routine_not_registered` when you have none for the Team.'
+      x-unfold-role: operator
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{routine}`: the routine Ploeg removed, or null when Ploeg did not name it.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routine]
+                properties:
+                  routine: { oneOf: [{ type: object, required: [team, fireUrl, creatorPinned, registeredAt, updatedAt], properties: { team: { type: string }, fireUrl: { type: string }, creatorPinned: { type: boolean }, registeredAt: { type: string }, updatedAt: { type: string } } }, { type: 'null' }] }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/ploeg/connections:
     get:
       tags: [Ploeg]
@@ -5203,6 +5303,40 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '413': { $ref: '#/components/responses/PayloadTooLarge' }
         '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/ploeg/work-items/{workItemId}/fire-routine:
+    parameters:
+      - $ref: '#/components/parameters/WorkItemId'
+    post:
+      tags: [Ploeg]
+      operationId: fireClaudeRoutine
+      summary: 'Start a Work Item with my Claude'
+      description: 'Asks Ploeg''s `POST /api/v1/operator/work-items/{id}/fire-routine` as the proven person to claim the Run that waits for you and fire your own Claude routine for its Team (Ploeg ADR-0197 section 7). Answers the Run and the session Anthropic started; no credential. Ploeg''s refusals pass through with their code in plain words: before the claim, leaving the Run waiting, 409 `credential_gateway_required`, `routine_not_registered`, `not_your_run`, `already_claimed`, 429 `routine_rate_limited`, 422 `routines_not_accepted`; after the claim, ending the Run stuck, 409 `routine_token_refused` or `routine_not_found` and 503 `routines_unavailable`, `routine_fire_unrecorded` or `routine_session_unrecorded`.'
+      x-unfold-role: operator
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody: { $ref: '#/components/requestBodies/Empty' }
+      responses:
+        '200':
+          description: '`{run, session}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run, session]
+                properties:
+                  run: { type: object, required: [id, workItemId, team, role, round], properties: { id: { type: string }, workItemId: { type: string }, team: { type: string }, role: { type: string }, round: { type: integer } } }
+                  session: { type: object, required: [id, url], properties: { id: { type: string }, url: { type: [string, 'null'] } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '502': { $ref: '#/components/responses/BadGateway' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }

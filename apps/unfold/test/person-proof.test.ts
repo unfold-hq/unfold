@@ -544,3 +544,23 @@ test('the Status page says when Ploeg refused a change for want of proof, even w
   assert.match(after.body.personProof.summary, /sign in again/);
 });
 
+
+test('a change that must be proven is not sent without a person token, and a refused token is not retried without it', async t => {
+  const store = scratchStore(t);
+  const idp = await exchangeServer(t);
+  const env = secretEnv(t);
+  const proof = new PersonProof({ tokenUrl: idp.url, clientId: 'unfold-exchange', clientSecretEnv: env, audience: 'ploeg-for-unfold' }, store);
+  const unsigned = recordingPloeg();
+  assert.equal(await proof.sendProven('oidc-person', unsigned.call), null, 'no kept sign-in, nothing sent');
+  assert.deepEqual(unsigned.calls, []);
+  const signIn = login(store);
+  proof.remember(signIn, 'oidc-person', 'person-sub', { accessToken: 'access', expiresInSeconds: 3600 });
+  const refusing = recordingPloeg(() => 401);
+  const answer = await actionContext.run({ via: 'browser', confirmation: null, scope: 'browser', signIn }, () => proof.sendProven('oidc-person', refusing.call));
+  assert.equal(answer?.status, 401);
+  assert.equal(refusing.calls.length, 1, 'one call, never repeated without the token');
+  assert.ok(refusing.calls[0][personTokenHeader]);
+  const plain = recordingPloeg(() => 401);
+  await actionContext.run({ via: 'browser', confirmation: null, scope: 'browser', signIn }, () => proof.send('oidc-person', undefined, plain.call));
+  assert.equal(plain.calls.length, 2, 'an ordinary change is retried without the token, which is why a secret goes through sendProven');
+});
