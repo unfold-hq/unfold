@@ -12,12 +12,14 @@ import type { AppConfig, User } from './types.ts';
 type Steps = { manages(user: User): boolean; admit(user: User, id: StepId, team?: string): Promise<void>; notOptedIn(user: User, step: StepId, code: OptInRefusal): void; available(user: User, id: StepId, fresh?: boolean): Promise<{ step: PloegStep; served: boolean | null }> };
 type Reads = { connections(user: User, fresh?: boolean): Promise<PloegConnections>; routing(user: User, fresh?: boolean): Promise<{ all: PloegTeam[] }> };
 type Pending = { user: string; signIn: string; at: string };
+/** What identifies the signed-in Admin's own ClickUp account: its immutable user ids where Unfold knows them, and the names and email addresses it goes by. */
+export type Personal = { ids: string[]; names: string[] };
 /** One change the onboarding made, for the Tenant's audit chain. Never a token, code or `state`. */
 export type ClickUpChange = { user: User; tenant: string; entity: 'Tracker connection' | 'Tracker binding'; action: 'create' | 'delete'; uid: string; name: string; data: Record<string, string> };
 type Options = {
   steps: Steps; api: PloegConnectionApi; reads: Reads; connections: TrackerConnections; config: Pick<AppConfig, 'baseUrl' | 'links'>;
   store: { getSecret<T>(id: string): T | undefined; setSecret(id: string, value: unknown): void; deleteSecret(id: string): void };
-  personal?: (user: User) => string[]; now?: () => Date; audit?: (change: ClickUpChange) => void; demo?: boolean; pinned?: string;
+  personal?: (user: User) => Personal; now?: () => Date; audit?: (change: ClickUpChange) => void; demo?: boolean; pinned?: string;
 };
 
 /** A repository the map step offers: a Work Target Ploeg reports ready, and the Unfold repository with the same owner/name and base branch. */
@@ -31,6 +33,7 @@ export type ClickUpView = {
   manage: boolean; demo: boolean; guide: { why: string; steps: string[]; docs: string; tokenLabel: string; tokenShape: string } | null;
   steps: { connect: boolean | null; lists: boolean | null; bind: boolean | null };
   connections: { id: string; account: string; method: string; setAt: string | null; ploeg: { id: string; state: string; invalidReason: string | null } | null; sources: (ConnectionSource & { line: ChecklistLine })[] }[];
+  unrecorded: { id: string; account: string; state: string }[];
 };
 
 const provider = 'clickup';
@@ -70,7 +73,8 @@ export class ClickUpOnboarding {
     const served = async (id: StepId) => { try { return (await this.options.steps.available(user, id, true)).served; } catch { return null; } };
     const [connect, lists, bind] = await Promise.all([served('connect-clickup'), served('read-scopes'), served('bind-lists')]);
     const held = connect ? await this.options.api.trackerConnections(user).catch(() => null) : null;
-    if (bind) await this.refresh(user).catch(() => undefined);
+    if (bind && manage) await this.refresh(user).catch(() => undefined);
+    const recorded = new Set(this.held().map(connection => connection.ploeg.connection));
     const sources = this.connections.sources();
     return {
       manage, demo: this.options.demo === true, guide: this.guide(), steps: { connect, lists, bind },
@@ -78,6 +82,7 @@ export class ClickUpOnboarding {
         const found = held?.find(entry => entry.id === connection.ploeg!.connection);
         return { id: connection.id, account: connection.account ?? '', method: connection.ploeg!.method, setAt: connection.tokenSetAt ?? null, ploeg: found ? { id: found.id, state: found.state, invalidReason: found.invalidReason } : null, sources: sources.filter(source => source.connection === connection.id).map(source => ({ ...source, line: sourceLine(source, manage) })) };
       }),
+      unrecorded: manage ? (held ?? []).filter(entry => entry.kind === provider && entry.source === 'runtime' && !recorded.has(entry.id)).map(entry => ({ id: entry.id, account: entry.account?.login || entry.account?.email || '', state: entry.state })) : [],
     };
   }
 
@@ -99,12 +104,20 @@ export class ClickUpOnboarding {
     return this.connections.connections().filter((connection): connection is TrackerConnection & { ploeg: NonNullable<TrackerConnection['ploeg']> } => connection.provider === provider && Boolean(connection.ploeg) && connection.tenant === defaultTenant);
   }
 
+  /** Whether `url` is a page on ClickUp's own HTTPS origin, the only place Unfold sends a person to sign in. */
+  private clickUpPage(url: string): boolean {
+    try { const parsed = new URL(url); return parsed.protocol === 'https:' && parsed.origin === new URL(this.options.config.links?.clickup?.appUrl ?? 'https://app.clickup.com').origin && !parsed.username && !parsed.password; }
+    catch { return false; }
+  }
+
   private root(): string { return apiRoot(`${(this.options.config.links?.clickup?.apiUrl ?? 'https://api.clickup.com').replace(/\/+$/, '')}/api/v2`, provider); }
 
   /**
    * Hands a pasted member token to Ploeg's token flow and keeps nothing: `400 connection_token_invalid` before any
    * request when it does not have ClickUp's token shape, and `400 connection_token_personal`, after asking Ploeg to
-   * remove the connection again, when the account Ploeg names is the signed-in Admin's own.
+   * remove the connection again, when the account Ploeg names is the signed-in Admin's own. That check is best effort:
+   * it matches the account's immutable id against the Admin's linked ClickUp account where Unfold knows that id, and
+   * otherwise only names and email addresses, so a member that shares none of them passes.
    */
   async connectWithToken(user: User, input: Record<string, unknown>): Promise<TrackerConnection> {
     this.manage(user);
@@ -113,8 +126,8 @@ export class ClickUpOnboarding {
     if (typeof token !== 'string' || token.length > 4096 || /[^\x21-\x7e]/.test(token) || !guide?.tokenPattern.test(token)) throw fail(400, 'connection_token_invalid', `That is not ${guide?.tokenShape ?? 'a ClickUp token'}. Copy the whole token again from ClickUp.`);
     await this.options.steps.admit(user, 'connect-clickup');
     const flow = await this.ploeg(user, 'connect-clickup', () => this.options.api.startFlow(user, { kind: provider, instance: ploegSteps.pair.tracker, method: 'token', label: 'Unfold member', handOverAgent: true }));
-    const done = await this.ploeg(user, 'connect-clickup', () => this.options.api.completeFlow(user, { state: flow.flow.state, token }));
-    return this.keep(user, done.connection, 'token');
+    const done = await this.complete(user, { state: flow.flow.state, token });
+    return this.keep(user, done, 'token');
   }
 
   /** Starts Ploeg's OAuth flow for the installation's ClickUp OAuth application and remembers its `state` for this person's sign-in only, as a hash, for ten minutes. */
@@ -125,31 +138,74 @@ export class ClickUpOnboarding {
     await this.options.steps.admit(user, 'connect-clickup');
     const redirectUri = `${this.options.config.baseUrl.replace(/\/+$/, '')}/api/onboarding/clickup/callback`;
     const flow = await this.ploeg(user, 'connect-clickup', () => this.options.api.startFlow(user, { kind: provider, instance: ploegSteps.pair.tracker, method: 'oauth', label: 'Unfold member', handOverAgent: true, redirectUri }));
-    if (!flow.authorizeUrl || !/^https:\/\//.test(flow.authorizeUrl)) throw fail(502, 'ploeg_response', 'Ploeg started the ClickUp sign-in without an address to send you to.');
+    if (!flow.authorizeUrl || !this.clickUpPage(flow.authorizeUrl)) throw fail(502, 'ploeg_response', 'Ploeg started the ClickUp sign-in without an address to send you to.');
     this.options.store.setSecret(pendingId(flow.flow.state), { user: user.id, signIn, at: this.now().toISOString() } satisfies Pending);
     return { authorizeUrl: flow.authorizeUrl };
   }
 
   /**
-   * Relays the code ClickUp sent back to Ploeg, once: only for the same signed-in person within ten minutes of the
-   * start, else `400 onboarding_state_invalid` and nothing is relayed. The `state` is forgotten on first use.
+   * Relays the code ClickUp sent back to Ploeg: only for the same signed-in person within ten minutes of the start,
+   * else `400 onboarding_state_invalid` and nothing is relayed. The `state` is kept until Ploeg completes the flow or
+   * refuses it for good, so a callback retried after a lost answer gets Ploeg's `replayed` outcome (ADR-0195 section
+   * 11) instead of a refusal; Ploeg exchanges the code at most once.
    */
   async completeOAuth(user: User, signIn: string | undefined, code: string, state: string): Promise<TrackerConnection> {
     this.manage(user);
     const id = /^[\x21-\x7e]{16,512}$/.test(state) ? pendingId(state) : '';
     const pending = id ? this.options.store.getSecret<Pending>(id) : undefined;
-    if (id) this.options.store.deleteSecret(id);
     const fresh = pending && Date.parse(pending.at) > this.now().getTime() - pendingMinutes * 60_000;
     if (!pending || !fresh || pending.user !== user.id || !signIn || pending.signIn !== signIn) throw fail(400, 'onboarding_state_invalid', 'This ClickUp sign-in was not started by you in this browser in the last ten minutes, so Unfold relayed nothing. Start it again.');
-    if (!/^[\x21-\x7e]{1,1024}$/.test(code)) throw fail(400, 'onboarding_code_invalid', 'ClickUp sent back no usable code. Start the sign-in again.');
-    const done = await this.ploeg(user, 'connect-clickup', () => this.options.api.completeFlow(user, { state, code }));
-    return this.keep(user, done.connection, 'oauth');
+    if (!/^[\x21-\x7e]{1,1024}$/.test(code)) { this.options.store.deleteSecret(id); throw fail(400, 'onboarding_code_invalid', 'ClickUp sent back no usable code. Start the sign-in again.'); }
+    let done: PloegTrackerConnection;
+    try { done = await this.complete(user, { state, code }); }
+    catch (error) {
+      if (error instanceof PloegError && error.status >= 400 && error.status < 500 && error.code !== 'flow_in_progress') this.options.store.deleteSecret(id);
+      throw error;
+    }
+    this.options.store.deleteSecret(id);
+    return this.keep(user, done, 'oauth');
+  }
+
+  /** Completes a flow; `409 already_connected` names the live connection Ploeg already holds for that account, which is adopted instead. */
+  private async complete(user: User, input: { state: string; token: string } | { state: string; code: string }): Promise<PloegTrackerConnection> {
+    try { return (await this.ploeg(user, 'connect-clickup', () => this.options.api.completeFlow(user, input))).connection; }
+    catch (error) {
+      const named = error instanceof PloegOperatorRefusal && error.code === 'already_connected' ? existingId(error.detail.connection) : '';
+      if (!named) throw error;
+      const found = (await this.options.api.trackerConnections(user)).find(entry => entry.id === named);
+      if (!found) throw error;
+      return found;
+    }
+  }
+
+  /**
+   * Adopts a ClickUp connection Ploeg holds that Unfold has not recorded, such as one whose answer was lost: the same
+   * own-account check as connecting, then recorded. `404 connection_not_found` for an id Ploeg does not report.
+   */
+  async adopt(user: User, ploegId: string): Promise<TrackerConnection> {
+    this.manage(user);
+    await this.options.steps.admit(user, 'connect-clickup');
+    const found = (await this.ploeg(user, 'connect-clickup', () => this.options.api.trackerConnections(user))).find(entry => entry.id === ploegId && entry.kind === provider && entry.source === 'runtime');
+    if (!found) throw fail(404, 'connection_not_found', 'Ploeg reports no ClickUp connection by this id. Reload Connect ClickUp to see the ones there are.');
+    return this.keep(user, found, found.method || 'token');
+  }
+
+  /** Removes a ClickUp connection Ploeg holds that Unfold has not recorded. One Unfold has recorded is removed with {@link removeConnection}. */
+  async removeUnrecorded(user: User, ploegId: string): Promise<{ removed: string }> {
+    this.manage(user);
+    if (this.held().some(connection => connection.ploeg.connection === ploegId)) throw fail(409, 'connection_recorded', 'Unfold has recorded this connection. Remove it from its own line, which checks the Lists that use it first.');
+    await this.options.steps.admit(user, 'connect-clickup');
+    await this.ploeg(user, 'connect-clickup', () => this.options.api.removeConnection(user, ploegId)).catch(error => { if (!(error instanceof PloegOperatorRefusal && error.status === 404)) throw error; });
+    this.options.audit?.({ user, tenant: defaultTenant, entity: 'Tracker connection', action: 'delete', uid: ploegId, name: ploegId, data: { ploeg_connection: ploegId, change: 'unrecorded' } });
+    return { removed: ploegId };
   }
 
   private async keep(user: User, connection: PloegTrackerConnection, method: string): Promise<TrackerConnection> {
-    const own = new Set((this.options.personal?.(user) ?? [user.name]).map(name => name.trim().toLowerCase()).filter(Boolean));
+    const personal = this.options.personal?.(user) ?? { ids: [], names: [user.name] };
+    const own = new Set(personal.names.map(name => name.trim().toLowerCase()).filter(Boolean));
     const names = [connection.account?.email, connection.account?.login].filter((name): name is string => Boolean(name)).map(name => name.trim().toLowerCase());
-    if (names.some(name => own.has(name))) {
+    const sameId = Boolean(connection.account?.id) && personal.ids.includes(connection.account!.id);
+    if (sameId || names.some(name => own.has(name))) {
       await this.options.api.removeConnection(user, connection.id).catch(error => { if (!(error instanceof PloegOperatorRefusal && error.status === 404)) throw error; });
       throw fail(400, 'connection_token_personal', 'That token belongs to your own ClickUp account, so Ploeg removed the connection again. Unfold needs a separate member: a token acts as the person who made it, so Unfold’s comments would look like yours, and ClickUp stops its webhooks when you leave. Create the member called Unfold and paste its token.');
     }
@@ -254,7 +310,8 @@ export class ClickUpOnboarding {
 
   /** Reads every bound List's state from Ploeg again (**Check again**): a binding Ploeg no longer has is `removed`, and its source loses its target. */
   async refresh(user: User): Promise<ConnectionSource[]> {
-    const bound = this.connections.sources().filter(source => source.binding);
+    const held = new Set(this.held().map(connection => connection.id));
+    const bound = this.connections.sources().filter(source => source.binding && held.has(source.connection));
     if (!bound.length) return [];
     const bindings = await this.options.api.bindings(user);
     return bound.map(source => {
@@ -277,7 +334,7 @@ export class ClickUpOnboarding {
   /** Removes a List's binding in Ploeg and drops it from the saved source. Ploeg answers an already removed binding with success, so a retry succeeds and records nothing twice. */
   async unbind(user: User, sourceId: string): Promise<{ removed: string | null }> {
     this.manage(user);
-    const source = this.connections.sources().find(entry => entry.id === sourceId);
+    const source = this.heldSource(sourceId);
     if (!source) throw fail(404, 'source_not_found', 'There is no such List. Reload Connect ClickUp to see the ones there are.');
     if (!source.binding) return { removed: null };
     const { id, team } = source.binding;
@@ -296,8 +353,14 @@ export class ClickUpOnboarding {
     throw fail(503, 'ploeg_step_unavailable', unavailableText(step, this.options.pinned ?? pinnedRelease()));
   }
 
+  /** A saved source of a connection this Tenant's Ploeg-held ClickUp connections include; any other source is absent. */
+  private heldSource(sourceId: string): ConnectionSource | undefined {
+    const held = new Set(this.held().map(connection => connection.id));
+    return this.connections.sources().find(entry => entry.id === sourceId && held.has(entry.connection));
+  }
+
   private boundSource(sourceId: string): ConnectionSource {
-    const source = this.connections.sources().find(entry => entry.id === sourceId);
+    const source = this.heldSource(sourceId);
     if (!source?.binding) throw fail(404, 'binding_not_found', 'This List is not bound. Bind it first.');
     return source;
   }
@@ -322,6 +385,8 @@ export class ClickUpOnboarding {
     }
   }
 }
+
+const existingId = (value: unknown): string => typeof value === 'string' ? value : value && typeof value === 'object' && typeof (value as { id?: unknown }).id === 'string' ? (value as { id: string }).id : '';
 
 /** A bound List's line: green only when Ploeg reports the binding `active`; `awaiting_webhook` amber with **Check again**; removed or invalid red with **Bind again**. */
 export function sourceLine(source: ConnectionSource, manage: boolean): ChecklistLine {

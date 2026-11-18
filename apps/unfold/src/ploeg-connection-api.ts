@@ -58,7 +58,7 @@ export interface PloegConnectionApi {
 }
 
 /** The one call the live adapter needs: `PloegClient.operatorCall`. */
-export type OperatorCall = (user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown }) => Promise<Record<string, unknown> | null>;
+export type OperatorCall = (user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; slow?: boolean }) => Promise<Record<string, unknown> | null>;
 
 const invalid = () => new PloegError(502, 'ploeg_response', 'Ploeg returned a connection or binding Unfold could not read.');
 const object = (value: unknown): Record<string, unknown> => { if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid(); return value as Record<string, unknown>; };
@@ -133,7 +133,7 @@ export class HttpPloegConnectionApi implements PloegConnectionApi {
   }
 
   async completeFlow(user: User, input: { state: string; token: string } | { state: string; code: string }): Promise<{ connection: PloegTrackerConnection; replayed: boolean }> {
-    const data = object(await this.call(user, 'connection-flows/complete', { method: 'POST', body: input }));
+    const data = object(await this.call(user, 'connection-flows/complete', { method: 'POST', body: input, slow: true }));
     return { connection: trackerConnection(data.connection), replayed: data.replayed === true };
   }
 

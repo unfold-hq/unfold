@@ -4187,13 +4187,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [manage, demo, guide, steps, connections]
+                required: [manage, demo, guide, steps, connections, unrecorded]
                 properties:
                   manage: { type: boolean }
                   demo: { type: boolean }
                   guide: { type: [object, 'null'], properties: { why: { type: string }, steps: { type: array, items: { type: string } }, docs: { type: string }, tokenLabel: { type: string }, tokenShape: { type: string } } }
                   steps: { type: object, properties: { connect: { type: [boolean, 'null'] }, lists: { type: [boolean, 'null'] }, bind: { type: [boolean, 'null'] } } }
                   connections: { type: array, items: { type: object, required: [id, account, method, setAt, ploeg, sources], properties: { id: { type: string }, account: { type: string }, method: { type: string }, setAt: { type: [string, 'null'] }, ploeg: { type: [object, 'null'] }, sources: { type: array, items: { type: object } } } } }
+                  unrecorded: { type: array, description: 'ClickUp connections Ploeg holds that Unfold has not recorded, such as one whose connect answer was lost; empty for a person who does not manage the Tenant.', items: { type: object, required: [id, account, state], properties: { id: { type: string }, account: { type: string }, state: { type: string } } } }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
@@ -4202,7 +4203,7 @@ paths:
       tags: [Ploeg]
       operationId: connectClickUpWithToken
       summary: 'Hand the Unfold member''s ClickUp token to Ploeg once'
-      description: 'Checks the token''s shape (400 `connection_token_invalid`, before any request leaves Unfold), then starts Ploeg''s `token` connection flow and completes it with the token (`POST /api/v1/operator/connection-flows` and `.../complete`, Ploeg ADR-0195). Ploeg checks it with ClickUp and stores it; Unfold keeps the Ploeg connection id and the account name, never the token. When the account Ploeg names is the signed-in Admin''s own, Unfold asks Ploeg to remove the connection again and answers 400 `connection_token_personal`. 503 `ploeg_step_unavailable` while this Ploeg does not serve the step; Ploeg''s own refusals pass through with their code (`connections_not_accepted`, `oauth_required`, `probe_failed`, `already_connected`).'
+      description: 'Checks the token''s shape (400 `connection_token_invalid`, before any request leaves Unfold), then starts Ploeg''s `token` connection flow and completes it with the token (`POST /api/v1/operator/connection-flows` and `.../complete`, Ploeg ADR-0195). Ploeg checks it with ClickUp and stores it; Unfold keeps the Ploeg connection id and the account name, never the token. When the account Ploeg names is the signed-in Admin''s own, Unfold asks Ploeg to remove the connection again and answers 400 `connection_token_personal`. 503 `ploeg_step_unavailable` while this Ploeg does not serve the step; Ploeg''s own refusals pass through with their code (`connections_not_accepted`, `oauth_required`, `probe_failed`). When Ploeg answers 409 `already_connected` naming the live connection it holds for the account, Unfold adopts that one. The own-account check is best effort: it matches the account''s immutable id against the Admin''s linked ClickUp account where Unfold knows it, and otherwise names and email addresses only.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }
@@ -4232,7 +4233,7 @@ paths:
       tags: [Ploeg]
       operationId: startClickUpSignIn
       summary: 'Start signing in to ClickUp as the Unfold member, through the installation''s ClickUp OAuth application'
-      description: 'Starts Ploeg''s `oauth` connection flow with Unfold''s callback as the redirect URI and answers where to send the person. Unfold keeps a hash of Ploeg''s `state` with the person and their browser sign-in for ten minutes. 409 `onboarding_base_url_missing` without `baseUrl`; 409 `method_not_allowed` when the installation has no ClickUp OAuth application; 503 `ploeg_step_unavailable` while this Ploeg does not serve the step.'
+      description: 'Starts Ploeg''s `oauth` connection flow with Unfold''s callback as the redirect URI and answers where to send the person: only an address on ClickUp''s own HTTPS origin (`links.clickup.appUrl`, by default `https://app.clickup.com`), else 502 `ploeg_response`. Unfold keeps a hash of Ploeg''s `state` with the person and their browser sign-in for ten minutes. 409 `onboarding_base_url_missing` without `baseUrl`; 409 `method_not_allowed` when the installation has no ClickUp OAuth application; 503 `ploeg_step_unavailable` while this Ploeg does not serve the step.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }
@@ -4254,7 +4255,7 @@ paths:
       tags: [Ploeg]
       operationId: completeClickUpSignIn
       summary: 'ClickUp''s redirect target after signing in as the Unfold member'
-      description: 'Relays the `code` and `state` to Ploeg''s flow completion once, only for the same signed-in person in the same browser within ten minutes of the start; neither is stored or logged. Redirects to `/?clickup=connected#settings/connect-clickup`, or to `/?clickup_error=<code>#settings/connect-clickup` (for example `onboarding_state_invalid` or `connection_token_personal`).'
+      description: 'Relays the `code` and `state` to Ploeg''s flow completion only for the same signed-in person in the same browser within ten minutes of the start; neither is stored or logged. Unfold keeps the hash of the `state` until Ploeg completes the flow or refuses it with a 4xx, so a callback retried after a lost or timed-out answer gets Ploeg''s `replayed` outcome; Ploeg exchanges the code at most once. Redirects to `/?clickup=connected#settings/connect-clickup`, or to `/?clickup_error=<code>#settings/connect-clickup` (for example `onboarding_state_invalid` or `connection_token_personal`).'
       x-unfold-role: admin
       parameters:
         - { name: code, in: query, schema: { type: string } }
@@ -4263,6 +4264,55 @@ paths:
       responses:
         '303': { description: Redirect back to Connect ClickUp. }
         '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/onboarding/clickup/unrecorded/{ploegConnection}:
+    parameters:
+      - { name: ploegConnection, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' }, example: clickup-unfold }
+    delete:
+      tags: [Ploeg]
+      operationId: removeUnrecordedClickUpConnection
+      summary: 'Remove a ClickUp connection Ploeg holds that Unfold has not recorded'
+      description: 'Asks Ploeg to remove it (`DELETE /api/v1/operator/tracker-connections/{id}`); one already gone succeeds. 409 `connection_recorded` for a connection Unfold has recorded, which is removed from its own line instead.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{removed}`'
+          content:
+            application/json:
+              schema: { type: object, required: [removed], properties: { removed: { type: string } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/clickup/unrecorded/{ploegConnection}/adopt:
+    parameters:
+      - { name: ploegConnection, in: path, required: true, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' }, example: clickup-unfold }
+    post:
+      tags: [Ploeg]
+      operationId: adoptClickUpConnection
+      summary: 'Record a ClickUp connection Ploeg holds that Unfold has not recorded'
+      description: 'For a connection whose connect answer was lost. Runs the same own-account check as connecting (400 `connection_token_personal`, after which Ploeg removes it) and records the Ploeg connection id, never a token. 404 `connection_not_found` for an id Ploeg does not report.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '201':
+          description: '`{connection}`'
+          content:
+            application/json:
+              schema: { type: object, required: [connection], properties: { connection: { type: object } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/onboarding/clickup/map:
     get:
       tags: [Ploeg]

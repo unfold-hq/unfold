@@ -43,6 +43,11 @@ function connections(data) {
   return `<section class="settings-section"><h2>Connected through Ploeg</h2>${data.connections.map(connection => `<div class="connection-card"><p><strong>${escape(connection.account || connection.id)}</strong> · ${escape(connection.method === 'oauth' ? 'signed in' : 'token pasted')}${connection.setAt ? ` on ${escape(connection.setAt.slice(0, 10))}` : ''} · Ploeg reports ${escape(connection.ploeg?.state ?? 'nothing yet')}${connection.ploeg?.invalidReason ? ` (${escape(connection.ploeg.invalidReason)})` : ''}. Unfold keeps no token.</p>${connection.sources.length ? `<ul class="check-lines">${connection.sources.map(source => sourceRow(source, data.manage)).join('')}</ul>` : ''}${data.manage ? button({ label: 'Remove this connection', size: 'sm', action: 'clickup-remove', data: { connection: connection.id } }) : ''}</div>`).join('')}</section>`;
 }
 
+function unrecorded(data) {
+  if (!data.manage || !data.unrecorded?.length) return '';
+  return `<section class="settings-section"><h2>Held by Ploeg, not recorded here</h2><p>Ploeg holds these ClickUp connections, but Unfold has no record of them, for example because the answer to a connect was lost. Adopt one to use it here, or remove it from Ploeg.</p><ul>${data.unrecorded.map(entry => `<li><span>${escape(entry.account || entry.id)}</span> · Ploeg reports ${escape(entry.state)} ${button({ label: 'Adopt', size: 'sm', variant: 'primary', action: 'clickup-adopt', data: { connection: entry.id } })} ${button({ label: 'Remove from Ploeg', size: 'sm', action: 'clickup-forget', data: { connection: entry.id } })}</li>`).join('')}</ul></section>`;
+}
+
 function mapStep(data) {
   if (!data.manage || !data.connections.length) return '';
   if (data.steps.bind !== true) return stepNote(data.steps.bind, 'bind Lists to a Team at runtime');
@@ -85,7 +90,7 @@ function content() {
   const data = view.data;
   if (!data) return skeleton({ rows: 4 });
   if (data.demo) return callout({ tone: 'neutral', title: 'Demo', body: '<p>The demo connects nothing: it holds no ClickUp connection and sends Ploeg nothing.</p>' });
-  return `${data.manage ? '' : '<p>Ask an administrator to connect ClickUp.</p>'}${stepNote(data.steps.connect, 'connect ClickUp from the screen')}${guide(data)}${connections(data)}${mapStep(data)}`;
+  return `${data.manage ? '' : '<p>Ask an administrator to connect ClickUp.</p>'}${stepNote(data.steps.connect, 'connect ClickUp from the screen')}${guide(data)}${connections(data)}${unrecorded(data)}${mapStep(data)}`;
 }
 
 function render() {
@@ -190,6 +195,8 @@ export default {
     'clickup-bind': () => bind(false),
     'clickup-check': control => act(`/api/onboarding/clickup/bindings/${encodeURIComponent(control.dataset.source)}/check`, 'POST', 'Checked again with Ploeg.'),
     'clickup-unbind': control => act(`/api/onboarding/clickup/bindings/${encodeURIComponent(control.dataset.source)}`, 'DELETE', 'The binding is removed.'),
+    'clickup-adopt': control => act(`/api/onboarding/clickup/unrecorded/${encodeURIComponent(control.dataset.connection)}/adopt`, 'POST', 'Unfold uses this connection now. It keeps no token.'),
+    'clickup-forget': control => act(`/api/onboarding/clickup/unrecorded/${encodeURIComponent(control.dataset.connection)}`, 'DELETE', 'Ploeg removed the connection.'),
     'clickup-remove': control => act(`/api/onboarding/clickup/connections/${encodeURIComponent(control.dataset.connection)}`, 'DELETE', 'Ploeg removed the connection.'),
   },
   forms: { 'clickup-token': saveToken },

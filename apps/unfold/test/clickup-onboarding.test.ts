@@ -12,7 +12,7 @@ import { Store } from '../src/store.ts';
 import { PloegClient, PloegError, type PloegConnections, type PloegTeam } from '../src/ploeg.ts';
 import { Onboarding, ploegSteps } from '../src/onboarding.ts';
 import { TrackerConnections } from '../src/tracker-connections.ts';
-import { ClickUpOnboarding, sourceLine, type ClickUpChange } from '../src/clickup-onboarding.ts';
+import { ClickUpOnboarding, sourceLine, type ClickUpChange, type Personal } from '../src/clickup-onboarding.ts';
 import { clickUpRoute } from '../src/clickup-onboarding-http.ts';
 import { HttpPloegConnectionApi } from '../src/ploeg-connection-api.ts';
 import { configuration } from './api-support.ts';
@@ -85,7 +85,7 @@ async function fakePloeg(t: TestContext): Promise<Fake> {
   return fake;
 }
 
-async function setup(t: TestContext, options: { served?: Record<string, boolean>; teams?: PloegTeam[]; scopesReleased?: boolean } = {}) {
+async function setup(t: TestContext, options: { served?: Record<string, boolean>; teams?: PloegTeam[]; scopesReleased?: boolean; personal?: Personal } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'unfold-clickup-'));
   const file = join(directory, 'clickup.sqlite');
   const store = new Store(file);
@@ -101,7 +101,7 @@ async function setup(t: TestContext, options: { served?: Record<string, boolean>
   const connections = new TrackerConnections(store, config, { enforced: false, now: clock, log: () => undefined });
   const client = new PloegClient(config);
   const changes: ClickUpChange[] = [];
-  const clickup = new ClickUpOnboarding({ steps: onboarding, api: new HttpPloegConnectionApi((user, path, call) => client.operatorCall(user, path, call)), reads, connections, config, store, now: clock, pinned: '0.2.0-rc.110', audit: change => changes.push(change) });
+  const clickup = new ClickUpOnboarding({ steps: onboarding, api: new HttpPloegConnectionApi((user, path, call) => client.operatorCall(user, path, call)), reads, connections, config, store, now: clock, ...(options.personal ? { personal: () => options.personal! } : {}), pinned: '0.2.0-rc.110', audit: change => changes.push(change) });
   onboarding.useStepLines(manage => clickup.lines(manage));
   return { store, file, fake, config, onboarding, connections, clickup, changes };
 }
@@ -154,11 +154,9 @@ test('an OAuth code is relayed only for the person and browser sign-in that star
   assert.equal(writes(fake)[0].body?.redirectUri, 'https://unfold.example/api/onboarding/clickup/callback');
   const first = fake.states.at(-1)!;
   await assert.rejects(clickup.completeOAuth(admin, 'sign-in-2', 'code-1', first), rejects('onboarding_state_invalid', 400), 'another browser sign-in is refused');
-  await assert.rejects(clickup.completeOAuth(admin, 'sign-in-1', 'code-1', first), rejects('onboarding_state_invalid', 400), 'and the state is forgotten on first use');
   await assert.rejects(clickup.completeOAuth(admin, 'sign-in-1', 'code-1', 'state-never-issued-by-ploeg'), rejects('onboarding_state_invalid', 400));
-  assert.equal(writes(fake).filter(entry => entry.path === 'connection-flows/complete').length, 0, 'nothing was relayed');
-  await clickup.startOAuth(admin, 'sign-in-1');
-  const second = fake.states.at(-1)!;
+  assert.equal(writes(fake).filter(entry => entry.path === 'connection-flows/complete').length, 0, 'nothing was relayed, and the refused caller did not use up the person’s flow');
+  const second = first;
   const kept = await clickup.completeOAuth(admin, 'sign-in-1', 'code-2', second);
   assert.deepEqual(writes(fake).at(-1), { method: 'POST', path: 'connection-flows/complete', body: { state: second, code: 'code-2' } });
   assert.equal(kept.ploeg?.method, 'oauth');
@@ -312,4 +310,96 @@ test('a Scope’s open items and one item are read through Ploeg with their text
   assert.equal(item.scope, '777');
   assert.deepEqual(item.untrusted, { title: 'Fix the basket', description: 'Pay in one step.', labels: ['repo:shop'] });
   assert.deepEqual(fake.seen.map(entry => `${entry.method} ${entry.path}`), ['GET tracker-connections/clickup-unfold/scopes/777/items', 'GET tracker-connections/clickup-unfold/items/86c0a1']);
+});
+
+test('a connection Ploeg holds but Unfold never recorded is listed with Adopt and Remove, and adopting records it without a token', async t => {
+  const { clickup, fake, connections } = await setup(t);
+  const view = await clickup.view(admin);
+  assert.deepEqual(view.unrecorded, [{ id: 'clickup-unfold', account: 'unfold', state: 'active' }], 'a lost connect answer leaves an orphan Ploeg reports');
+  assert.deepEqual((await clickup.view(developer)).unrecorded, [], 'only an Admin sees them');
+  const kept = await clickup.adopt(admin, 'clickup-unfold');
+  assert.equal(kept.ploeg?.connection, 'clickup-unfold');
+  assert.deepEqual((await clickup.view(admin)).unrecorded, []);
+  await assert.rejects(clickup.removeUnrecorded(admin, 'clickup-unfold'), rejects('connection_recorded', 409));
+  await assert.rejects(clickup.adopt(admin, 'clickup-other'), rejects('connection_not_found', 404));
+  connections.forgetPloegConnection(admin, kept.id);
+  assert.deepEqual(await clickup.removeUnrecorded(admin, 'clickup-unfold'), { removed: 'clickup-unfold' });
+  assert.deepEqual(writes(fake).at(-1), { method: 'DELETE', path: 'tracker-connections/clickup-unfold', body: {} });
+});
+
+test('a connect Ploeg answers with 409 already_connected adopts the connection Ploeg names', async t => {
+  const { clickup, fake } = await setup(t);
+  fake.answers.set('POST connection-flows/complete', { status: 409, body: { error: { code: 'already_connected', message: 'This account is already a live connection.', connection: { id: 'clickup-unfold' } } } });
+  const kept = await clickup.connectWithToken(admin, { token: memberToken });
+  assert.equal(kept.ploeg?.connection, 'clickup-unfold');
+  assert.equal(kept.account, 'unfold');
+});
+
+test('the own-account check also matches the linked account’s immutable id when Unfold knows it', async t => {
+  const { clickup, fake, connections } = await setup(t, { personal: { ids: ['42'], names: ['someone-else'] } });
+  await assert.rejects(clickup.connectWithToken(admin, { token: memberToken }), rejects('connection_token_personal', 400));
+  assert.deepEqual(writes(fake).at(-1), { method: 'DELETE', path: 'tracker-connections/clickup-unfold', body: {} });
+  assert.deepEqual(connections.connections(), []);
+});
+
+test('Unbind and Check again reach only Lists of this Tenant’s Ploeg-held connections', async t => {
+  const { clickup, connections, store, fake } = await setup(t);
+  const other = connections.recordPloegConnection(admin, { provider: 'clickup', baseUrl: 'https://api.clickup.com/api/v2', tenant: 'other', account: 'theirs', ploeg: { connection: 'clickup-theirs', method: 'token', accountId: '99' } });
+  const binding = { id: 'b-9', team: 'delivery', state: 'active', reason: null, default: 'shop', allow: [], target: { forge: 'github', owner: 'acme', repo: 'shop', baseBranch: 'main' }, checkedAt: clock().toISOString() };
+  const source = { id: 'their-list', connection: other.id, name: 'Their List', project: '901', repositoryId: 'shop', executionOwner: 'ploeg', tenant: 'other', binding, createdAt: clock().toISOString(), createdBy: 'x', updatedAt: clock().toISOString(), updatedBy: 'x' };
+  store.db.prepare('INSERT INTO tracker_connection_sources(id,connection_id,tenant,client,client_project_id,created_at,body) VALUES(?,?,?,NULL,NULL,?,?)').run(source.id, other.id, 'other', source.createdAt, JSON.stringify(source));
+  await assert.rejects(clickup.unbind(admin, 'their-list'), rejects('source_not_found', 404));
+  await assert.rejects(clickup.check(admin, 'their-list'), rejects('binding_not_found', 404));
+  assert.deepEqual(writes(fake), [], 'nothing was sent to Ploeg');
+  assert.equal(connections.sources()[0].binding?.id, 'b-9', 'and the other Tenant’s binding is untouched');
+});
+
+test('Unfold sends a person only to ClickUp’s own origin to sign in', async t => {
+  const { clickup, fake, store } = await setup(t);
+  fake.answers.set('POST connection-flows', { status: 201, body: { flow: { id: 'flow-x', method: 'oauth', expiresAt: '2026-11-18T10:15:00Z', state: 'state-from-a-bad-ploeg-answer' }, next: { authorizeUrl: 'https://clickup.evil.example/api?state=x' } } });
+  await assert.rejects(clickup.startOAuth(admin, 'sign-in-1'), rejects('ploeg_response', 502));
+  assert.equal(store.getSecret('clickup-flow:x'), undefined);
+});
+
+test('completing a flow waits longer than a read, and a callback retried after a lost answer is relayed again so Ploeg can answer replayed', async t => {
+  const { clickup, fake } = await setup(t);
+  const seen: { path: string; slow?: boolean }[] = [];
+  const api = new HttpPloegConnectionApi(async (_user, path, call) => { seen.push({ path, ...(call?.slow ? { slow: true } : {}) }); return { connection: { id: 'clickup-unfold', kind: 'clickup', account: { id: '42', login: 'unfold' } }, replayed: true }; });
+  assert.equal((await api.completeFlow(admin, { state: 's', code: 'c' })).replayed, true);
+  assert.deepEqual(seen, [{ path: 'connection-flows/complete', slow: true }]);
+  await clickup.startOAuth(admin, 'sign-in-1');
+  const state = fake.states.at(-1)!;
+  fake.answers.set('POST connection-flows/complete', { status: 503, body: { error: { code: 'vendor_unavailable', message: 'ClickUp did not answer.' } } });
+  await assert.rejects(clickup.completeOAuth(admin, 'sign-in-1', 'code-1', state), rejects('vendor_unavailable', 503));
+  fake.answers.delete('POST connection-flows/complete');
+  const kept = await clickup.completeOAuth(admin, 'sign-in-1', 'code-1', state);
+  assert.equal(kept.ploeg?.connection, 'clickup-unfold', 'the retry reached Ploeg with the same state');
+  await assert.rejects(clickup.completeOAuth(admin, 'sign-in-1', 'code-1', state), rejects('onboarding_state_invalid', 400), 'after success the state is gone');
+  await clickup.startOAuth(admin, 'sign-in-1');
+  const refused = fake.states.at(-1)!;
+  fake.answers.set('POST connection-flows/complete', { status: 410, body: { error: { code: 'flow_expired', message: 'The flow expired.' } } });
+  await assert.rejects(clickup.completeOAuth(admin, 'sign-in-1', 'code-2', refused), rejects('flow_expired', 410));
+  fake.answers.delete('POST connection-flows/complete');
+  await assert.rejects(clickup.completeOAuth(admin, 'sign-in-1', 'code-2', refused), rejects('onboarding_state_invalid', 400), 'a definite refusal forgets the state');
+});
+
+test('a callback from another person with the same browser sign-in is refused and relays nothing', async t => {
+  const { clickup, fake } = await setup(t);
+  await clickup.startOAuth(admin, 'sign-in-1');
+  const state = fake.states.at(-1)!;
+  await assert.rejects(clickup.completeOAuth({ ...admin, id: 'admin-2' }, 'sign-in-1', 'code-1', state), rejects('onboarding_state_invalid', 400));
+  assert.equal(writes(fake).filter(entry => entry.path === 'connection-flows/complete').length, 0);
+});
+
+test('a viewer reading Connect ClickUp writes nothing; only an Admin’s read refreshes the bindings Unfold holds', async t => {
+  const { clickup, fake, connections, config } = await setup(t);
+  config.ploeg!.userTeams = { [developer.id]: ['delivery'] };
+  const kept = await clickup.connectWithToken(admin, { token: memberToken });
+  await clickup.bind(admin, { connection: kept.id, list: { id: '777' }, team: 'delivery', default: 'shop' });
+  fake.bindings[0].state = 'active';
+  const before = JSON.stringify(connections.sources());
+  await clickup.view(developer);
+  assert.equal(JSON.stringify(connections.sources()), before, 'a GET by someone who does not manage the Tenant changed nothing');
+  await clickup.view(admin);
+  assert.equal(connections.sources()[0].binding?.state, 'active');
 });
