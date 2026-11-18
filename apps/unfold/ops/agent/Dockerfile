@@ -47,6 +47,7 @@ RUN chmod 0644 /usr/local/lib/unfold/relay-worker.mjs
 RUN --mount=type=bind,from=fetch,source=/npm-patches,target=/tmp/npm-patches \
     --mount=type=bind,source=patch-bundled-npm.mjs,target=/tmp/patch-bundled-npm.mjs \
     node /tmp/patch-bundled-npm.mjs /tmp/npm-patches
+RUN --mount=type=bind,source=check-picomatch-users.mjs,target=/tmp/check-picomatch-users.mjs node /tmp/check-picomatch-users.mjs
 USER node
 RUN node --check /usr/local/lib/unfold/relay-worker.mjs
 RUN opencode --version | grep -F "${OPENCODE_VERSION}"

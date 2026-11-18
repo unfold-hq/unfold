@@ -1,0 +1,37 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-bf3f61f4e0fecd9b049dcb80ebe4d3ea083723ec8e880559e8ec26730b05e5b3",
+  "author": "https://github.com/unfold-hq/unfold",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-112366"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/unfold-agent"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The ReDoS needs an attacker to supply the glob pattern (single-branch repeated extglobs such as +(*)). In this image the only copy is picomatch 4.0.7 at /usr/lib/node_modules/node-gyp/node_modules/picomatch, shipped by Wolfi's node-gyp 13.1.0-r2, which npm-12 depends on; Wolfi's npm bundles no copy. Its only caller is node-gyp's lib/build.js, through tinyglobby, with the fixed patterns 'build/*.sln' and 'build/*.mk', which contain no extglob, so no input reaches picomatch as a pattern. The agent in one session's container already runs arbitrary commands as the node user, so even a pattern it wrote itself would only stall its own process. check-picomatch-users.mjs fails the image build if another copy, another importer or another pattern appears. No fixed release exists (affected through 4.0.7, the latest, on 2026-11-18). Expires 2026-12-18: re-review then, and remove this statement as soon as Wolfi's node-gyp ships a fixed picomatch.",
+      "timestamp": "2026-11-18T10:10:59Z"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-fc5q-39xc-vjpf"
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/unfold-agent"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
+      "impact_statement": "The ReDoS needs an attacker to supply the glob pattern (single-branch repeated extglobs such as +(*)). In this image the only copy is picomatch 4.0.7 at /usr/lib/node_modules/node-gyp/node_modules/picomatch, shipped by Wolfi's node-gyp 13.1.0-r2, which npm-12 depends on; Wolfi's npm bundles no copy. Its only caller is node-gyp's lib/build.js, through tinyglobby, with the fixed patterns 'build/*.sln' and 'build/*.mk', which contain no extglob, so no input reaches picomatch as a pattern. The agent in one session's container already runs arbitrary commands as the node user, so even a pattern it wrote itself would only stall its own process. check-picomatch-users.mjs fails the image build if another copy, another importer or another pattern appears. No fixed release exists (affected through 4.0.7, the latest, on 2026-11-18). Expires 2026-12-18: re-review then, and remove this statement as soon as Wolfi's node-gyp ships a fixed picomatch.",
+      "timestamp": "2026-11-18T10:10:59Z"
+    }
+  ],
+  "timestamp": "2026-11-18T10:10:59Z"
+}
