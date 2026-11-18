@@ -1711,6 +1711,7 @@ export class PloegClient {
     }]);
   }
 
+
   /**
    * Whether this Ploeg serves an onboarding step, learned from the step's operator read route (ADR-0044): true when
    * the GET answers, false on 404, null when Ploeg could not be asked. It only ever sends a GET, so a step is never
