@@ -121,9 +121,9 @@ async function environment(t: { after: (fn: () => Promise<void>) => void }, issu
 const sessions = (config: string) => readFile(join(config, 'plugins', 'data', 'unfold', 'telemetry.json'), 'utf8').then(text => JSON.parse(text) as Record<string, { accessToken: string; refreshToken: string; expiresAt: string; user: string }>);
 
 test('the configuration comes from the environment only, with generic defaults, and a token never reaches a log line', () => {
-  assert.deepEqual(configuration({}), { issuer: '', clientId: '', scopes: 'openid offline_access', audience: '', header: 'Authorization', exchangeAudience: 'unfold', notify: true, debug: false });
-  const set = configuration({ UNFOLD_TELEMETRY_ISSUER: ' https://idp.example.org/realms/people/ ', UNFOLD_TELEMETRY_CLIENT_ID: clientId, UNFOLD_TELEMETRY_SCOPES: 'openid profile', UNFOLD_TELEMETRY_AUDIENCE: 'telemetry', UNFOLD_TELEMETRY_HEADER: 'X-Scope-OrgID', UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE: 'unfold-staging', UNFOLD_TELEMETRY_NOTIFY: '0', UNFOLD_TELEMETRY_DEBUG: '1' });
-  assert.deepEqual(set, { issuer: 'https://idp.example.org/realms/people', clientId, scopes: 'openid profile', audience: 'telemetry', header: 'X-Scope-OrgID', exchangeAudience: 'unfold-staging', notify: false, debug: true });
+  assert.deepEqual(configuration({}), { issuer: '', clientId: '', scopes: 'openid offline_access', audience: '', header: 'Authorization', exchangeAudience: 'unfold', exchangeScopes: 'openid profile email', notify: true, debug: false });
+  const set = configuration({ UNFOLD_TELEMETRY_ISSUER: ' https://idp.example.org/realms/people/ ', UNFOLD_TELEMETRY_CLIENT_ID: clientId, UNFOLD_TELEMETRY_SCOPES: 'openid profile', UNFOLD_TELEMETRY_AUDIENCE: 'telemetry', UNFOLD_TELEMETRY_HEADER: 'X-Scope-OrgID', UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE: 'unfold-staging', UNFOLD_TELEMETRY_EXCHANGE_SCOPES: 'openid groups', UNFOLD_TELEMETRY_NOTIFY: '0', UNFOLD_TELEMETRY_DEBUG: '1' });
+  assert.deepEqual(set, { issuer: 'https://idp.example.org/realms/people', clientId, scopes: 'openid profile', audience: 'telemetry', header: 'X-Scope-OrgID', exchangeAudience: 'unfold-staging', exchangeScopes: 'openid groups', notify: false, debug: true });
   assert.equal(configuration({ UNFOLD_TELEMETRY_ISSUER: 'ftp://idp.example.org' }).issuer, '', 'only http(s) issuers');
   assert.equal(redacted('Bearer abc.def.ghi and "access_token":"secret-value" and refresh_token=another'), 'Bearer [redacted] and "access_token":"[redacted]" and refresh_token=[redacted]');
 });
@@ -237,7 +237,7 @@ test('Claude Code gets {} at once and a background sign-in; then the header, a s
 
   const token = await run(['token'], env);
   assert.deepEqual([token.code, token.stdout], [0, `${issuer.exchanged}\n`]);
-  assert.deepEqual(issuer.requests.at(-1)?.form, { grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', client_id: clientId, subject_token: issuer.access[1], subject_token_type: 'urn:ietf:params:oauth:token-type:access_token', audience: 'unfold' });
+  assert.deepEqual(issuer.requests.at(-1)?.form, { grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange', client_id: clientId, subject_token: issuer.access[1], subject_token_type: 'urn:ietf:params:oauth:token-type:access_token', audience: 'unfold', scope: 'openid profile email' });
   assert.equal(issuer.requests.filter(request => request.path === '/device').length, 1, 'token never starts a sign-in');
 
   const out = await run(['logout'], env);
