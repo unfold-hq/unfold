@@ -36,26 +36,30 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
     if (req.method === 'GET' && path === 'forge-connections' && options.refuseRead) return refuse(403, options.refuseRead);
     if (req.method === 'GET' && path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: options.otherForge ? [{ key: 'site', label: 'site', forge: 'forgejo', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: null, boards: [] }] : [] });
     if (options.served === false && (path === 'forge-connections' || path === 'targets')) return res.writeHead(404).end();
-    if (req.method === 'GET' && path === 'forge-connections') return send(200, { connections: calls.some(call => call.body.installationId) ? [{ id: 'github-acme', kind: 'github', instance: 'github', method: 'github_app_installation', source: 'runtime', state: options.connectionState ?? 'active', invalidReason: null, account: { id: 4242, login: 'acme', installationId: Number(installationId) } }] : [] });
+    const connection = () => ({ id: 'github-acme', port: 'forge', kind: 'github', instance: 'github', method: 'github_app_installation', account: { id: '4242', login: 'acme', installationId }, source: 'runtime', state: options.connectionState ?? 'active', invalidReason: null, label: '', revision: 1, app: 'app-1', secrets: { privateKey: { store: 'kv', path: 'apps/app-1', version: 1 } }, lastProbe: null, usedBy: [], createdBy: 'oidc-admin', createdAt: '2026-11-18T10:00:00Z', updatedBy: 'oidc-admin', updatedAt: '2026-11-18T10:00:00Z' });
+    const connectionApp = { id: 'app-1', port: 'forge', kind: 'github', instance: 'github', appId: '77', slug: 'ploeg-acme', clientId: 'Iv1.x', owner: { id: '4242', login: 'acme' }, settingsUrl: 'https://github.com/organizations/acme/settings/apps/ploeg-acme', installations: [], secrets: { privateKey: { store: 'kv', path: 'apps/app-1', version: 1 } }, createdBy: 'oidc-admin', createdAt: '2026-11-18T10:00:00Z' };
+    if (req.method === 'GET' && path === 'forge-connections') return send(200, { connections: calls.some(call => call.body.installationId) ? [connection()] : [], nextCursor: null });
     if (req.method === 'GET' && path === 'targets') return send(200, { targets: [] });
-    if (req.method === 'GET' && path === 'connection-apps') return send(200, { apps: calls.some(call => call.body.code) ? [{ id: 'app-1', slug: 'ploeg-acme', owner: 'acme' }] : [] });
+    if (req.method === 'GET' && path === 'connection-apps') return send(200, { connectionApps: calls.some(call => call.body.code) ? [connectionApp] : [] });
     if (req.method === 'POST' && path === 'connection-flows') {
       if (options.refuseFlow) return refuse(422, options.refuseFlow);
       const manifest = body.method === 'github_app_manifest';
-      return send(201, { flow: { id: manifest ? 'flow-1' : 'flow-2', method: body.method, expiresAt: '2026-11-18T12:15:00Z', state: manifest ? firstState : secondState }, next: manifest ? { manifest: { name: 'Ploeg acme', url: 'https://ploeg.example', redirect_url: body.redirectUri, setup_url: body.redirectUri, public: false }, postUrl: `https://github.com/settings/apps/new?state=${firstState}` } : { installUrl: `https://github.com/apps/ploeg-acme/installations/new?state=${secondState}` } });
+      return send(201, { flow: { id: manifest ? 'flow-1' : 'flow-2', method: body.method, expiresAt: '2026-11-18T12:15:00Z', state: manifest ? firstState : secondState }, next: manifest ? { manifest: JSON.stringify({ name: 'Ploeg acme', url: 'https://ploeg.example', redirect_url: body.redirectUri, setup_url: body.redirectUri, public: false }), postUrl: `https://github.com/settings/apps/new?state=${firstState}` } : { installUrl: `https://github.com/apps/ploeg-acme/installations/new?state=${secondState}` } });
     }
     if (req.method === 'POST' && path === 'connection-flows/complete') {
       if (options.failCompleteOnce && body.installationId && calls.filter(call => call.body.installationId).length === 1) return res.writeHead(503).end();
       if (options.completeDelayMs && body.installationId) await new Promise(resolve => setTimeout(resolve, options.completeDelayMs));
-      if (body.code === manifestCode && body.state === firstState) return send(200, { app: { id: 'app-1', slug: 'ploeg-acme', privateKey: { store: 'kv', path: 'apps/app-1', version: 1 } }, flow: { id: 'flow-2', method: 'github_app_installation', state: secondState }, next: { installUrl: `https://github.com/apps/ploeg-acme/installations/new?state=${secondState}` } });
-      if (body.installationId === installationId && body.state === secondState) return send(200, { connection: { id: 'github-acme', kind: 'github', instance: 'github', method: 'github_app_installation', source: 'runtime', state: 'active', account: { id: 4242, login: 'acme', installationId: Number(installationId) } } });
+      if (body.code === manifestCode && body.state === firstState) return send(200, { connectionApp, flow: { id: 'flow-2', method: 'github_app_installation', port: 'forge', kind: 'github', instance: 'github', status: 'pending', expiresAt: '2026-11-18T12:15:00Z', state: secondState }, next: { installUrl: `https://github.com/apps/ploeg-acme/installations/new?state=${secondState}` }, replayed: false });
+      if (body.installationId === installationId && body.state === secondState) return send(200, { connection: connection(), replayed: calls.filter(call => call.body.installationId).length > 1 });
       return refuse(404, 'unknown_flow');
     }
-    if (req.method === 'GET' && path === 'forge-connections/github-acme/repositories') return send(200, { repositories: [{ repository: 'acme/shop', registered: false, key: null }, { repository: 'acme/site', registered: true, key: 'site', source: 'static' }] });
+    if (req.method === 'GET' && path === 'forge-connections/github-acme/repositories') return url.searchParams.get('after') === '2'
+      ? send(200, { repositories: [{ id: '11', fullName: 'acme/site', private: false, canWrite: true, registered: true, key: 'site' }, { id: '12', fullName: 'acme/docs', private: true, canWrite: false, registered: false, key: null }], nextCursor: null })
+      : send(200, { repositories: [{ id: '10', fullName: 'acme/shop', private: true, canWrite: true, registered: false, key: null }], nextCursor: '2' });
     if (req.method === 'POST' && path === 'targets') {
-      if (options.refuseTarget) return refuse(422, options.refuseTarget, { checks: [{ check: 'not_archived', passed: false, message: 'The repository is archived.' }] });
+      if (options.refuseTarget) return refuse(422, options.refuseTarget, { checks: [{ name: 'not_archived', result: 'fail', detail: 'The repository is archived.' }] });
       const target = { key: body.key, repository: body.repository, branch: 'main', state: url.searchParams.get('dryRun') ? 'not_registered' : 'active', readiness: { state: 'not_ready', reasons: [{ code: 'instruction_file_missing' }], prepareAvailable: true } };
-      return send(url.searchParams.get('dryRun') ? 200 : 201, { target, checks: [{ check: 'granted', passed: true }, { check: 'agents_md', passed: false, message: 'No AGENTS.md on main.' }] });
+      return send(url.searchParams.get('dryRun') ? 200 : 201, { target, checks: [{ name: 'granted', result: 'pass' }, { name: 'agents_md', result: 'fail', detail: 'No AGENTS.md on main.' }] });
     }
     return res.writeHead(404).end();
   });
@@ -143,7 +147,8 @@ test('an Admin creates the App, installs it and registers a repository; Ploeg ge
 
   const granted = await request(api.url, '/api/onboarding/github/connections/github-acme/repositories', { cookie });
   responses.push(granted.text);
-  assert.deepEqual(granted.body.repositories.map((entry: { repository: string; registered: boolean }) => [entry.repository, entry.registered]), [['acme/shop', false], ['acme/site', true]]);
+  assert.deepEqual(granted.body.repositories.map((entry: { repository: string; registered: boolean; canWrite: boolean }) => [entry.repository, entry.registered, entry.canWrite]), [['acme/shop', false, true], ['acme/site', true, true], ['acme/docs', false, false]], 'every page of Ploeg’s answer is read');
+  assert.deepEqual(ploeg.calls.filter(call => call.url.includes('/repositories')).map(call => call.url), ['/api/v1/operator/forge-connections/github-acme/repositories?limit=100', '/api/v1/operator/forge-connections/github-acme/repositories?limit=100&after=2']);
 
   const upper = await request(api.url, '/api/onboarding/github/targets', { method: 'POST', cookie, body: { connection: 'github-acme', repository: 'acme/shop', key: 'Acme-Shop' } });
   assert.equal(upper.status, 400, 'the key is explicit and lower case');
@@ -152,7 +157,7 @@ test('an Admin creates the App, installs it and registers a repository; Ploeg ge
   responses.push(dry.text);
   assert.equal(dry.body.outcome, 'accepted');
   assert.equal(dry.body.prepareAvailable, true);
-  assert.deepEqual(dry.body.checks.map((check: { name: string; passed: boolean }) => [check.name, check.passed]), [['granted', true], ['agents_md', false]]);
+  assert.deepEqual(dry.body.checks.map((check: { name: string; result: string }) => [check.name, check.result]), [['granted', 'pass'], ['agents_md', 'fail']]);
   assert.equal(ploeg.writes().filter(call => call.url.startsWith('/api/v1/operator/targets')).length, 1, 'a dry run sends only the dry run');
 
   const registered = await request(api.url, '/api/onboarding/github/targets', { method: 'POST', cookie, body: { connection: 'github-acme', repository: 'acme/shop', key: 'acme-shop', dryRun: false } });
@@ -246,7 +251,7 @@ test('an installation that has not opted in turns its install line red, and a re
   assert.equal(dry.status, 200, 'a refused dry run answers its checks and registers nothing');
   assert.equal(dry.body.outcome, 'refused');
   assert.equal(dry.body.reason, 'target_not_ready');
-  assert.deepEqual(dry.body.checks, [{ name: 'not_archived', passed: false, text: 'The repository is archived.' }]);
+  assert.deepEqual(dry.body.checks, [{ name: 'not_archived', result: 'fail', text: 'The repository is archived.' }]);
   assert.equal(dry.body.prepareAvailable, false);
   assert.equal((api.app.store.db.prepare('SELECT count(*) AS n FROM repositories').get() as { n: number }).n, 0);
 });
@@ -354,7 +359,7 @@ test('a state tied to one person is refused for another person, even with the sa
   const github = new GithubConnections({
     db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({}) }) } as never,
     store: { getSecret: <T>(id: string) => secrets.get(id) as T, setSecret: (id: string, value: unknown) => { secrets.set(id, value); } },
-    ploeg: { isDemo: false, connections: async () => ({ demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: [], boards: [], unrouted: [], fetchedAt: '' }), operatorCall: async (_user, path) => { if (path.includes('complete')) completes.push(path); return { flow: { id: 'flow-1', state: firstState }, next: { manifest: '{}', postUrl: 'https://github.com/settings/apps/new' } }; } },
+    ploeg: { isDemo: false, connections: async () => ({ demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: [], boards: [], unrouted: [], fetchedAt: '' }), operatorCall: async (_user, path) => { if (path.includes('complete')) completes.push(path); return { flow: { id: 'flow-1', state: firstState }, next: { manifest: JSON.stringify({ name: 'Ploeg' }), postUrl: 'https://github.com/settings/apps/new' } }; } },
     steps: { manages: () => true, admit: async () => undefined, available: async () => ({ served: true }), notOptedIn: () => undefined },
     repositories: { admitRegistration: () => undefined, register: () => { throw new Error('unused'); }, repositories: () => [] },
     stored: async () => true, audit: () => undefined, baseUrl: 'https://unfold.example', pinned: 'unknown', plan: ploegSteps,

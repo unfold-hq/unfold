@@ -13,9 +13,9 @@ export type ConnectionApp = { id: string; slug: string; owner: string | null };
 /** A forge connection as Ploeg reports it, with the vendor account by its display login only. */
 export type ForgeConnection = { id: string; kind: string; instance: string; method: string; source: 'runtime' | 'static'; state: string; invalidReason: string | null; account: string | null };
 /** One repository a forge connection's grant reaches (Ploeg ADR-0193 section 3), and whether Ploeg already registered it. */
-export type GrantedRepository = { repository: string; registered: boolean; key: string | null; source: string | null; stored: boolean };
+export type GrantedRepository = { repository: string; private: boolean; canWrite: boolean; registered: boolean; key: string | null; stored: boolean };
 /** One check of a dry run or a registration, as Ploeg reported it. */
-export type TargetCheck = { name: string; passed: boolean; text: string };
+export type TargetCheck = { name: string; result: 'pass' | 'fail' | 'unknown'; text: string };
 /** What a dry run or a registration came to: accepted with the target Ploeg would store, or refused with Ploeg's reason. */
 export type TargetOutcome = {
   dryRun: boolean; outcome: 'accepted' | 'refused'; reason: string | null; message: string;
@@ -128,8 +128,8 @@ const targetWords: Record<string, string> = {
 
 function checksOf(value: unknown): TargetCheck[] {
   return items(value, 50).map(entry => {
-    const passed = typeof entry.passed === 'boolean' ? entry.passed : typeof entry.ok === 'boolean' ? entry.ok : entry.result === 'pass' || entry.status === 'pass' || entry.status === 'passed';
-    return { name: short(entry.check ?? entry.name ?? entry.id, 100) || 'check', passed, text: short(entry.message ?? entry.reason ?? entry.text, 500) };
+    const result = short(entry.result, 16);
+    return { name: short(entry.name, 100) || 'check', result: result === 'pass' || result === 'fail' ? result : 'unknown', text: short(entry.detail, 500) };
   });
 }
 
@@ -192,6 +192,17 @@ export class GithubConnections {
     return object(await this.options.ploeg.operatorCall(user, path, body === undefined ? {} : { method: 'POST', body, ...(slow ? { slow } : {}) }));
   }
 
+  private async pages(user: User, path: string, field: string, max: number): Promise<Record<string, unknown>[]> {
+    const found: Record<string, unknown>[] = [];
+    let after: string | null = null;
+    do {
+      const data = await this.call(user, `${path}?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+      found.push(...items(data[field], 100));
+      after = typeof data.nextCursor === 'string' && data.nextCursor && data.nextCursor !== after ? data.nextCursor : null;
+    } while (after && found.length < max);
+    return found.slice(0, max);
+  }
+
   private ties(): Record<string, Tie> {
     const cutoff = this.now().getTime() - tieTtlMs;
     return Object.fromEntries(Object.entries(this.options.store.getSecret<Record<string, Tie>>(tiesId) ?? {}).filter(([, tie]) => Date.parse(tie.at) > cutoff));
@@ -231,7 +242,7 @@ export class GithubConnections {
     const served = { connect: connect.served, register: register.served };
     if (served.connect === false) return { demo: false, served, secondForge: null, apps: [], connections: [], ...base };
     let connections: ForgeConnection[];
-    try { connections = items((await this.call(user, 'forge-connections')).connections, 200).map(forgeConnection).filter(entry => entry.kind === this.options.plan.pair.forge); }
+    try { connections = (await this.pages(user, 'forge-connections', 'connections', 200)).map(forgeConnection).filter(entry => entry.kind === this.options.plan.pair.forge); }
     catch (error) {
       if (!(error instanceof PloegOperatorRefusal) || error.status >= 500) return { demo: false, served: { ...served, connect: served.connect === true ? true : null }, secondForge: null, apps: [], connections: [], ...base };
       if (error.status === 404 && error.code === 'not_found') return { demo: false, served: { ...served, connect: false }, secondForge: null, apps: [], connections: [], ...base };
@@ -239,7 +250,7 @@ export class GithubConnections {
       return { demo: false, served: { ...served, connect: true }, secondForge: null, apps: [], connections: [], ...base, refused: { code: error.code, message: install ? `Ploeg serves this step, but the installation has not opted in (${error.code}).` : error.message, install } };
     }
     const [apps, secondForge] = await Promise.all([
-      this.call(user, 'connection-apps').then(data => items(data.apps, 50).map(entry => ({ id: short(entry.id, 128), slug: short(entry.slug, 100), owner: short(entry.owner, 100) || null }))).catch(() => []),
+      this.call(user, 'connection-apps').then(data => items(data.connectionApps, 50).filter(entry => entry.kind === this.options.plan.pair.forge).map(entry => ({ id: short(entry.id, 128), slug: short(entry.slug, 100), owner: short(object(entry.owner).login, 100) || null }))).catch(() => []),
       this.secondForge(user),
     ]);
     const live = new Map(connections.map(entry => [entry.id, entry]));
@@ -306,8 +317,10 @@ export class GithubConnections {
   private nextOf(method: FlowMethod, next: Record<string, unknown>): Handoff['next'] | undefined {
     if (method === 'github_app_installation') { const url = githubUrl(next.installUrl); return url ? { kind: 'redirect', url } : undefined; }
     const url = githubUrl(next.postUrl);
-    const manifest = typeof next.manifest === 'string' ? next.manifest : next.manifest && typeof next.manifest === 'object' ? JSON.stringify(next.manifest) : '';
-    return url && manifest && manifest.length <= 65_536 ? { kind: 'post', url, manifest } : undefined;
+    if (typeof next.manifest !== 'string' || next.manifest.length > 65_536) return undefined;
+    let manifest: Record<string, unknown>;
+    try { manifest = object(JSON.parse(next.manifest)); } catch { return undefined; }
+    return url && Object.keys(manifest).length ? { kind: 'post', url, manifest: JSON.stringify(manifest) } : undefined;
   }
 
   /** The one-time step from Unfold to GitHub for the person who started the flow, in the same sign-in. */
@@ -339,11 +352,10 @@ export class GithubConnections {
         if (!/^[A-Za-z0-9_-]{1,200}$/.test(code!)) return { status: 400, code: 'onboarding_state_invalid' };
         const answer = await this.call(user, 'connection-flows/complete', { state, code }, true);
         this.untie(state);
-        const app = object(answer.app);
+        const app = object(answer.connectionApp);
         if (short(app.id, 128)) this.options.audit(user, { action: 'create', type: 'GitHub App', uid: short(app.id, 128), name: `GitHub App ${short(app.slug, 100) || short(app.id, 128)} created through Ploeg`, data: { change: 'created_from_manifest' } });
-        const install = object(answer.installation);
-        const flow = object(answer.flow ?? install.flow);
-        const next = this.nextOf('github_app_installation', object(answer.next ?? install.next));
+        const flow = object(answer.flow);
+        const next = this.nextOf('github_app_installation', object(answer.next));
         const nextState = short(flow.state, 512);
         if (!next || !nextState || !short(flow.id, 128)) return back('github', 'app_created');
         this.tie(user, signIn, nextState, short(flow.id, 128), 'github_app_installation');
@@ -369,13 +381,13 @@ export class GithubConnections {
   async granted(user: User, connection: string): Promise<{ connection: string; repositories: GrantedRepository[] }> {
     if (!this.options.steps.manages(user)) throw new PloegError(403, 'forbidden', 'Only an administrator connects accounts and adds repositories and Lists.');
     if (!connectionId.test(connection)) throw new PloegError(400, 'invalid_input', 'Name a GitHub connection Ploeg holds.');
-    let data: Record<string, unknown>;
-    try { data = await this.call(user, `forge-connections/${encodeURIComponent(connection)}/repositories?limit=200`); }
+    let listed: Record<string, unknown>[];
+    try { listed = await this.pages(user, `forge-connections/${encodeURIComponent(connection)}/repositories`, 'repositories', 1000); }
     catch (error) { return this.refuse(user, 'register-repositories', error, targetWords, 'target_refused'); }
     const stored = new Set(this.options.repositories.repositories().filter(entry => entry.tenant === defaultTenant).map(entry => entry.key));
-    const repositories = items(data.repositories, 500).map(entry => {
-      const repository = short(entry.repository ?? entry.fullName ?? entry.name, 300);
-      return { repository, registered: entry.registered === true, key: short(entry.key, 128) || null, source: short(entry.source, 16) || null, stored: stored.has(repositoryKey(`${githubOrigin}/${repository}`)) };
+    const repositories = listed.map(entry => {
+      const repository = short(entry.fullName, 300);
+      return { repository, private: entry.private === true, canWrite: entry.canWrite === true, registered: entry.registered === true, key: short(entry.key, 128) || null, stored: stored.has(repositoryKey(`${githubOrigin}/${repository}`)) };
     }).filter(entry => repositoryPattern.test(entry.repository));
     return { connection, repositories };
   }

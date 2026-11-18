@@ -4714,7 +4714,7 @@ paths:
       tags: [Ploeg]
       operationId: listGithubGrantedRepositories
       summary: 'The repositories a GitHub connection reaches'
-      description: 'Ploeg''s `GET /api/v1/operator/forge-connections/{connection}/repositories` (Ploeg ADR-0193): each repository the installation was granted, whether Ploeg registered it and under which key, and whether Unfold stored it. 403 for someone who does not manage the Tenant.'
+      description: 'Ploeg''s `GET /api/v1/operator/forge-connections/{connection}/repositories` (Ploeg ADR-0193): each repository the installation was granted, whether the grant may write, whether Ploeg registered it and under which key, and whether Unfold stored it. Unfold pages through Ploeg''s answer, which holds at most 100 per page, up to 1000 repositories. 403 for someone who does not manage the Tenant.'
       x-unfold-role: admin
       responses:
         '200':
@@ -4726,7 +4726,7 @@ paths:
                 required: [connection, repositories]
                 properties:
                   connection: { type: string }
-                  repositories: { type: array, items: { type: object, required: [repository, registered, key, source, stored], properties: { repository: { type: string }, registered: { type: boolean }, key: { type: [string, 'null'] }, source: { type: [string, 'null'] }, stored: { type: boolean } } } }
+                  repositories: { type: array, items: { type: object, required: [repository, private, canWrite, registered, key, stored], properties: { repository: { type: string }, private: { type: boolean }, canWrite: { type: boolean, description: 'Whether the installation may push and open pull requests there; a read-only grant is not offered.' }, registered: { type: boolean }, key: { type: [string, 'null'] }, stored: { type: boolean } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -8620,7 +8620,7 @@ components:
         outcome: { type: string, enum: [accepted, refused] }
         reason: { type: [string, 'null'], description: 'Ploeg''s refusal code.' }
         message: { type: string }
-        checks: { type: array, items: { type: object, required: [name, passed, text], properties: { name: { type: string }, passed: { type: boolean }, text: { type: string } } } }
+        checks: { type: array, items: { type: object, required: [name, result, text], properties: { name: { type: string }, result: { type: string, enum: [pass, fail, unknown] }, text: { type: string } } } }
         target: { type: [object, 'null'], properties: { key: { type: string }, repository: { type: string }, branch: { type: string }, state: { type: string } } }
         readiness: { type: string, enum: [ready, not_ready, unknown] }
         reasons: { type: array, items: { type: string } }

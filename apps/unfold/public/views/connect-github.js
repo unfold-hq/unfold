@@ -59,7 +59,7 @@ function connectionSection(data) {
 
 function resultMarkup(result) {
   if (!result) return '';
-  const checks = result.checks.length ? `<ul class="health-list">${result.checks.map(check => `<li class="health-detail">${badge({ tone: check.passed ? 'success' : 'danger', label: check.passed ? 'Passed' : 'Failed', size: 'sm' })} ${escape(check.name)}${check.text ? `: ${escape(check.text)}` : ''}</li>`).join('')}</ul>` : '';
+  const checks = result.checks.length ? `<ul class="health-list">${result.checks.map(check => `<li class="health-detail">${badge({ tone: check.result === 'pass' ? 'success' : check.result === 'fail' ? 'danger' : 'neutral', label: check.result === 'pass' ? 'Passed' : check.result === 'fail' ? 'Failed' : 'Unknown', size: 'sm' })} ${escape(check.name)}${check.text ? `: ${escape(check.text)}` : ''}</li>`).join('')}</ul>` : '';
   const readiness = result.readiness === 'not_ready' ? `<p class="health-detail">Not ready${result.reasons.length ? `: ${escape(result.reasons.join(', '))}` : ''}.${result.prepareAvailable ? ' Ploeg can open a pull request that adds the AGENTS.md (Prepare a repository on the checklist).' : ''}</p>` : '';
   return `<p class="health-detail">${escape(result.message)}${result.reason ? ` (${escape(result.reason)})` : ''}</p>${readiness}${checks}`;
 }
@@ -73,8 +73,8 @@ function repositorySection() {
     const key = view.keys[entry.repository] ?? entry.key ?? suggestedKey(entry.repository);
     const result = view.results[entry.repository];
     const done = entry.registered || result?.repository;
-    const status = done ? badge({ tone: 'success', label: entry.source === 'static' ? 'Configured by the installation' : 'Registered', size: 'sm' }) : '';
-    const controls = done ? '' : `<div class="field"><label class="field-label" for="${escape(id)}">Key</label><input id="${escape(id)}" data-github-key="${escape(entry.repository)}" maxlength="128" autocomplete="off" spellcheck="false" value="${escape(key)}"><p class="field-hint">Lower case. Tasks pick this repository with the label repo/&lt;key&gt;.</p></div><div class="checklist-confirm">${button({ label: 'Check', size: 'sm', icon: 'check', action: 'github-check', data: { repository: entry.repository }, busy: view.busy === `check-${entry.repository}` })}${result?.dryRun && result.outcome === 'accepted' ? button({ label: 'Register', variant: 'primary', size: 'sm', icon: 'plus', action: 'github-register', data: { repository: entry.repository }, busy: view.busy === `register-${entry.repository}` }) : ''}</div>`;
+    const status = done ? badge({ tone: 'success', label: 'Registered', size: 'sm' }) : entry.canWrite ? '' : badge({ tone: 'attention', label: 'Read-only for the App', size: 'sm' });
+    const controls = done || !entry.canWrite ? '' : `<div class="field"><label class="field-label" for="${escape(id)}">Key</label><input id="${escape(id)}" data-github-key="${escape(entry.repository)}" maxlength="128" autocomplete="off" spellcheck="false" value="${escape(key)}"><p class="field-hint">Lower case. Tasks pick this repository with the label repo/&lt;key&gt;.</p></div><div class="checklist-confirm">${button({ label: 'Check', size: 'sm', icon: 'check', action: 'github-check', data: { repository: entry.repository }, busy: view.busy === `check-${entry.repository}` })}${result?.dryRun && result.outcome === 'accepted' ? button({ label: 'Register', variant: 'primary', size: 'sm', icon: 'plus', action: 'github-register', data: { repository: entry.repository }, busy: view.busy === `register-${entry.repository}` }) : ''}</div>`;
     return `<li class="health-check"><div class="health-main"><div class="health-heading"><h3 class="health-title">${escape(entry.repository)}</h3>${status}</div>${controls}${resultMarkup(result)}</div></li>`;
   }).join('');
   const body = rows ? `<ol class="health-list">${rows}</ol>` : '<p class="card-body">The installation reaches no repository. Add repositories to it on GitHub, then reload.</p>';
