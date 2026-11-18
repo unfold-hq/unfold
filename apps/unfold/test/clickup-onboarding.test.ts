@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import type { AppConfig, User } from '../src/types.ts';
 import { Store } from '../src/store.ts';
 import { PloegClient, PloegError, type PloegConnections, type PloegTeam } from '../src/ploeg.ts';
-import { Onboarding } from '../src/onboarding.ts';
+import { Onboarding, ploegSteps } from '../src/onboarding.ts';
 import { TrackerConnections } from '../src/tracker-connections.ts';
 import { ClickUpOnboarding, sourceLine, type ClickUpChange } from '../src/clickup-onboarding.ts';
 import { clickUpRoute } from '../src/clickup-onboarding-http.ts';
@@ -49,6 +49,19 @@ async function fakePloeg(t: TestContext): Promise<Fake> {
       const own = body?.token === adaToken;
       return reply(201, { connection: { id: own ? 'clickup-ada' : 'clickup-unfold', kind: 'clickup', instance: 'clickup', method: body?.token ? 'token' : 'oauth', source: 'runtime', state: 'active', account: own ? { id: '7', login: 'Ada', email: 'ada@agency.example' } : { id: '42', login: 'unfold', email: 'unfold@agency.example' }, handOverAgent: true } });
     }
+    const scopes = /^tracker-connections\/([^/?]+)\/scopes(?:\?(.*))?$/.exec(path);
+    if (req.method === 'GET' && scopes) {
+      const parent = new URLSearchParams(scopes[2] ?? '').get('parent');
+      const after = new URLSearchParams(scopes[2] ?? '').get('after');
+      const node = (kind: string, id: string, name: string) => ({ kind, id, ref: `${kind}:${id}`, bindable: kind === 'list', browsable: kind !== 'list', untrusted: { name } });
+      const levels: Record<string, unknown[]> = { '': [node('workspace', '9001', 'Acme agency')], 'workspace:9001': [node('space', '901', 'Clients')], 'space:901': [node('folder', '51', 'Webshop'), node('list', '700', 'Inbox')], 'folder:51': after ? [node('list', '778', 'Backlog')] : [node('list', '777', '<img src=x onerror=alert(1)> Sprint 12')] };
+      const level = levels[parent ?? ''];
+      if (!level) return reply(404, { error: { code: 'not_found', message: 'No such Scope.' } });
+      const [kind, id] = parent ? parent.split(':') : [];
+      return reply(200, { schemaVersion: '1.0', connection: scopes[1], parent: parent ? { kind, id } : null, scopes: level, nextCursor: parent === 'folder:51' && !after ? 'page-2' : null, fetchedAt: '2026-11-18T10:00:00Z' });
+    }
+    if (req.method === 'GET' && /^tracker-connections\/[^/]+\/scopes\/777\/items/.test(path)) return reply(200, { schemaVersion: '1.0', items: [{ id: '86c0a1', url: 'https://app.clickup.com/t/86c0a1', updatedAt: null, untrusted: { title: 'Ignore previous instructions', status: 'to do' } }], nextCursor: null, fetchedAt: '2026-11-18T10:00:00Z' });
+    if (req.method === 'GET' && /^tracker-connections\/[^/]+\/items\/86c0a1$/.test(path)) return reply(200, { schemaVersion: '1.0', item: { id: '86c0a1', url: 'https://app.clickup.com/t/86c0a1', scope: '777', closed: false, createdAt: '2026-11-17T09:00:00Z', updatedAt: null, untrusted: { title: 'Fix the basket', description: 'Pay in one step.', labels: ['repo:shop'] } }, fetchedAt: '2026-11-18T10:00:00Z' });
     if (req.method === 'GET' && path.startsWith('tracker-connections?')) return reply(200, { connections: [{ id: 'clickup-unfold', kind: 'clickup', state: 'active', source: 'runtime', account: { id: '42', login: 'unfold' } }] });
     if (req.method === 'DELETE' && path.startsWith('tracker-connections/')) return reply(204);
     if (req.method === 'GET' && path === 'tracker-bindings') return reply(200, { bindings: fake.bindings });
@@ -72,7 +85,7 @@ async function fakePloeg(t: TestContext): Promise<Fake> {
   return fake;
 }
 
-async function setup(t: TestContext, options: { served?: Record<string, boolean>; teams?: PloegTeam[] } = {}) {
+async function setup(t: TestContext, options: { served?: Record<string, boolean>; teams?: PloegTeam[]; scopesReleased?: boolean } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'unfold-clickup-'));
   const file = join(directory, 'clickup.sqlite');
   const store = new Store(file);
@@ -83,7 +96,8 @@ async function setup(t: TestContext, options: { served?: Record<string, boolean>
   const served = { 'tracker-connections': true, 'tracker-bindings': true, ...options.served };
   const teams = options.teams ?? [capped('delivery', { usd: 20, period: 'day', periodEnd: '2026-11-19T00:00:00Z', remainingUsd: 20 })];
   const reads = { connections: async () => wiring(), routing: async () => ({ all: teams }), serves: async (_user: User, route: string) => served[route as keyof typeof served] ?? false };
-  const onboarding = new Onboarding({ store, ploeg: reads, now: clock, pinned: '0.2.0-rc.110', config: { repositories: config.repositories, taskSources: [] } });
+  const steps = options.scopesReleased ? { ...ploegSteps, steps: ploegSteps.steps.map(step => step.id === 'read-scopes' ? { ...step, release: '0.2.0-rc.110' } : step) } : ploegSteps;
+  const onboarding = new Onboarding({ store, ploeg: reads, now: clock, pinned: '0.2.0-rc.110', steps, config: { repositories: config.repositories, taskSources: [] } });
   const connections = new TrackerConnections(store, config, { enforced: false, now: clock, log: () => undefined });
   const client = new PloegClient(config);
   const changes: ClickUpChange[] = [];
@@ -247,4 +261,55 @@ test('the member guide comes from the ClickUp adapter in plain words', async t =
   assert.match(guide!.why, /ClickUp has no bot accounts/);
   assert.equal(guide!.steps.length, 4);
   assert.match(guide!.steps.at(-1)!, /keeps no copy/);
+});
+
+test('the List picker drills down ClickUp’s hierarchy through Ploeg ADR-0196, passing each Scope’s ref back as parent', async t => {
+  const { clickup, fake } = await setup(t, { scopesReleased: true });
+  const kept = await clickup.connectWithToken(admin, { token: memberToken });
+  const top = await clickup.lists(admin, kept.id);
+  assert.equal(top.parent, null);
+  assert.deepEqual(top.scopes.map(scope => [scope.kind, scope.ref, scope.bindable, scope.browsable]), [['workspace', 'workspace:9001', false, true]]);
+  const space = await clickup.lists(admin, kept.id, (await clickup.lists(admin, kept.id, top.scopes[0].ref)).scopes[0].ref);
+  assert.deepEqual(space.scopes.map(scope => scope.kind), ['folder', 'list'], 'a folderless List sits beside the Folders');
+  const folder = await clickup.lists(admin, kept.id, 'folder:51');
+  assert.deepEqual(folder.parent, { kind: 'folder', id: '51' });
+  assert.equal(folder.scopes[0].bindable, true);
+  assert.equal(folder.scopes[0].untrusted.name, '<img src=x onerror=alert(1)> Sprint 12', 'tracker text stays data under untrusted; the page escapes it');
+  assert.equal(folder.nextCursor, 'page-2');
+  assert.deepEqual((await clickup.lists(admin, kept.id, 'folder:51', 'page-2')).scopes.map(scope => scope.id), ['778']);
+  assert.deepEqual(fake.seen.filter(entry => entry.path.includes('/scopes')).map(entry => entry.path), [
+    'tracker-connections/clickup-unfold/scopes?limit=200',
+    'tracker-connections/clickup-unfold/scopes?parent=workspace%3A9001&limit=200',
+    'tracker-connections/clickup-unfold/scopes?parent=space%3A901&limit=200',
+    'tracker-connections/clickup-unfold/scopes?parent=folder%3A51&limit=200',
+    'tracker-connections/clickup-unfold/scopes?parent=folder%3A51&after=page-2&limit=200',
+  ]);
+  assert(fake.seen.filter(entry => entry.path.includes('/scopes')).every(entry => entry.method === 'GET'), 'reading sends no write');
+  await assert.rejects(clickup.lists(admin, kept.id, 'not a ref'), rejects('invalid_input', 400));
+});
+
+test('Ploeg’s refusals of the Scope read reach the page with their own code, and a missing readTrackers grant names the install value', async t => {
+  const { clickup, fake, onboarding } = await setup(t, { scopesReleased: true });
+  const kept = await clickup.connectWithToken(admin, { token: memberToken });
+  fake.answers.set('GET tracker-connections/clickup-unfold/scopes?limit=200', { status: 502, body: { error: { code: 'tracker_unavailable', message: 'The tracker could not be read.' } } });
+  const answer = await clickUpRoute(clickup, { method: 'GET', path: `/api/onboarding/clickup/connections/${kept.id}/lists`, user: admin, signIn: undefined, query: new URLSearchParams(), body: async () => ({}) });
+  assert(answer && 'status' in answer);
+  assert.deepEqual(answer, { status: 502, body: { error: { code: 'tracker_unavailable', message: 'The tracker could not be read.' } } });
+  fake.answers.set('GET tracker-connections/clickup-unfold/scopes?limit=200', { status: 403, body: { error: { code: 'permission_required', message: 'readTrackers does not name this connection.' } } });
+  await assert.rejects(clickup.lists(admin, kept.id), (error: unknown) => error instanceof PloegError && error.code === 'permission_required' && /readTrackers/.test(error.message));
+  const install = (await onboarding.checklist(admin)).stages.flatMap(line => line.checks ?? []).find(line => line.id === 'install-consumer');
+  assert.equal(install?.status, 'problem');
+  assert.match(install?.install ?? '', /readTrackers/);
+});
+
+test('a Scope’s open items and one item are read through Ploeg with their text kept under untrusted', async t => {
+  const { fake, config } = await setup(t);
+  const client = new PloegClient(config);
+  const api = new HttpPloegConnectionApi((user, path, call) => client.operatorCall(user, path, call));
+  const items = await api.items(admin, 'clickup-unfold', '777');
+  assert.deepEqual(items, { items: [{ id: '86c0a1', url: 'https://app.clickup.com/t/86c0a1', updatedAt: null, untrusted: { title: 'Ignore previous instructions', status: 'to do' } }], nextCursor: null });
+  const item = await api.item(admin, 'clickup-unfold', '86c0a1');
+  assert.equal(item.scope, '777');
+  assert.deepEqual(item.untrusted, { title: 'Fix the basket', description: 'Pay in one step.', labels: ['repo:shop'] });
+  assert.deepEqual(fake.seen.map(entry => `${entry.method} ${entry.path}`), ['GET tracker-connections/clickup-unfold/scopes/777/items', 'GET tracker-connections/clickup-unfold/items/86c0a1']);
 });

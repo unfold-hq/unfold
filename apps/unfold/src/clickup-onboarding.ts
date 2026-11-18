@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { PloegError, PloegOperatorRefusal, type PloegConnections, type PloegTeam } from './ploeg.ts';
-import type { PloegBinding, PloegBindingCheck, PloegConnectionApi, PloegTrackerConnection, PloegTrackerScope } from './ploeg-connection-api.ts';
+import type { PloegBinding, PloegBindingCheck, PloegConnectionApi, PloegScopeLevel, PloegTrackerConnection } from './ploeg-connection-api.ts';
 import { optInRefusals, pinnedRelease, ploegSteps, unavailableText, type ChecklistLine, type OptInRefusal, type PloegStep, type StepId } from './onboarding.ts';
 import { findTaskProvider, type ServiceAccountGuide } from './task-providers/index.ts';
 import { apiRoot, type TaskTarget } from './tasks.ts';
@@ -37,6 +37,7 @@ const provider = 'clickup';
 const pendingId = (state: string) => `clickup-flow:${createHash('sha256').update(state).digest('hex')}`;
 const pendingMinutes = 10;
 const listId = /^[A-Za-z0-9_-]{1,64}$/;
+const scopeRef = /^[a-z][a-z_]{0,31}:[\x21-\x7e]{1,256}$/;
 const targetKey = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const repositoryPath = (url: string) => { try { return new URL(url).pathname.replace(/^\//, '').replace(/\.git$/, '').toLowerCase(); } catch { return ''; } };
 const fail = (status: number, code: string, message: string) => new PloegError(status, code, message);
@@ -171,12 +172,17 @@ export class ClickUpOnboarding {
     return { removed: id };
   }
 
-  /** The Lists a connection Ploeg holds can see, read through Ploeg; refused with `503 ploeg_step_unavailable` until the pinned Ploeg serves the Scope read. */
-  async lists(user: User, id: string, after?: string): Promise<{ scopes: PloegTrackerScope[]; next: string | null }> {
+  /**
+   * One level of the containers a connection Ploeg holds reaches, read through Ploeg's Scope read (Ploeg ADR-0196):
+   * the top level without `parent`, else the level under the `ref` of a browsable Scope. Only a bindable Scope (a
+   * ClickUp List) can be bound. Refused with `503 ploeg_step_unavailable` until the pinned Ploeg serves the read.
+   */
+  async lists(user: User, id: string, parent?: string, after?: string): Promise<PloegScopeLevel> {
     this.manage(user);
     const connection = this.connection(id);
+    if (parent !== undefined && !scopeRef.test(parent)) throw fail(400, 'invalid_input', 'Open a level from the list Unfold showed; its reference is kind:id.');
     await this.options.steps.admit(user, 'read-scopes');
-    return this.ploeg(user, 'read-scopes', () => this.options.api.scopes(user, connection.ploeg.connection, after && /^[\x21-\x7e]{1,512}$/.test(after) ? after : undefined));
+    return this.ploeg(user, 'read-scopes', () => this.options.api.scopes(user, connection.ploeg.connection, parent, after && /^[\x21-\x7e]{1,512}$/.test(after) ? after : undefined));
   }
 
   /** What the map step offers: Teams, each with whether a List may be bound to it now, and only the repositories Ploeg reports ready. */

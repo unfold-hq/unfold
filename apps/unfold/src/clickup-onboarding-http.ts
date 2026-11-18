@@ -36,7 +36,7 @@ export async function clickUpRoute(service: ClickUpOnboarding, request: ClickUpR
     if (path === '/api/onboarding/clickup/bindings' && method === 'POST') return { status: 200, body: await service.bind(user, await body()) };
     const connection = path.match(/^\/api\/onboarding\/clickup\/connections\/(tc-[a-f0-9]{12})(?:\/(lists))?$/);
     if (connection && !connection[2] && method === 'DELETE') return { status: 200, body: await service.removeConnection(user, connection[1]) };
-    if (connection && connection[2] && method === 'GET') return { status: 200, body: await service.lists(user, connection[1], query.get('after') ?? undefined) };
+    if (connection && connection[2] && method === 'GET') return { status: 200, body: await service.lists(user, connection[1], query.get('parent') ?? undefined, query.get('after') ?? undefined) };
     const binding = path.match(/^\/api\/onboarding\/clickup\/bindings\/([a-z0-9][a-z0-9-]{0,63})(?:\/(check))?$/);
     if (binding && binding[2] && method === 'POST') return { status: 200, body: { source: await service.check(user, binding[1]) } };
     if (binding && !binding[2] && method === 'DELETE') return { status: 200, body: await service.unbind(user, binding[1]) };

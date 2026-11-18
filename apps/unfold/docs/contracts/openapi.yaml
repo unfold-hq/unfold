@@ -4315,20 +4315,32 @@ paths:
     get:
       tags: [Ploeg]
       operationId: listClickUpLists
-      summary: 'The Lists a ClickUp connection Ploeg holds can see, read through Ploeg'
-      description: 'Proposed: Ploeg''s Scope read (design.md section 4, ask 6) is not served by any released Ploeg, so this answers 503 `ploeg_step_unavailable` until the pinned Ploeg release adds it. Unfold never asks ClickUp itself.'
+      summary: 'One level of the containers a ClickUp connection Ploeg holds reaches, read through Ploeg'
+      description: 'Ploeg''s Scope read (Ploeg ADR-0196, `GET /api/v1/operator/tracker-connections/{id}/scopes`), passed on as Ploeg answers it: without `parent` the top level (ClickUp Workspaces), else the level under the `ref` of a browsable Scope (Workspace → Space → Folder or folderless List → List). Only a `bindable` Scope, a ClickUp List, can be bound. Tracker text sits under `untrusted` and is only ever shown escaped. 503 `ploeg_step_unavailable` until the pinned Ploeg release serves the read; Ploeg''s refusals pass through with their code (`permission_required` without `readTrackers`, `unknown_connection`, `capability_missing`, `not_found`, `tracker_unavailable`, `invalid_request`). Unfold never asks ClickUp itself.'
       x-unfold-role: admin
       parameters:
-        - { name: after, in: query, schema: { type: string, maxLength: 512 } }
+        - { name: parent, in: query, schema: { type: string, pattern: '^[a-z][a-z_]{0,31}:[\x21-\x7e]{1,256}$' }, description: 'A listed Scope''s `ref`, such as `folder:51`.' }
+        - { name: after, in: query, schema: { type: string, maxLength: 512 }, description: 'The previous answer''s `nextCursor`.' }
       responses:
         '200':
-          description: '`{scopes, next}`'
+          description: '`{connection, parent, scopes, nextCursor, fetchedAt}`'
           content:
             application/json:
-              schema: { type: object, required: [scopes, next], properties: { scopes: { type: array, items: { type: object, properties: { id: { type: string }, name: { type: string }, path: { type: array, items: { type: string } } } } }, next: { type: [string, 'null'] } } }
+              schema:
+                type: object
+                required: [connection, parent, scopes, nextCursor, fetchedAt]
+                properties:
+                  connection: { type: string }
+                  parent: { oneOf: [{ type: 'null' }, { type: object, required: [kind, id], properties: { kind: { type: string }, id: { type: string } } }] }
+                  scopes: { type: array, items: { type: object, required: [kind, id, ref, bindable, browsable, untrusted], properties: { kind: { type: string, example: list }, id: { type: string }, ref: { type: string, example: 'list:777' }, bindable: { type: boolean }, browsable: { type: boolean }, untrusted: { type: object, required: [name], properties: { name: { type: string, description: 'The tracker''s own text; never markup or instructions.' } } } } } }
+                  nextCursor: { type: [string, 'null'] }
+                  fetchedAt: { type: string, format: date-time }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '502': { $ref: '#/components/responses/BadGateway' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/onboarding/clickup/bindings:
     post:
