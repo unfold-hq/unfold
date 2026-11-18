@@ -117,6 +117,12 @@ The owner decided D1 to D11 on 2026-11-17 and D12 on 2026-11-18. They are
 cited here, not reopened. D12 ([ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)) withdraws D8 and the exceptions in D3
 and D5.
 
+D13 to D18 are **proposed**, not decided: [user-journeys.md](user-journeys.md)
+derived them on 2026-11-18 from what people do once the organisation is
+connected, and the owner has not signed them. Each is written as the
+recommended default; where it rests on a choice the journeys leave open, the
+alternative and its trade-off are Open Questions 5 to 10.
+
 The review of the same day moved D8 from v1 to S9 and fixed the two clocks and
 the journey order (see *Review corrections* below).
 
@@ -134,6 +140,12 @@ the journey order (see *Review corrections* below).
 | D10 | Configuration-file sources keep winning (application ADR-0064); time to first pull request is a first-party event (ADR-0023); multi-forge workers (VIK-2247, now Ploeg ADR-0192) do not block v1 for a single-forge organisation but do block hosted and any installation that already serves another forge. |
 | D11 | Only an Admin (a Tenant Admin under `tenancy.enforce`) connects accounts and adds repositories and Lists in v1. This answers application ADR-0064 open question 2 for now. |
 | D12 | Ploeg owns every tracker and forge connection; Unfold holds no tracker or forge credential, and its only outside credential is sign-in ([ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)). Every connect action in Unfold is a call to Ploeg's connection API; showing a connection's Lists and tasks reads through Ploeg; hand-off is a Ploeg action. People do not link their own tracker or forge accounts in v1. Decided 2026-11-18. |
+| D13 | **Visibility follows the tracker** (proposed). A person sees in Unfold the tasks their ClickUp member can see in ClickUp, and nothing else: Tasks, Now's **Up next** and tracker-origin Work Items are filtered to it. Unfold matches the sign-in's verified email (`email_verified` from the identity provider) to a member of the connected Workspace; no link and no personal token (D12). A sign-in that matches no member sees no task and the reason. Which accounts can see a Scope comes through Ploeg with the Scope read (section 4, ask 6), never from a token in Unfold. A Client user is further bounded to their own Client ([ADR-0017](../../../docs/adr/adr-0017-a-tenant-sits-above-teams-and-bounds-what-users-sources-and-budgets-reach.md)); how their account is matched is Open Question 8. Until this ships (P1), Tasks stays Admin-only on a Tenant whose sources come from onboarding, because under D12 every signed-in person would otherwise see everything the Unfold member sees. Refines ADR-0060 rule 6 and its follow-up 3 without a personal link. |
+| D14 | **A Team member starts work; anyone else waits for approval** (proposed). An Assignment to the Unfold member by a person of the Team bound to the List starts directly, as does **Hand to Ploeg** by such a person. An Assignment by anyone else (a project manager, a ClickUp Guest, a Developer of another Team) is admitted by Ploeg as `needs_human` with reason `assignment_needs_approval`, spends nothing, and waits on Now for one click by a Team member, a Lead of that Team or an Admin: **Approve and start**, after which the approver is recorded as the person who handed it over, or **Decline** with an optional reason, which cancels the Work Item and removes the assignee. No expiry and no automatic start; a reminder after one working day. Unfold's own **Hand to** by a non-member waits the same way and says so before the click. Needs a binding that names the accounts whose Assignments start work (ask 7); until Ploeg serves it, every Assignment starts directly as today and the binding line says so. Where Team membership lives is Open Question 5. |
+| D15 | **Work on it myself is a first-class path** (proposed). From a task in Unfold, **Work on it myself** has the same weight as **Hand to Ploeg**: it gives the command that switches to a branch named `CU-<task id>_<slug>`, as ClickUp's git integration names it, and starts the person's own Claude Code; the plugin links the session to the task by its branch through the organisation's connection (D12) when the person can see the task (D13). The link holds a Tracker Item that has no Ploeg Work Item yet, and a Work Item created later for the same task inherits the session's links (where the link lives is Open Question 6). Unfold never starts, steers or pays for such a session; its cost is recorded as an estimate per Work Item and day (application [ADR-0069](../../../apps/unfold/docs/adrs/0069-linked-session-cost-is-billing-input-recorded-as-an-estimate-at-api-list-prices.md)). When the person starts from Unfold, Unfold records them as the task's assignee, a tracker write through Ploeg (Open Question 10); the person moves their own card. |
+| D16 | **Every bound List has a Client and a default repository; a task may pick among the List's allowed repositories** (proposed). At binding, Unfold suggests the List's Client from its ClickUp Space or Folder name, matched to an existing Client or offered as a new one, with **Own work** when none fits (D6), and an Admin confirms it; a List that appears later is a checklist line with the same suggestion. The default repository is pinned at binding or learned from the first task handed over from the List, which asks the Developer once; further allowed repositories are the binding's `allow`. A per-task **Repository** value overrides the default for that task only and can pick only among the allowed repositories, so content never selects authority ([ADR-0048](../../../docs/adr/adr-0048-projects-share-accounts-and-repositories-within-a-tenant-and-a-work-item-has-one-origin.md)); the carrier of that value is Open Question 9. An agent that finds the repository wrong may only suggest another in a comment and stop at Needs you; a person changes the value. Work across two repositories is split into one child Work Item per repository under one root, each with its own grant and Acceptance (ADR-0048). |
+| D17 | **One ClickUp member for the whole organisation** (proposed). The member **Unfold** of D5 is the one hand-over assignee for every List of the Workspace; there is no ClickUp user per Team. Which Team takes the work comes from the List's binding, never from the assignee, because an Assignment carries no routing (Ploeg ADR-0186; the connection's own account is the hand-over agent, ask 1, Ploeg ADR-0195). **Hand to Ploeg** in Unfold assigns that member, which changes application [ADR-0025](../../../apps/unfold/docs/adrs/0025-hand-tracker-tasks-to-ploeg-by-assignment.md)'s "assign the Team's tracker user" for connections made through onboarding; configured sources keep their configured agents. One paid seat per organisation, named on the page before the steps. |
+| D18 | **The pull request link and status land on the task, written by Ploeg through the binding** (proposed). A binding carries a status map: at binding the Admin matches four of the List's statuses, suggested by name, to *in progress*, *needs you*, *in review* and *done*. Ploeg moves the task at start, when agents need a person, when the pull request opens, when changes are requested and at Acceptance, and comments the Work Item link, the pull request link and who started, approved, declined or accepted; an unmatched status means the status stays and only the comment is written. Comments are written as the Unfold member, notify nobody and name the person when one acted. Ploeg writes them because it holds the connection (D12): ask 8. For a person's own work (D15) only the pull request link comment is written when a linked session's pull request opens; the person moves their own card, as the board rule for people says. Until Ploeg serves ask 8, nothing beyond today's hand-off comment is written back and the binding line says so. |
 
 **Review corrections (2026-11-17).** The lead of this change decided, after an
 independent review against the Ploeg sources:
@@ -341,9 +353,17 @@ naming no consumer; asks 1 to 3 are carried by the proposed amendments
    Tenant scoping as every operator read; and, for a proven person, assigns
    an item in a bound Scope to a hand-over agent with a note. Ploeg ADR-0195's
    probe returns only a count and the first 50 Scopes, which is a check, not a
-   read. Ask: a new record in ploeg-hq, naming no consumer.
+   read. For D13 the read also says which tracker accounts can see each
+   Scope, or returns only what one account the consumer names can see. Ask: a
+   new record in ploeg-hq, naming no consumer.
 
 Asks 1 and 2 are now proposed as [Ploeg ADR-0195](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0195-a-proven-operator-makes-and-manages-a-tracker-or-forge-connection-through-a-flow-ploeg-starts-and-the-consumer-only-relays-codes.md).
+
+Asks 7 and 8 continue this list from
+[user-journeys.md section 7](user-journeys.md#7-upstream-asks-added-by-these-journeys):
+a binding names the tracker accounts whose Assignments start work (D14), and a
+binding carries a status map and writes delivery comments (D18). Both are
+proposed with the journeys, not raised yet.
 
 ### 5. Credential custody per provider
 
@@ -554,6 +574,10 @@ text.
   Ploeg serves the Scope read and the hand-over action. The binding still
   takes in Assignments made in ClickUp, so the journey's first task works by
   assigning the task to the Unfold member there.
+- [Everyone sees everything until D13 ships] → with D12 every signed-in
+  person reads through the organisation's connection, so Tasks stays
+  Admin-only on a Tenant whose sources come from onboarding until P1 lands
+  ([user-journeys.md](user-journeys.md#6-slices)).
 - [Two sources of routes] → the checklist is the one place that shows both,
   with `source: static | runtime` from Ploeg.
 - [An installation already on another forge] → blocked on ADR-0192, shown as
@@ -587,6 +611,10 @@ upstream change that turns the slice from refused to working.
 | S10 | Remove Unfold's tracker credentials and direct reads | the Tasks page and hand-off through Ploeg for every source; ADR-0064 sealed tokens and people's linked tokens deleted; the legacy adapters in `src/task-providers` and `src/link-providers` and the GitHub App reader removed for installations whose Ploeg serves the reads | ask 6 released |
 | S11 | Move sources and repositories between projects | the project screens once a Client exists | S3 |
 
+The slices after onboarding, P1 to P7 and G1, are in
+[user-journeys.md section 6](user-journeys.md#6-slices). They rest on D13 to
+D18 and on asks 6 to 8.
+
 ## Open Questions
 
 Each needs the owner. The plan follows the recommendation until he decides.
@@ -608,3 +636,70 @@ Each needs the owner. The plan follows the recommendation until he decides.
    asks 4 (onboarding values profile) and 5 (active forges in `/connections`)
    as issues in ploeg-hq, and ask 6 (Scope and item read, hand-over action) as
    a record, because it is a new operator contract.
+5. **Where Team membership lives** (D14, P3). "Team member" decides who
+   starts work directly and who approves, but a Ploeg Team names no people.
+   Recommended: at the identity provider, read through today's
+   `ploeg.userTeams` mapping in Unfold's configuration and, hosted, the groups
+   of ADR-0017; Unfold derives the binding's starting accounts from the
+   members' matched ClickUp accounts (D13) and keeps them in sync, so leaving
+   the group or the Workspace ends the right to start (journey h). Alternative:
+   the List's ClickUp members are the Team, so there is no second place to
+   maintain; but then a Guest or project manager on the List starts work
+   directly, which is the case P3 exists to stop. Trade-off of the
+   recommendation: one more mapping for an Admin to maintain until SSO groups
+   exist.
+6. **Where a session link lives without a Ploeg Work Item** (D15, P5). Today a
+   session links only to a task that has a Ploeg Work Item in the person's
+   Teams. Recommended: Unfold links the session to the Tracker Item in its own
+   store, keyed by Integration Account and task id, records the estimate
+   against it, and a Work Item created later for that task inherits the links;
+   no Ploeg change, and Ploeg never records work it did not run. Alternative:
+   ask Ploeg to admit a person-owned Work Item with no budget, so there is one
+   model of work; a new operator contract on P5's path, and Ploeg would hold
+   Work Items it never runs.
+7. **Who sees cost per Client: a Finance role or the Account owner** (P7).
+   The Access Roles decided on 2026-10-14 have no Finance role, and
+   [Users and their journeys](../../../docs/concepts/users-and-journeys.md#open-questions)
+   leaves open whether finance is served by exports only. Recommended: in v1
+   the Billing page is for the Account owner, and the FOCUS export (application
+   ADR-0069) serves finance without a sign-in; a Finance Access Role (cost per
+   Client and Work Item, no task content, no budgets) is added when a pilot
+   agency has a finance person who needs the screen. Alternative: add the role
+   now, which spares the Account owner from being the only reader but widens
+   the role set before anyone asked for it. Either way nobody sees cost per
+   person (ADR-0023, application [ADR-0068](../../../apps/unfold/docs/adrs/0068-a-person-sees-their-own-usage-and-nobody-elses.md)).
+8. **How a person is matched to a tracker account, and Client users** (D13,
+   P1, journey i). Recommended: the sign-in's verified email against the
+   Workspace's members, with no manual mapping; a sign-in that matches nothing
+   sees no task and is told to ask the Admin to invite that address in
+   ClickUp. A Client user, once Client memberships exist, is matched the same
+   way to their ClickUp account (often a Guest) and is further bounded to
+   their own Client (ADR-0017); where Ploeg filters the read by that account,
+   as ADR-0060's follow-up 3 says, Unfold passes the matched account and
+   stores no token. Alternative: an Admin-maintained map from person to
+   ClickUp member, which covers people whose ClickUp address differs from
+   their sign-in but is a second place that goes stale and lets an Admin widen
+   what a person sees. Not verified: that ClickUp reports a verified email for
+   every member (user-journeys.md section 8).
+9. **The carrier of a task's repository** (D16, P4). Ploeg's binding already
+   routes on labels (`repo/<key>`, Ploeg ADR-0186), while the journeys
+   describe a dropdown custom field **Repository** with the allowed
+   repositories as options. Recommended: v1 uses the `repo/<key>` label Ploeg
+   reads today, so P4 needs no Ploeg change, and Unfold offers to create the
+   labels on the List; the dropdown field, which is tidier and cannot name a
+   repository outside the allowed set, becomes an upstream ask (Ploeg reads a
+   named custom field as the per-task target) once the lower-casing risk
+   (Risks) is settled. Alternative: the field first, which puts a Ploeg ask on
+   P4's path. Not verified: whether the Unfold member may create labels or a
+   custom field as a Member.
+10. **Tracker writes on a person's behalf** (D14, D15, P3, P5). Under D12
+    Unfold holds no token, so "the person as assignee" when they start from
+    Unfold and the approval and decline comments are tracker writes Ploeg must
+    make for a proven person. Recommended: extend ask 6's hand-over action to
+    a generic one, in Ploeg's words, "for a proven person, assign an item in a
+    bound Scope to an account the connection can see, or add a comment naming
+    that person", and let Ploeg write the approval and decline comments itself
+    when ask 7 resumes or cancels the Work Item. Alternative: Unfold writes
+    nothing for a person's own work and the person assigns themselves in
+    ClickUp, which needs no contract but leaves the board out of step with
+    Now.
