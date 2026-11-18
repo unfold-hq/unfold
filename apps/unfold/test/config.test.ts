@@ -89,6 +89,16 @@ test('an OIDC subject namespace is kept without its trailing slash, and an empty
   await assert.rejects(load(t, { auth: { oidc: { ...oidc, subjectNamespace: ' ' } } }), /auth.oidc.subjectNamespace must be a non-empty string/);
 });
 
+test('auth.oidc.exchange.provision is off unless set, must be a boolean, and needs match subject', async t => {
+  const oidc = { issuer: 'https://auth.example/application/o/unfold/', clientId: 'unfold' };
+  const exchange = (value: Record<string, unknown>) => load(t, { auth: { oidc: { ...oidc, exchange: { audiences: ['machine-helper'], ...value } } } });
+  assert.deepEqual((await exchange({})).auth.oidc!.exchange, { audiences: ['machine-helper'], match: 'subject', provision: false });
+  assert.equal((await exchange({ provision: true })).auth.oidc!.exchange!.provision, true);
+  await assert.rejects(exchange({ provision: 'yes' }), /\/auth\/oidc\/exchange\/provision: must be true or false/);
+  await assert.rejects(exchange({ provision: true, match: 'email' }), /auth.oidc.exchange.provision needs match subject/);
+  await assert.rejects(exchange({ provisioning: true }), /\/auth\/oidc\/exchange\/provisioning: unknown key \(did you mean provision\?\)/);
+});
+
 test('unfold-mcp over HTTP is off unless UNFOLD_MCP_RESOURCE is set, and then needs live mode and single sign-on', async t => {
   const oidc = { issuer: 'https://auth.example/application/o/unfold/', clientId: 'unfold' };
   assert.equal((await load(t, { auth: { oidc } })).mcp, undefined);

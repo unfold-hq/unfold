@@ -320,6 +320,7 @@ How people sign in.
 | `auth.oidc.exchange` | object |  | Lets an editor trade a token from this issuer for an editor credential without a browser approval (RFC 8693). Off unless set. |
 | `auth.oidc.exchange.audiences` | list of string (1–20 entries) |  | Audiences a traded token's aud must name one of, such as the client id of the tool that already signs people in. |
 | `auth.oidc.exchange.match` | one of `subject`, `email` | `subject` | How a traded token finds its account: by sub, as browser sign-in does, or by verified email for a client whose sub differs. |
+| `auth.oidc.exchange.provision` | boolean | `false` | Create the account a traded token names when none exists, as browser sign-in would, with the role its claims entitle. Needs match subject. |
 
 ### `ploeg`
 

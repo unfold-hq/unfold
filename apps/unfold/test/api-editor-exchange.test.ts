@@ -8,7 +8,7 @@ import { subjectUserId } from '../src/oidc.ts';
 const grant = 'urn:ietf:params:oauth:grant-type:token-exchange';
 const jwtType = 'urn:ietf:params:oauth:token-type:jwt';
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
-const exchanging = (match?: 'subject' | 'email') => ({ configure: (config: any) => { config.auth.oidc.exchange = { audiences: ['telemetry-helper'], match: match ?? 'subject' }; } });
+const exchanging = (match?: 'subject' | 'email', provision = false) => ({ configure: (config: any) => { config.auth.oidc.exchange = { audiences: ['telemetry-helper'], match: match ?? 'subject', provision }; } });
 
 async function exchange(url: string, subjectToken: string, extra: Record<string, unknown> = {}) {
   return request(url, '/api/auth/editor/exchange', { method: 'POST', body: { grant_type: grant, subject_token: subjectToken, subject_token_type: jwtType, client: 'claude-code', host: 'ada-laptop', ...extra }, csrf: false });
@@ -76,6 +76,59 @@ test('Unfold refuses a token from another issuer, for another audience, expired,
   assert.equal(wrongGrant.body.error.code, 'unsupported_grant_type');
   const wrongType = await exchange(server.url, idp.mint(claimsFor(idp.issuer)), { subject_token_type: 'urn:ietf:params:oauth:token-type:saml2' });
   assert.equal(wrongType.body.error.code, 'invalid_request');
+});
+
+test('without provision a token for a person without an account is refused, however entitled, and no account appears', async t => {
+  const { server, idp } = await workbench(t, exchanging());
+  const newcomer = subjectUserId(idp.issuer, 'newcomer@example.com');
+  const refused = await exchange(server.url, idp.mint(claimsFor(idp.issuer, { sub: 'newcomer@example.com', email: 'newcomer@example.com', groups: ['unfold-admins'] })));
+  assert.equal(refused.status, 403, refused.text);
+  assert.equal(refused.body.error.code, 'exchange_unknown_person');
+  assert.equal(server.app.store.getUser(newcomer), undefined);
+});
+
+test('with provision a first exchange creates the account browser sign-in would, with the role its claims entitle, and a second exchange finds it', async t => {
+  const { server, idp } = await workbench(t, exchanging('subject', true));
+  const newcomer = subjectUserId(idp.issuer, 'newcomer@example.com');
+  const claims = { sub: 'newcomer@example.com', email: 'newcomer@example.com', preferred_username: 'newcomer', groups: ['unfold-viewers', 'unfold/agency/member'] };
+  const first = await exchange(server.url, idp.mint(claimsFor(idp.issuer, claims)));
+  assert.equal(first.status, 200, first.text);
+  assert.equal(first.body.user.id, newcomer);
+  assert.equal(first.body.user.role, 'viewer');
+  const created = server.app.store.getUser(newcomer)!;
+  assert.equal(created.name, 'newcomer@example.com', 'named after the email, as browser sign-in names it');
+  assert.equal(created.role, 'viewer');
+  assert.equal(created.passwordHash, '', 'a single sign-on account, never a local one');
+  assert.deepEqual(created.memberships, [{ kind: 'tenant', tenant: 'agency', role: 'developer' }], 'memberships from the groups, as browser sign-in stores them');
+  assert.equal((await request(server.url, '/api/bootstrap', { headers: bearer(first.body.access_token) })).status, 200);
+
+  const second = await exchange(server.url, idp.mint(claimsFor(idp.issuer, { ...claims, groups: ['unfold-admins'] })));
+  assert.equal(second.status, 200, second.text);
+  assert.equal(second.body.user.id, newcomer);
+  assert.equal(server.app.store.getUser(newcomer)!.role, 'viewer', 'an existing account keeps its role: the exchange never changes one');
+  assert.equal(server.app.store.editorCredentials(newcomer).length, 2);
+
+  const { callback } = await signIn(server, idp);
+  assert.equal(callback.status, 303);
+  assert.equal(server.app.store.getUser(subjectUserId(idp.issuer, 'person@example.com'))!.role, 'operator', 'browser sign-in still works beside it');
+});
+
+test('with provision a token that entitles no role, or fails any check, creates nobody', async t => {
+  const { server, idp } = await workbench(t, exchanging('subject', true));
+  const now = Math.floor(Date.now() / 1000);
+  const entitled = { sub: 'stranger@example.com', email: 'stranger@example.com', groups: ['unfold-viewers'] };
+  const refusals: Array<[string, string, number, string]> = [
+    ['no entitled role', idp.mint(claimsFor(idp.issuer, { sub: 'stranger@example.com', email: 'stranger@example.com', groups: ['guests'] })), 403, 'oidc_not_entitled'],
+    ['another issuer', idp.mint(claimsFor('https://idp.example.org', entitled)), 400, 'invalid_grant'],
+    ['another audience', idp.mint(claimsFor(idp.issuer, { ...entitled, aud: 'unfold-elsewhere' })), 400, 'invalid_grant'],
+    ['expired', idp.mint(claimsFor(idp.issuer, { ...entitled, iat: now - 7200, exp: now - 3600 })), 400, 'invalid_grant'],
+  ];
+  for (const [name, token, status, code] of refusals) {
+    const refused = await exchange(server.url, token);
+    assert.equal(refused.status, status, `${name}: ${refused.text}`);
+    assert.equal(refused.body.error.code, code, name);
+    assert.equal(server.app.store.getUser(subjectUserId(idp.issuer, 'stranger@example.com')), undefined, name);
+  }
 });
 
 test('under match email a client with its own subjects finds the account by verified email, and an unverified email finds nobody', async t => {

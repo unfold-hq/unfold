@@ -24,7 +24,7 @@ import { parseEditorWindow } from './ahp/editor-window.ts';
 import { agentHostTokenId, type AgentsWindowTarget, repositoryFolderPaths, protocolBaselines as agentHostProtocolVersions, protocolVersion as agentHostProtocolVersion } from './ahp/host.ts';
 import { agentHostAuthority, agentsWindowSessionLinks } from '../public/core/agents-window.js';
 import { isLinkProvider, type Links } from './links.ts';
-import type { Oidc } from './oidc.ts';
+import type { Oidc, OidcIdentity } from './oidc.ts';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { StatusBoard, gatewayProbe } from './status.ts';
@@ -404,6 +404,18 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   notifications.start();
   const traceComments = config.ploeg && !ploeg.isDemo ? new AgentTraceComments(ploeg, linked.store, { jobs, enabled: team => flags.getBooleanValue('linked.trace-comment', false, { targetingKey: `team:${team}`, tenantId: defaultTenant, mode: config.mode, team }) }) : undefined;
   const signOffs = config.ploeg && !ploeg.isDemo ? new ClientSignOffs(ploeg, new ClientSignOffStore(store.db), { jobs, enabled: team => flags.getBooleanValue('client.sign-off', false, { targetingKey: `team:${team}`, tenantId: defaultTenant, mode: config.mode, team }), commentEnabled: team => flags.getBooleanValue('client.sign-off-comment', false, { targetingKey: `team:${team}`, tenantId: defaultTenant, mode: config.mode, team }) }) : undefined;
+  const admittedAccount = (identity: OidcIdentity, disabled: () => never): string => {
+    if (!lifecycle.admit(identity)) disabled();
+    const claimedName = identity.email ?? identity.name;
+    const name = store.upsertUser({ id: identity.id, name: claimedName, role: identity.role, passwordHash: '', memberships: identity.memberships });
+    if (name !== claimedName) console.error(JSON.stringify({ level: 'warn', event: 'login.name_taken', method: 'oidc', user: identity.id, name }));
+    return name;
+  };
+  const provisionExchangedAccount = (claims: Record<string, unknown>): void => {
+    const identity = oidc!.identity(claims);
+    admittedAccount(identity, () => fault(403, 'exchange_unknown_person', 'The identity provider turned this person\'s account off, so Unfold does not create one.'));
+    console.log(JSON.stringify({ level: 'info', event: 'editor.provisioned', actor: identity.id, role: identity.role }));
+  };
   const mcpPerson = (id: string) => { const record = store.getUser(id); return record && lifecycle.admit({ id }) ? signedInUser(record) : undefined; };
   const mcpEvents = new McpEvents(store, { jobs, settings: config.outboundEvents, tenancy: tenants, enabled: user => flags.getBooleanValue('mcp.events', false, flagContext(user)), allowsTeam: (user, team) => ploeg.allows(user, team), findUser: mcpPerson, baseUrl: config.baseUrl });
   const outbound = new OutboundEvents(store, { jobs, settings: config.outboundEvents, tenancy: tenants, enabled: tenant => flags.getBooleanValue('events.webhooks', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), ...(config.ploeg && !ploeg.isDemo ? { ploeg, ploegTeams: config.ploeg.teams } : {}), baseUrl: config.baseUrl, calendar: config.acceptanceCalendar, demo: config.mode === 'demo', sink: (event, source, facts, at) => mcpEvents.sink(event, source, facts, at) });
@@ -543,8 +555,10 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         const claims = await oidc.exchangeClaims(typeof data.subject_token === 'string' ? data.subject_token : '');
         const userId = exchangedAccountId(config.auth.oidc!, claims, name => store.getUserByName(name));
         if (!userId) fault(403, 'exchange_unknown_person', 'The token names nobody Unfold can match to an account. Sign in to Unfold in the browser once, then try again.');
+        const provisioned = exchange.provision && !store.getUser(userId!);
+        if (provisioned) provisionExchangedAccount(claims);
         const issued = auth.exchangeEditor(userId!, editorLabel(data.client, data.host));
-        console.log(JSON.stringify({ level: 'info', event: 'editor.exchanged', actor: issued.user.id, audience: claims.aud, match: exchange.match }));
+        console.log(JSON.stringify({ level: 'info', event: 'editor.exchanged', actor: issued.user.id, audience: claims.aud, match: exchange.match, provisioned }));
         return json(res, 200, { access_token: issued.token, issued_token_type: 'urn:ietf:params:oauth:token-type:access_token', token_type: 'Bearer', expires_in: Math.floor((Date.parse(issued.expiresAt) - Date.now()) / 1000), expiresAt: issued.expiresAt, familyExpiresAt: issued.familyExpiresAt, user: issued.user });
       }
       if (method === 'POST' && editorCollect) {
@@ -565,10 +579,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         try {
           if (denied) throw Object.assign(new Error(denied), { code: denied.replace(/[^a-z_]/gi, '').slice(0, 40) || 'denied' });
           const identity = await oidc.complete(url.searchParams.get('code') ?? '', url.searchParams.get('state') ?? '', auth.browserBinding(req), url.searchParams.get('iss') ?? undefined);
-          if (!lifecycle.admit(identity)) throw Object.assign(new Error('The identity provider turned this account off.'), { code: 'account_disabled' });
-          const claimedName = identity.email ?? identity.name;
-          const name = store.upsertUser({ id: identity.id, name: claimedName, role: identity.role, passwordHash: '', memberships: identity.memberships });
-          if (name !== claimedName) console.error(JSON.stringify({ level: 'warn', event: 'login.name_taken', method: 'oidc', user: identity.id, name }));
+          const name = admittedAccount(identity, () => { throw Object.assign(new Error('The identity provider turned this account off.'), { code: 'account_disabled' }); });
           const issued = auth.issue({ id: identity.id, name, role: identity.role, memberships: identity.memberships });
           if (proof && identity.tokens) proof.remember(issued.signIn, identity.id, identity.subject, identity.tokens);
           if (identity.editor) auth.claimEditor(identity.editor, issued.user);
