@@ -51,6 +51,8 @@ When the gateway also accepts a credential in request headers, store it with **U
 
 For a [Cloudflare Access service token](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/), add `CF-Access-Client-Id` and `CF-Access-Client-Secret`, and have the gateway's operator give the application a Service Auth policy that includes the token. Any gateway that takes a fixed credential in a header works the same way.
 
+Your own Cloudflare Access session works too, without a service token and without asking the operator for anything. Run `cloudflared access login https://<workbench>`, then store the output of `cloudflared access token -app=https://<workbench>` as the header `cf-access-token` ([Cloudflare's command-line guide](https://developers.cloudflare.com/cloudflare-one/tutorials/cli/)). The gateway then knows it is you. The token lasts as long as the session the gateway's administrator configured, after which you store a new one.
+
 The extension then sends those headers with every request to that workbench: API calls, the live event stream and downloads. Things to know:
 
 - The headers are a second credential beside your Unfold sign-in, kept in VS Code SecretStorage under the workbench's origin. They never appear in settings, never reach the webview, and are never sent anywhere else, because the extension follows no redirect. **Sign Out** leaves them in place; remove them with the same command.
@@ -60,7 +62,7 @@ The extension then sends those headers with every request to that workbench: API
 - The browser sign-in still opens your browser, which signs in to the gateway its own way.
 - VS Code's Agents window makes its own connection to the workbench and takes no headers, so behind an access gateway it stays **Not connected**. The same holds for the **Ploeg** server in VS Code chat when that server sits behind a gateway: its definition carries a URL only.
 
-The tests run the client against a local server that redirects to a sign-in page until it sees the headers. Against Cloudflare Access, checked on 2026-11-18: without headers the extension names the gateway's sign-in host, and with a service token Access does not know it reports that the gateway refused the stored headers. Not checked yet: a service token the gateway admits, and the command in a desktop VS Code.
+The tests run the client against a local server that redirects to a sign-in page until it sees the headers. Against Cloudflare Access, checked on 2026-11-18: without headers the extension names the gateway's sign-in host, and with a service token Access does not know it reports that the gateway refused the stored headers. Not checked yet: a service token or a personal token the gateway admits, and the command in a desktop VS Code.
 
 ## Use Unfold from the Agents window
 
