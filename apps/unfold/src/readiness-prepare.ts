@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { PloegError, type PloegAdmitted, type PloegCancellation, type PloegClient, type PloegConnectionRepository, type PloegConnections, type PloegPrepareAdmission, type PloegTeam } from './ploeg.ts';
 import type { ChecklistAction, ChecklistLine, Onboarding, TeamBudget } from './onboarding.ts';
 import { defaultTenant } from './tenancy.ts';
@@ -16,7 +16,7 @@ export type PrepareRecord = {
   pullRequest: { url: string; state: 'open' | 'closed' | 'unknown' } | null; cancelledAt?: string; ploegState?: string;
 };
 /** What the checklist's Prepare and Review-and-merge stages show, and the repositories a person may now bind a List to. */
-export type ReadinessLines = { prepare: ChecklistLine; review: ChecklistLine; bindable: string[] };
+export type ReadinessLines = { prepare: ChecklistLine; review: ChecklistLine | null; bindable: string[] };
 
 type PreparePloeg = Pick<PloegClient, 'connections' | 'routing' | 'admitPrepare' | 'decide' | 'detail'> & { readonly isDemo: boolean };
 type Gate = Pick<Onboarding, 'manages' | 'admit' | 'pullRequestOpened'>;
@@ -78,7 +78,8 @@ export class ReadinessPrepare {
     if (this.ploeg.isDemo) throw new PloegError(409, 'ploeg_demo', 'The demo opens no readiness pull request: no Run starts and no money is spent.');
     await this.onboarding.admit(user, 'prepare-repository', team);
     return this.locked(target, async () => {
-      const held = this.records()[target];
+      const stored = this.records()[target];
+      const held = stored?.state === 'admitted' && stored.workItemId ? await this.follow(user, stored, true, true) : stored;
       if (held?.state === 'admitted') return { prepare: held, replayed: true };
       const repository = (await this.ploeg.connections(user, true)).repositories.find(entry => entry.key === target);
       if (!repository) throw new PloegError(404, 'ploeg_not_found', 'Ploeg reports no registered repository with that key.');
@@ -89,15 +90,17 @@ export class ReadinessPrepare {
       if (cap !== usd) throw new PloegError(409, 'spend_cap_changed', `The cap that bounds the readiness Run is ${dollars(cap)} now, not the ${dollars(usd)} you confirmed. Read it again and confirm it.`);
       const replay = held?.state === 'admitting' && held.team === team && held.budgetUsd === usd;
       const attempt = replay ? held.attempt : (held?.attempt ?? 0) + 1;
-      const record: PrepareRecord = { target, team, attempt, requestId: `prepare-${createHash('sha256').update(target).digest('hex').slice(0, 32)}-${attempt}`, budgetUsd: usd, by: { id: user.id, name: user.name }, at: this.now().toISOString(), workItemId: null, state: 'admitting', pullRequest: null };
+      const requestId = replay ? held.requestId : `prepare-${createHash('sha256').update(target).digest('hex').slice(0, 24)}-${attempt}-${randomBytes(8).toString('hex')}`;
+      const tracked = held?.pullRequest && held.pullRequest.state !== 'closed' && held.state !== 'ended' ? held.pullRequest : null;
+      const record: PrepareRecord = { target, team, attempt, requestId, budgetUsd: usd, by: { id: user.id, name: user.name }, at: this.now().toISOString(), workItemId: null, state: 'admitting', pullRequest: tracked };
       this.save(target, record);
       let admitted: PloegAdmitted;
       try { admitted = await this.ploeg.admitPrepare(user, { requestId: record.requestId, team, target, budgetUsd: usd } satisfies PloegPrepareAdmission); }
       catch (error) {
-        if (error instanceof PloegError && error.status >= 400 && error.status < 500) this.save(target, held && held.state !== 'admitting' ? held : null);
+        if (error instanceof PloegError && error.status >= 400 && error.status < 500 && error.code !== 'prepare_in_progress') this.save(target, held && held.state !== 'admitting' ? held : null);
         throw error;
       }
-      const prepare: PrepareRecord = { ...record, workItemId: admitted.id, state: 'admitted' };
+      const prepare: PrepareRecord = { ...record, workItemId: admitted.id, state: 'admitted', pullRequest: null };
       this.save(target, prepare);
       return { prepare, replayed: admitted.replayed };
     });
@@ -114,7 +117,8 @@ export class ReadinessPrepare {
     if (!target) throw new PloegError(400, 'invalid_input', 'Name the repository whose readiness Work Item to cancel: {target}.');
     if (this.ploeg.isDemo) throw new PloegError(409, 'ploeg_demo', 'The demo runs no readiness Work Item, so there is nothing to cancel.');
     return this.locked(target, async () => {
-      const held = this.records()[target];
+      const stored = this.records()[target];
+      const held = stored?.state === 'admitted' && stored.workItemId ? await this.follow(user, stored, true, true) : stored;
       if (held?.state !== 'admitted' || !held.workItemId) throw new PloegError(409, 'prepare_not_running', 'No readiness Work Item runs for this repository.');
       const cancellation = await this.ploeg.decide(user, held.workItemId, 'cancel', '', { commandId: `prepare-cancel-${held.workItemId}` }) as PloegCancellation;
       const closed = cancellation.pullRequest;
@@ -131,8 +135,8 @@ export class ReadinessPrepare {
    */
   async lines(user: User, input: { connections: PloegConnections | null; teams: PloegTeam[] | null; budget: TeamBudget[]; manage: boolean; fresh: boolean }): Promise<ReadinessLines> {
     const { connections, budget, manage } = input;
-    const records = this.records();
-    for (const record of Object.values(records)) if (record.state === 'admitted' && record.workItemId) await this.follow(user, record, input.fresh);
+    const records: Record<string, PrepareRecord> = {};
+    for (const [key, record] of Object.entries(this.records())) records[key] = record.state === 'admitted' && record.workItemId ? await this.follow(user, record, input.fresh, manage) : record;
     const repositories = connections?.repositories ?? [];
     const teams = new Map((input.teams ?? []).map(team => [team.id, team]));
     const confirmed = budget.filter(entry => entry.confirmed && entry.spendCap);
@@ -141,7 +145,7 @@ export class ReadinessPrepare {
     const bindable: string[] = [];
     const ask = 'Ask an administrator to prepare it.';
     for (const repository of repositories) {
-      const record = this.records()[repository.key];
+      const record = records[repository.key];
       const name = named(repository);
       const id = `prepare:${repository.key}`;
       if (repository.readiness === 'ready') {
@@ -161,7 +165,7 @@ export class ReadinessPrepare {
         if (pr) reviewChecks.push({ id: `review:${repository.key}`, stage: 8, title: name, status: 'warning', text: `Review and merge the readiness pull request: it adds only AGENTS.md. A reviewer’s findings are posted on it and no Run fixes them, so change the branch yourself if a command is wrong. Merging makes ${name} ready.`, action: { label: 'Open the pull request', href: pr.url, kind: 'link', external: true } });
         continue;
       }
-      if (record?.state === 'cancelled' && record.pullRequest && record.pullRequest.state !== 'closed') {
+      if ((record?.state === 'cancelled' || record?.state === 'admitting') && record.pullRequest && record.pullRequest.state !== 'closed') {
         prepareChecks.push({ id, stage: 7, title: name, status: 'warning', reason: 'prepare_in_progress', text: `The readiness Work Item was cancelled, but Ploeg did not close its pull request. Until a person closes or merges it, Ploeg refuses a second readiness Work Item for ${name} (prepare_in_progress).`, action: { label: 'Open the pull request', href: record.pullRequest.url, kind: 'link', external: true } });
         continue;
       }
@@ -183,21 +187,28 @@ export class ReadinessPrepare {
       ? { id: 'prepare-repository', stage: 7, title: 'Prepare a repository', status: waiting ? 'pending' : prepareChecks.some(line => line.status === 'problem') ? 'problem' : 'ok', text: waiting ? 'A repository that misses only AGENTS.md can get one readiness pull request from Ploeg. A person confirms the cap first.' : 'Every repository that needed a readiness pull request has one, or says why it cannot.', checks: prepareChecks }
       : { id: 'prepare-repository', stage: 7, title: 'Prepare a repository', status: bindable.length ? 'ok' : 'pending', text: bindable.length ? 'Every prepared repository is ready.' : 'No registered repository needs a readiness pull request.' };
     const open = reviewChecks.filter(line => line.status !== 'ok').length;
-    const review: ChecklistLine = reviewChecks.length
+    const review: ChecklistLine | null = reviewChecks.length
       ? { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: open ? 'warning' : 'ok', text: open ? 'A readiness pull request waits for a person to review and merge it. Ploeg never merges.' : 'Every readiness pull request is merged and its repository is ready.', checks: reviewChecks }
-      : { id: 'review-and-merge', stage: 8, title: 'Review and merge', status: 'pending', text: 'Waits for a readiness pull request.' };
+      : null;
     return { prepare, review, bindable };
   }
 
-  private async follow(user: User, record: PrepareRecord, fresh: boolean): Promise<void> {
+  /**
+   * The record as Ploeg reports its Work Item now: its state, the pull request it opened, and `ended` once it stopped
+   * without one waiting for review. Only a reader who manages the Tenant persists what changed and records
+   * `onboarding.first_agent_pr_opened`; anyone else's read leaves the store as it is.
+   */
+  private async follow(user: User, record: PrepareRecord, fresh: boolean, persist: boolean): Promise<PrepareRecord> {
     const detail = await this.ploeg.detail(user, record.workItemId!, fresh).catch(() => null);
-    if (!detail) return;
+    if (!detail) return record;
     const url = detail.item.pullRequest?.url ?? '';
-    let changed: PrepareRecord | null = record.ploegState === detail.item.state ? null : { ...record, ploegState: detail.item.state };
-    if (url && !record.pullRequest) changed = { ...(changed ?? record), pullRequest: { url, state: 'open' } };
+    let current: PrepareRecord = record.ploegState === detail.item.state ? record : { ...record, ploegState: detail.item.state };
+    if (url && !current.pullRequest) current = { ...current, pullRequest: { url, state: 'open' } };
+    if (!running.has(detail.item.state) && detail.item.state !== 'awaiting_review' && detail.item.state !== 'needs_human') current = { ...current, state: 'ended', ...(url ? { pullRequest: { url, state: detail.item.state === 'done' ? 'closed' : 'unknown' } } : {}) };
+    if (!persist) return current;
     if (url) this.onboarding.pullRequestOpened(user, 'readiness');
-    if (!running.has(detail.item.state) && detail.item.state !== 'awaiting_review' && detail.item.state !== 'needs_human') changed = { ...(changed ?? record), state: 'ended', ...(url ? { pullRequest: { url, state: detail.item.state === 'done' ? 'closed' : 'unknown' } } : {}) };
-    if (changed) this.save(record.target, changed);
+    if (current !== record) this.save(record.target, current);
+    return current;
   }
 
   private save(target: string, record: PrepareRecord | null): void {

@@ -24,7 +24,7 @@ type Repository = { key: string; owner: string; repo: string; readiness: 'ready'
 type WorkItem = { id: string; state: string; pullRequest: string | null; requestId: string };
 type Fake = {
   repositories: Repository[]; cap: number; workItems: WorkItem[]; posts: { path: string; body: Record<string, unknown>; acting: string }[];
-  refuse?: { status: number; code: string }; closeOnCancel: boolean;
+  refuse?: { status: number; code: string }; closeOnCancel: boolean; dropAnswer?: boolean;
 };
 
 const repository = (key: string, overrides: Partial<Repository> = {}): Repository => ({ key, owner: 'acme', repo: key, readiness: 'not_ready', reason: 'AGENTS.md is missing at the root of main', prepareAvailable: true, ...overrides });
@@ -54,6 +54,7 @@ async function fakePloeg(t: TestContext, initial: Partial<Fake> = {}) {
           if (replay) return reply(res, 200, { workItem: { id: replay.id, team: 'delivery', state: replay.state, shiftId: null, budgetUsd: body.budgetUsd, poolUsd: null }, created: false, replayed: true });
           const entry = { id: String(40 + fake.workItems.length + 1), state: 'queued', pullRequest: null, requestId: String(body.requestId) };
           fake.workItems.push(entry);
+          if (fake.dropAnswer) { fake.dropAnswer = false; req.socket.destroy(); return; }
           return reply(res, 201, { workItem: { id: entry.id, team: 'delivery', state: 'queued', shiftId: null, budgetUsd: body.budgetUsd, poolUsd: null }, created: true, replayed: false });
         }
         const cancelled = /^work-items\/(\d+)\/cancel$/.exec(path);
@@ -81,7 +82,7 @@ async function fakePloeg(t: TestContext, initial: Partial<Fake> = {}) {
   return { fake, config: { url: `http://127.0.0.1:${address.port}`, tokenEnv: env } };
 }
 
-async function setup(t: TestContext, initial: Partial<Fake> = {}, steps = servedSteps) {
+async function setup(t: TestContext, initial: Partial<Fake> = {}, steps = servedSteps, config: Partial<AppConfig> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'unfold-prepare-'));
   const store = new Store(join(directory, 'prepare.sqlite'));
   t.after(async () => { try { store.close(); } catch {} await rm(directory, { recursive: true, force: true }); });
@@ -90,7 +91,7 @@ async function setup(t: TestContext, initial: Partial<Fake> = {}, steps = served
   const insight = new InsightService(store, { mode: 'live' } as AppConfig, '9.9.9', clock, { schedule: false });
   t.after(() => insight.stop());
   const build = () => {
-    const onboarding = new Onboarding({ store, ploeg, insight, now: clock, pinned: '0.2.0', steps, config: { repositories: [], taskSources: [] } });
+    const onboarding = new Onboarding({ store, ploeg, insight, now: clock, pinned: '0.2.0', steps, config: { repositories: [], taskSources: [], ...config } });
     const prepare = new ReadinessPrepare({ store, ploeg, onboarding, now: clock });
     onboarding.useReadiness(prepare);
     return { onboarding, prepare };
@@ -216,7 +217,9 @@ test('an opened readiness pull request shows a review-and-merge line, records th
   assert.equal(tracked.action?.href, 'https://github.com/acme/site/pull/7');
   fake.refuse = { status: 409, code: 'prepare_in_progress' };
   await assert.rejects(prepare.start(admin, { target: 'site', team: 'delivery', usd: 20 }), refusedWith(409, 'prepare_in_progress'));
-  assert.equal(prepare.records().site.state, 'cancelled', 'a refused Admission keeps the tracked pull request');
+  assert.equal(prepare.records().site.state, 'admitting', 'a prepare_in_progress refusal keeps the request it sent, so a retry replays it');
+  assert.equal(prepare.records().site.pullRequest?.url, 'https://github.com/acme/site/pull/7', 'and the tracked pull request');
+  assert.equal(line((await onboarding.checklist(admin, true)).stages, 'prepare:site')?.reason, 'prepare_in_progress');
 });
 
 test('a cancel after the pull request opened that Ploeg closed offers the repository again', async t => {
@@ -261,4 +264,45 @@ test('the HTTP routes need a signed-in Admin, and the demo says it is a demo and
   assert.equal(unsigned.status, 405);
   const checklist = await request(demo.url, '/api/onboarding');
   assert.match(checklist.body.stages.find((entry: ChecklistLine) => entry.id === 'prepare-repository').text, /^Demo · no readiness pull request opens/);
+});
+
+test('a lost answer is replayed under the same request, so only one Work Item exists', async t => {
+  const { fake, onboarding, prepare } = await setup(t);
+  await onboarding.confirmCap(admin, { team: 'delivery', usd: 20, period: 'day' });
+  fake.dropAnswer = true;
+  await assert.rejects(prepare.start(admin, { target: 'site', team: 'delivery', usd: 20 }), (error: unknown) => error instanceof PloegError && error.status >= 500);
+  assert.equal(prepare.records().site.state, 'admitting');
+  const retried = await prepare.start(admin, { target: 'site', team: 'delivery', usd: 20 });
+  assert.equal(retried.prepare.workItemId, '41');
+  assert.equal(retried.replayed, true);
+  assert.equal(fake.workItems.length, 1);
+  assert.equal(admissions(fake)[0].body.requestId, admissions(fake)[1].body.requestId);
+  assert.match(String(admissions(fake)[0].body.requestId), /^prepare-[0-9a-f]{24}-1-[0-9a-f]{16}$/, 'the request carries a nonce, so a reset store never repeats it');
+});
+
+test('without readiness work, stage 8 keeps the connections-read line: green when ready, red with the fix when not', async t => {
+  const ready = await setup(t, { repositories: [repository('site', { readiness: 'ready', reason: '', prepareAvailable: false })] });
+  const green = line((await ready.onboarding.checklist(admin, true)).stages, 'review-and-merge')!;
+  assert.equal(green.status, 'ok');
+  assert.match(green.text, /Every repository Ploeg routes to is ready/);
+  const notReady = await setup(t, { repositories: [repository('old', { prepareAvailable: false, reason: 'the repository is archived' })] });
+  const red = line((await notReady.onboarding.checklist(admin, true)).stages, 'review-and-merge')!;
+  assert.equal(red.status, 'problem');
+  assert.match(red.text, /acme\/old is not ready/);
+});
+
+test('a read by someone who does not manage the Tenant follows the Work Item without writing the store or recording an event', async t => {
+  const owner: User = { ...admin, memberships: [{ kind: 'tenant', tenant: 'default', role: 'admin' }] } as User;
+  const { store, fake, onboarding, prepare } = await setup(t, {}, servedSteps, { tenancy: { enforce: true } } as Partial<AppConfig>);
+  await onboarding.confirmCap(owner, { team: 'delivery', usd: 20, period: 'day' });
+  await prepare.start(owner, { target: 'site', team: 'delivery', usd: 20 });
+  fake.workItems[0].pullRequest = 'https://github.com/acme/site/pull/7';
+  const seen = await onboarding.checklist(admin, true);
+  assert.equal(seen.manage, false);
+  assert.equal(line(seen.stages, 'review:site')?.action?.href, 'https://github.com/acme/site/pull/7', 'the reader still sees the pull request');
+  assert.equal(prepare.records().site.pullRequest, null, 'nothing was written');
+  assert.equal(events(store, 'onboarding.first_agent_pr_opened').length, 0);
+  await onboarding.checklist(owner, true);
+  assert.equal(prepare.records().site.pullRequest?.url, 'https://github.com/acme/site/pull/7');
+  assert.equal(events(store, 'onboarding.first_agent_pr_opened').length, 1);
 });
