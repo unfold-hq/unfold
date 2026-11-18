@@ -337,6 +337,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0071](../../apps/unfold/docs/adrs/0071-a-billing-system-reads-the-cost-export-with-its-own-service-account-token.md) | A billing system reads the cost export with its own service account token | 2026-11-17 | unknown | — |
 | Unfold | [0072](../../apps/unfold/docs/adrs/0072-release-notes-are-written-per-change-and-the-workbench-shows-what-is-new.md) | Release notes are written per change, and the workbench shows what is new | 2026-11-17 | unknown | — |
 | Unfold | [0073](../../apps/unfold/docs/adrs/0073-the-plugin-carries-the-opentelemetry-headers-helper-that-signs-usage-metrics-with-the-identity-provider.md) | The plugin carries the OpenTelemetry headers helper that signs usage metrics with the identity provider | 2026-11-18 | unknown | — |
+| Unfold | [0074](../../apps/unfold/docs/adrs/0074-the-editor-sends-access-gateway-headers-a-person-stores-for-one-workbench.md) | The editor sends access gateway headers a person stores for one workbench | 2026-11-18 | unknown | — |
 
 ## Other statuses
 
