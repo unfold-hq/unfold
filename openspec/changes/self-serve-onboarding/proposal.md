@@ -50,6 +50,13 @@ the plan against the Ploeg sources: two clocks, the journey order for a
 repository that is not ready, the shared GitHub App key moved to the GitHub
 Issues slice, no cost estimate, and the install prerequisites named.
 
+On 2026-11-18 the owner decided that Ploeg owns every tracker and forge
+connection and Unfold holds none
+([ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)).
+This change follows it: no tracker or forge secret is kept in Unfold at all,
+not even as a named exception; Unfold's tracker reads come from Ploeg; and
+the shared GitHub App key and the sealed ClickUp copy are withdrawn.
+
 ## What Changes
 
 Everything below is **proposed**; nothing of it is built.
@@ -67,8 +74,13 @@ Everything below is **proposed**; nothing of it is built.
   explains in plain words why (ClickUp has no bot accounts; a token acts as
   the person who made it; webhooks die with their creator) and walks the Admin
   through creating it. Self-hosted: that member's token is pasted once and goes
-  write-only to Ploeg's store. Hosted (later): OAuth through Unfold's own
-  ClickUp app, consented as that member.
+  write-only to Ploeg's store, and Unfold keeps no copy. Hosted (later):
+  OAuth through a ClickUp app registered for the hosted offer and configured
+  in Ploeg (Ploeg ADR-0195), consented as that member.
+- **Tracker reads through Ploeg.** The List picker and the Tasks page read a
+  connection's Lists and tasks through Ploeg, and hand-off is a Ploeg action
+  (ADR-0060). Unfold's own tracker adapters and account links become legacy
+  for installations whose Ploeg serves those reads.
 - **Add repositories and Lists at runtime.** Unfold asks Ploeg to register a
   repository its GitHub App installation already reaches (Ploeg ADR-0193) and to bind each List to a Team and its
   **ready** repositories (Ploeg ADR-0186). A repository missing only
@@ -175,8 +187,8 @@ Everything below is **proposed**; nothing of it is built.
 - `apps/unfold/public/`: `views/connections.js` and `connections.js` (the
   checklist), `views/tasks.js` (the dialog), a GitHub and a ClickUp connect
   flow, the readiness offer.
-- `apps/unfold/ops/helm/unfold/`: nothing in v1. The GitHub Issues slice
-  (S9) adds the mount of the App key Ploeg writes.
+- `apps/unfold/ops/helm/unfold/`: nothing. Unfold never mounts a key Ploeg
+  writes (ADR-0060).
 - `apps/unfold/docs/contracts/openapi.yaml`, `error-codes.md`,
   `docs/operations/task-connections.md`; `docs/concepts/connect-a-repository.md`
   and `customer-environments.md` once slices land.
@@ -187,5 +199,10 @@ Everything below is **proposed**; nothing of it is built.
   agent, store-backed connections in `trackerBindings.connections`, and the
   GitHub forge receiver for installation events. Two asks go as issues: an
   onboarding values profile and active forges per installation in
-  `/operator/connections`.
-- New system record: [ADR-0059](../../../docs/adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md), proposed.
+  `/operator/connections`. The connection contract and the connection account
+  as hand-over agent are now proposed as
+  [Ploeg ADR-0195](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0195-a-proven-operator-makes-and-manages-a-tracker-or-forge-connection-through-a-flow-ploeg-starts-and-the-consumer-only-relays-codes.md).
+  ADR-0060 adds a sixth ask: a read of a tracker connection's Scopes and their
+  items, and the hand-over action (design.md section 4).
+- New system record: [ADR-0059](../../../docs/adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md), proposed,
+  amended by [ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md), accepted.

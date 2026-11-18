@@ -2,8 +2,8 @@
 type: how-to
 audience: [operator, integrator]
 owner: unfold
-last_verified: 2026-09-23
-verified_by: "Checked each named command, setting, environment variable, UI label and qualification test against apps/ploeg (ops/helm/ploeg values and templates, cmd/ploegd/operator.go, pkg/httpapi qualification tests) and apps/unfold (package.json, config/unified.example.json, src/delivery-config.ts, public/app.js, public/delivery.js, scripts/qualify-*.ts); the external Renovate rule was not re-read. On 2026-09-30 the browser pages and lane names in Use it were re-read against apps/unfold at 68c90cf on feat/unfold-redesign (public/shell.js, public/ploeg.js) and the editor view name in extensions/vscode/package.json"
+last_verified: 2026-11-18
+verified_by: "Checked each named command, setting, environment variable, UI label and qualification test against apps/ploeg (ops/helm/ploeg values and templates, cmd/ploegd/operator.go, pkg/httpapi qualification tests) and apps/unfold (package.json, config/unified.example.json, src/delivery-config.ts, public/app.js, public/delivery.js, scripts/qualify-*.ts); the external Renovate rule was not re-read. On 2026-09-30 the browser pages and lane names in Use it were re-read against apps/unfold at 68c90cf on feat/unfold-redesign (public/shell.js, public/ploeg.js) and the editor view name in extensions/vscode/package.json. On 2026-11-18 the Who holds which credential section was added from system ADR-0060"
 ---
 
 # Run the unified workbench
@@ -46,6 +46,17 @@ An example registration shape, with secret material omitted:
 ```
 
 The registry is `PLOEG_OPERATOR_CONSUMERS`; the separate named environment variable contains the credential. Ploeg rejects short or malformed consumer credentials and unscoped execution details. Read access and execution access are independent. Existing unconfigured operator routes stay closed.
+
+## Who holds which credential
+
+| Credential | Held by |
+|---|---|
+| The Operator Consumer token, and the person's exchanged token | Unfold, to call Ploeg's operator API |
+| Sign-in (OpenID Connect) | Unfold |
+| Tracker and forge connections: tokens, App keys, webhook secrets, per-Run forge credentials | Ploeg ([ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)) |
+| Inference keys for a Run | Ploeg mints them per Run |
+
+Since 2026-11-18 Ploeg owns every tracker and forge connection and Unfold holds none ([ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)). Not all of it is built: today Unfold still reads configured task sources with its own tracker adapters and `tokenEnv`, keeps the sealed token of a tracker connection saved on the screen, uses people's repository links for Git access in step 6 above and the publisher's forge token for **Accept and open pull request**. These are legacy and go once the pinned Ploeg serves tracker reads and hand-off; until then configure them as below.
 
 ## Use it
 

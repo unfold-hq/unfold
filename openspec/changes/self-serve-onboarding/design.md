@@ -90,6 +90,7 @@ that carries the asks of section 4.
 | [Ploeg ADR-0186](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0186-an-operator-consumer-binds-a-tracker-scope-to-a-team-at-runtime-and-static-routing-wins-on-conflict.md) | runtime tracker bindings with a dry run, probes, webhooks, static wins; a binding to a target that is not ready is refused (`target_not_ready`); Teams are not created at runtime |
 | [Ploeg ADR-0192](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0192-a-runs-forge-is-resolved-from-its-work-target-and-the-claim-carries-the-forge-and-a-credential-minted-for-that-run.md) | a Run's forge comes from its Work Target (the VIK-2247 fix); supersedes Ploeg ADR-0023 |
 | [Ploeg ADR-0193](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0193-a-proven-operator-registers-a-work-target-at-runtime-only-for-a-repository-ploegs-forge-connection-was-granted.md) | a repository is registered only when Ploeg's own store-backed forge connection (ADR-0184) was granted it and a proven person with operator authority asks; a repository missing only `AGENTS.md` **is registered**, reported not ready with `prepareAvailable: true`; a withdrawn grant marks the target `invalid`, never deleted |
+| [Ploeg ADR-0195](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0195-a-proven-operator-makes-and-manages-a-tracker-or-forge-connection-through-a-flow-ploeg-starts-and-the-consumer-only-relays-codes.md) | the connection contract of section 4 ask 2: flows Ploeg starts with its own `state`, the consumer relaying only a code, an installation id or a pasted token; list, probe, replace and remove; the connection's own account as hand-over agent (ask 1). Proposed on 2026-11-17 |
 | [Ploeg ADR-0194](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0194-a-repository-missing-only-its-instruction-file-may-receive-one-run-that-adds-it.md) | a `prepare_repository` Work Item, admitted only against a registered target whose only readiness reason is `instruction_file_missing`; it may add `AGENTS.md` and nothing else; its Shift pool is the lowest of four caps (section 5) and "nothing is estimated or invented" |
 
 ## Goals / Non-Goals
@@ -112,7 +113,10 @@ the one-time install values.
 
 ## Decisions
 
-The owner decided D1 to D11 on 2026-11-17. They are cited here, not reopened.
+The owner decided D1 to D11 on 2026-11-17 and D12 on 2026-11-18. They are
+cited here, not reopened. D12 ([ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)) withdraws D8 and the exceptions in D3
+and D5.
+
 The review of the same day moved D8 from v1 to S9 and fixed the two clocks and
 the journey order (see *Review corrections* below).
 
@@ -120,15 +124,16 @@ the journey order (see *Review corrections* below).
 |---|---|
 | D1 | First version: self-hosted, one organisation, but the flow is designed as an agency Admin walks it, so the same code goes hosted later. Multi-tenant hosting pieces (ADR-0009 isolation, the Zitadel broker of ADR-0058, the `Tenant` operator) are out of scope; the design must not block them. |
 | D2 | Ploeg learns about boards and repositories at runtime through a generic operator API; its static file stays a seed and wins on conflict. Boards: Ploeg ADR-0186. Repositories: runtime Work Target registration, Ploeg ADR-0193. |
-| D3 | Apps and OAuth first; no pasted secret where the vendor allows. Ploeg holds connection secrets and does the OAuth code exchange itself, writing to its secret store (Ploeg ADR-0184). Exception: D8, from S9. |
+| D3 | Apps and OAuth first; no pasted secret where the vendor allows. Ploeg holds connection secrets and does the OAuth code exchange itself, writing to its secret store (Ploeg ADR-0184). The exception D8 named is withdrawn by D12. |
 | D4 | First pair: GitHub as the forge (a GitHub App, created by a self-hoster with GitHub's App manifest flow in one click) and ClickUp as the tracker. Then GitHub Issues. Linear stays where ADR-0050's tracker order puts it unless a pilot agency uses Linear; Linear's `actor=app` agents need no seat, and watchlist item T48 tracks ClickUp opening assignable external agents. |
-| D5 | ClickUp identity: a dedicated ClickUp member "Unfold" (one paid seat). Self-hosted: its token is pasted once and goes write-only to Ploeg's store. Hosted: OAuth through Unfold's own ClickUp app, consented as that member. The onboarding makes creating the member easy and explains why. Optional later: a status or tag trigger, opt-in, for organisations without the seat. |
+| D5 | ClickUp identity: a dedicated ClickUp member "Unfold" (one paid seat). Self-hosted: its token is pasted once and goes write-only to Ploeg's store. Hosted: OAuth through a ClickUp app registered for the hosted offer, consented as that member; since D12 that app is configured in Ploeg, which does the exchange (Ploeg ADR-0195). The onboarding makes creating the member easy and explains why. Optional later: a status or tag trigger, opt-in, for organisations without the seat. |
 | D6 | Connections first, projects later: everything lands in a silent default Client Project, **Own work** (ADR-0048). Projects appear in the screens only when a Client is added; moving sources and repositories between projects must be possible later. |
 | D7 | A new repository's first Work Item is a readiness pull request from Ploeg's prepare-repository kind, for a repository that is not ready only because `AGENTS.md` is missing; the cap that bounds it is shown and a person confirms it. Tied to ADR-0047's levels. |
-| D8 | Unfold and Ploeg read the same GitHub App key from one secret **once Unfold reads GitHub as a tracker (S9)**. Before hosted: only Ploeg holds the key and hands Unfold short-lived read tokens. |
+| D8 | ~~Unfold and Ploeg read the same GitHub App key from one secret once Unfold reads GitHub as a tracker (S9).~~ Withdrawn by D12 on 2026-11-18: only Ploeg ever holds the key, and Unfold reads GitHub Issues through Ploeg. |
 | D9 | Runtime repository registration as in D2. |
 | D10 | Configuration-file sources keep winning (application ADR-0064); time to first pull request is a first-party event (ADR-0023); multi-forge workers (VIK-2247, now Ploeg ADR-0192) do not block v1 for a single-forge organisation but do block hosted and any installation that already serves another forge. |
 | D11 | Only an Admin (a Tenant Admin under `tenancy.enforce`) connects accounts and adds repositories and Lists in v1. This answers application ADR-0064 open question 2 for now. |
+| D12 | Ploeg owns every tracker and forge connection; Unfold holds no tracker or forge credential, and its only outside credential is sign-in ([ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)). Every connect action in Unfold is a call to Ploeg's connection API; showing a connection's Lists and tasks reads through Ploeg; hand-off is a Ploeg action. People do not link their own tracker or forge accounts in v1. Decided 2026-11-18. |
 
 **Review corrections (2026-11-17).** The lead of this change decided, after an
 independent review against the Ploeg sources:
@@ -141,7 +146,7 @@ independent review against the Ploeg sources:
   List → task. A ready repository goes register → bind → task. Unfold never
   asks Ploeg to bind a List to a target that is not ready (ADR-0186 refuses it
   with `target_not_ready` anyway).
-- **D8 moves to S9.** The v1 pair never reads GitHub through Unfold: the
+- **D8 moves to S9** (withdrawn altogether by D12 on 2026-11-18). The v1 pair never reads GitHub through Unfold: the
   repository picker, pull requests and Runs all come through Ploeg. A
   manifest-created App's `appId` exists only at runtime, and the Unfold chart
   has no mount for a key Ploeg writes. The shared key is therefore designed
@@ -165,8 +170,8 @@ to connect this", and is not shown who the Admins are.
 | 1 | Installation | nothing, unless a line is red: then hands the named install value to whoever installed Unfold and Ploeg | Unfold reads each prerequisite below from Ploeg where Ploeg reports it | every prerequisite Unfold can read is met |
 | 2 | Connect GitHub | **Create the GitHub App** (manifest flow) or **Use an existing App** if the installation already has one, then **Install** and pick repositories on GitHub's own page | Ploeg issues the `state`, converts the manifest code, stores key, webhook secret and client secret, verifies the installation belongs to its App (the connection contract, section 4 ask 2) | Ploeg reports a GitHub forge connection that reaches at least one repository |
 | 3 | Register repositories | ticks repositories from the list the installation reaches | Unfold dry-runs Ploeg ADR-0193 registration for each, then registers; stores the repository and grants it to Own work | each picked repository is registered: **ready**, or **not ready, prepare available** (Ploeg's `prepareAvailable: true`), or refused with Ploeg's reason |
-| 4 | Connect ClickUp | follows **Create the Unfold member** (four steps), pastes that member's token once | Unfold checks the token's shape and that ClickUp accepts it, refuses the Admin's own account, relays the token to Ploeg's store | Ploeg reports a ClickUp connection whose account is the Unfold member |
-| 5 | Pick Lists | picks Lists by name from the Workspace | Unfold saves each as a source in Own work | each List is saved |
+| 4 | Connect ClickUp | follows **Create the Unfold member** (four steps), pastes that member's token once | Unfold checks the token's shape and relays it to Ploeg's connection flow only; Ploeg checks that ClickUp accepts it and names the account; Unfold removes the connection again when that account is the Admin's own | Ploeg reports a ClickUp connection whose account is the Unfold member |
+| 5 | Pick Lists | picks Lists by name from the Workspace | Unfold reads the connection's Lists through Ploeg (section 4, ask 6) and saves each as a source in Own work | each List is saved |
 | 6 | Budget | reads the Team's spend cap and confirms it | Unfold reads the Team's `spendCap` from Ploeg's Teams read; the chart's default is USD 20 a day | the Admin confirmed a Team whose `spendCap` is not null |
 | 7 | Prepare | for each repository with `prepareAvailable`: reads the cap that bounds the Run, **Prepare this repository** | Unfold admits a `prepare_repository` Work Item with `budgetUsd` set to the confirmed cap | the readiness pull request is open (the first clock stops here when it is first) |
 | 8 | Review and merge | a person reviews and merges the readiness pull request on GitHub | Ploeg re-inspects the target at merge and writes `target.readiness_changed` (ADR-0194 section 7) | the repository is ready (ADR-0047 Level 2) |
@@ -250,7 +255,7 @@ Unfold's store gains, by migration, the Unfold side of
 
 | ADR-0048 concept | Unfold table | Key | Holds | Never holds |
 |---|---|---|---|---|
-| Integration Account | `tracker_connections`, renamed `integration_accounts` with a `role` (`tracker` or `forge`) and a `provider` | Tenant + provider + instance (API root) + account: the GitHub App installation id, or the ClickUp Workspace and member id. An agency may install one App on several GitHub organisations; each installation is its own account | account display name, the Ploeg connection id it mirrors, who added it, when the credential was last set, state | a credential (see section 5 for the ADR-0064 copy) |
+| Integration Account | `tracker_connections`, renamed `integration_accounts` with a `role` (`tracker` or `forge`) and a `provider` | Tenant + provider + instance (API root) + account: the GitHub App installation id, or the ClickUp Workspace and member id. An agency may install one App on several GitHub organisations; each installation is its own account | account display name, the Ploeg connection id it mirrors, who added it, when the credential was last set, state | a credential (D12) |
 | source | `tracker_connection_sources`, plus `client_project_id` | integration account + container id | name, the Ploeg binding id, the target it resolved to, state | a token |
 | repository | `repositories` (new) | forge instance + `owner/name`, lower-cased, without `.git` (the key D2 of `tenant-client-scoping` already uses) | base branch, the Ploeg Work Target key, the integration account it was registered through, readiness facts last read (including `prepareAvailable`), maturity level, state | a token |
 | Repository Grant | `repository_grants` (new) | client project + repository | who granted and when | |
@@ -292,12 +297,13 @@ are illustrative where the owning record has not fixed them.
 | e | relay the installation id GitHub returns; Ploeg verifies it with an App JWT | connection contract (ask 2) | the same two `state` checks |
 | f | `GET /api/v1/operator/forge-connections/{connection}/repositories` | Ploeg ADR-0193 | — |
 | g | `POST /api/v1/operator/targets?dryRun=true`, then without `dryRun` | Ploeg ADR-0193 | Admin; the repository is in (f) |
-| h | create a ClickUp tracker connection from a pasted token; the answer names the account | connection contract (ask 2), ADR-0184 rule 1 as amended | shape check, ClickUp accepts it, not the Admin's own account |
+| h | create a ClickUp tracker connection from a pasted token; the answer names the account | connection contract (ask 2, Ploeg ADR-0195), ADR-0184 rule 1 as amended | the shape check only; Ploeg checks that ClickUp accepts it; Unfold removes the connection again when the account Ploeg names is the Admin's own |
 | i | `POST /api/v1/operator/work-items` with `kind: "prepare_repository"`, the Team, the target and `budgetUsd` | Ploeg ADR-0194 | a person confirmed the cap shown; the target reports `prepareAvailable: true`; the Team's `spendCap` is not null |
 | j | `POST /api/v1/operator/teams/{team}/tracker-bindings?dryRun=true`, then without `dryRun` | Ploeg ADR-0186 | Admin; the List's source is saved; `default` and `allow` name only **ready** targets from (g) or the static file; the Team's `spendCap` is not null |
+| h2 | list the connection's Lists, then a List's tasks, through Ploeg | ask 6 | Admin for the picker; Tenant and Client reach for the Tasks page |
 | k | the existing Work Item, Run, pull request and events reads (`target.readiness_changed`, `tracker_binding.*`, `work_target.*`) | operator API v1 | — |
 
-Five upstream asks follow from this order. All are in ploeg-hq's words,
+Six upstream asks follow from this order and from D12. All are in ploeg-hq's words,
 naming no consumer; asks 1 to 3 are carried by the proposed amendments
 (ploeg-hq/ploeg follow-up PR):
 
@@ -329,37 +335,45 @@ naming no consumer; asks 1 to 3 are carried by the proposed amendments
    from it whether Ploeg resolves a Run's forge per target (ADR-0192). Ask:
    `/connections` reports the forges the installation serves and whether
    targets on several forges are supported.
+6. **Read a tracker connection's Scopes and their items, and hand an item
+   over** (D12). An operator consumer lists the Scopes a tracker connection
+   can see and, page by page, the items in one Scope, with the same Team and
+   Tenant scoping as every operator read; and, for a proven person, assigns
+   an item in a bound Scope to a hand-over agent with a note. Ploeg ADR-0195's
+   probe returns only a count and the first 50 Scopes, which is a check, not a
+   read. Ask: a new record in ploeg-hq, naming no consumer.
+
+Asks 1 and 2 are now proposed as [Ploeg ADR-0195](https://github.com/ploeg-hq/ploeg/blob/development/docs/adrs/0195-a-proven-operator-makes-and-manages-a-tracker-or-forge-connection-through-a-flow-ploeg-starts-and-the-consumer-only-relays-codes.md).
 
 ### 5. Credential custody per provider
 
 | Credential | Who receives it | Where it lives | Who reads it | Unfold's DB |
 |---|---|---|---|---|
-| GitHub App private key, webhook secret, client secret | Ploeg, from the manifest conversion | Ploeg's secret store (OpenBao/Vault KV or a Kubernetes Secret Ploeg created) | Ploeg only in v1; from S9 also Unfold (D8) | nothing |
+| GitHub App private key, webhook secret, client secret | Ploeg, from the manifest conversion | Ploeg's secret store (OpenBao/Vault KV or a Kubernetes Secret Ploeg created) | Ploeg only (D12) | nothing |
 | GitHub installation tokens | minted per Run by Ploeg | memory only | Ploeg | nothing |
-| ClickUp member token, self-hosted | the Admin pastes it once into Unfold, which relays it to Ploeg | Ploeg's secret store, write-only | Ploeg | see below |
+| ClickUp member token, self-hosted | the Admin pastes it once into Unfold, which relays it to Ploeg's connection flow and keeps nothing | Ploeg's secret store, write-only | Ploeg | nothing |
 | ClickUp OAuth token, hosted | Ploeg, from the code exchange as that member | Ploeg's secret store | Ploeg | nothing |
 | ClickUp webhook secret | Ploeg, when it registers the webhook | Ploeg's secret store (`WebhookSecretSink`) | Ploeg | nothing |
-| People's own linked ClickUp and GitHub accounts | unchanged (application ADR-0016) | Unfold's store, sealed | Unfold, for browsing as that person | unchanged |
+| People's own linked tracker and forge accounts | not offered in v1 (D12); links made before it are legacy (application ADR-0016, amended) | Unfold's store, sealed, until the legacy links are removed in S10 | Unfold's legacy adapters only | legacy, removed in S10 |
 
-**The ClickUp copy in Unfold.** Unfold reads tasks and hands them off with the
-source's token today (application ADR-0064 and 0025). With the token only in
-Ploeg's store, Unfold cannot do either. v1 keeps ADR-0064's sealed copy: the
-one paste goes to Ploeg's store and into Unfold's `internal_state`, and the
-page says so. This is the one place a connection secret stays in Unfold's
-database in v1, named as an exception in
-[ADR-0059](../../../docs/adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md).
-It goes away before hosted: Unfold's service reads go through Ploeg or through
-people's own links, and hand-off becomes a Ploeg action. See Open Questions 1.
+**No tracker or forge secret in Unfold (D12).** The one ClickUp paste goes
+to Ploeg's connection flow and nowhere else; Unfold keeps the Ploeg connection
+id. Unfold's Tasks page, List picker and hand-off therefore read and act
+through Ploeg (section 4, ask 6). Until the pinned Ploeg serves those, a
+connection made through onboarding cannot be read or handed off from Unfold's
+Tasks page: the page refuses with the Ploeg release that adds it, and a person
+assigns the task to the Unfold member in ClickUp, which Ploeg takes in
+through the binding. Sources in the configuration keep their legacy adapters
+until S10. Application ADR-0064's sealed copy, which v1 kept as a named
+exception before 2026-11-18, is not written for any new connection.
 
-**The shared App key (D8), from S9.** v1 needs no GitHub key in Unfold: the
-repository picker, Work Items, Runs and pull requests all come through Ploeg.
-When GitHub Issues becomes a tracker (S9), Unfold reads issues as the App and
-needs the key. S9 designs the mount (the Unfold chart has none for a Secret
-Ploeg writes today), and must resolve that a manifest-created App's `appId`
-exists only at runtime, so it cannot be a chart value; Unfold reads it from
-Ploeg's connection read instead. The hardening slice (S10) replaces the shared
-key with short-lived read tokens Ploeg mints. Unfold's publisher token
-(`delivery.publisher.tokenEnv`) is unchanged by this change.
+**No GitHub key in Unfold (D12).** The repository picker, Work Items, Runs and
+pull requests come through Ploeg, and so do GitHub Issues reads once that
+tracker lands (S9). Unfold never mounts the App key and never reads the
+manifest-created App's `appId` from a chart value. Unfold's publisher token
+(`delivery.publisher.tokenEnv`, application ADR-0040) is a forge credential
+too; [ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) leaves when it goes as an open question, with the recommendation
+that publishing becomes a Ploeg action.
 
 ### 6. Security
 
@@ -379,7 +393,7 @@ key with short-lived read tokens Ploeg mints. Unfold's publisher token
   confirmed, with the confirmed cap. Refused attempts are failures.
   No record carries a secret, a manifest code or an installation token.
 - **No secret in Unfold's database**, logs, action records, product events or
-  responses, except the ADR-0064 ClickUp copy above. The manifest conversion
+  responses, without exception (D12). The manifest conversion
   code and the installation id pass through Unfold's server once and are
   never stored or logged.
 - **OAuth `state`, two bindings.** Ploeg issues the `state` (connection
@@ -490,13 +504,13 @@ text.
 | Tenants per Agency, `tenancy.enforce` | every table already has a Tenant; v1 writes `default` | assume one Tenant in a query |
 | Zitadel broker (ADR-0058) | stage 0 | depend on local login |
 | `Tenant` operator, Ploeg's Tenant (Ploeg ADR-0178) | Ploeg's store path and consumer per Tenant; the install values of section 1 become the operator's per Tenant | put Tenant-wide secrets in Unfold |
-| ClickUp OAuth through Unfold's own ClickUp app | stage 4 swaps the paste for consent as the member; Ploeg does the exchange | assume a pasted token |
-| Ploeg-only App key (D8 hardening) | Unfold's reads switch to short-lived tokens Ploeg mints | read the key outside `github-app.ts` |
+| ClickUp OAuth through the hosted offer's ClickUp app, configured in Ploeg | stage 4 swaps the paste for consent as the member; Ploeg does the exchange | assume a pasted token |
+| No tracker or forge credential in Unfold (D12) | already true for every connection onboarding makes; S10 removes the legacy adapters and links | add a tracker or forge credential to Unfold |
 | Multi-forge (Ploeg ADR-0192) | stage 2 for a second forge | assume one forge per Tenant in Unfold's model |
 
 ## Risks / Trade-offs
 
-- [Five upstream records, all proposed, and five asks] → each slice ships
+- [Six upstream records, all proposed, and six asks] → each slice ships
   with its refuse-with-explanation state, so Unfold never waits on Ploeg to
   merge; the journey is complete only when the records and asks 1 and 2 are
   released.
@@ -535,12 +549,11 @@ text.
 - [The Admin pastes their own token] → refused when Unfold can see it is the
   Admin's own account; otherwise the page states whose account it is before
   saving.
-- [ClickUp copy in Unfold (section 5)] → kept for v1 by the owner; removed in
-  S10.
-- [Shared App key (D8), from S9] → a compromised Unfold pod could mint write
-  tokens for every installed repository. Accepted for self-hosted from S9 by
-  the owner; the key is mounted only into the server pod, never into agent
-  workspaces, and S10 removes it before hosted.
+- [Unfold's tracker screens wait for ask 6] → with no copy of the token,
+  Unfold cannot read or hand off a connection made through onboarding until
+  Ploeg serves the Scope read and the hand-over action. The binding still
+  takes in Assignments made in ClickUp, so the journey's first task works by
+  assigning the task to the Unfold member there.
 - [Two sources of routes] → the checklist is the one place that shows both,
   with `source: static | runtime` from Ploeg.
 - [An installation already on another forge] → blocked on ADR-0192, shown as
@@ -566,33 +579,32 @@ upstream change that turns the slice from refused to working.
 | S2 | Saved sources get their Ploeg target | `sync()` gives a saved source the target of the static route that covers its List; `task_binding_unconfigured` gone for those | nothing; extended to runtime bindings in S5 |
 | S3 | Repositories and Own work in Unfold's store | `repositories`, `client_projects`, `repository_grants`, `integration_accounts` (keyed with the installation or account id); Own work; configured entries mirrored | nothing |
 | S4 | Connect GitHub and register repositories | Ploeg-issued `state` tied to the session, manifest flow, install, list, runtime registration with `prepareAvailable` shown | the **connection contract** (ask 2, ADR-0184 amendment), Ploeg ADR-0193 with its amendment's GitHub receiver; **and Ploeg ADR-0192 on any installation that already serves another forge** (gated on the pinned bundle version until ask 5) |
-| S5 | Connect ClickUp and bind Lists | member guide, paste to Ploeg's store, pick Lists, map to **ready** repositories and Team, bindings done only when `active` | the **connection contract** (ask 2, including ADR-0184 rule 1's amended paste), ADR-0186 with ClickUp `ScopeProber`, ask 1 (connection account is the agent); ask 3 or the installer naming the connection |
+| S5 | Connect ClickUp and bind Lists | member guide, the token relayed to Ploeg's connection flow only, pick Lists from Ploeg's Scope read, map to **ready** repositories and Team, bindings done only when `active` | the **connection contract** (ask 2, Ploeg ADR-0195, including ADR-0184 rule 1's amended paste), ADR-0186 with ClickUp `ScopeProber`, ask 1 (connection account is the agent); ask 3 or the installer naming the connection; ask 6 for the List picker |
 | S6 | Spend-cap gate | the Team's `spendCap` read and confirmed before readiness work and onboarding bindings | Ploeg's Teams read (served); a runtime change is not in v1 |
 | S7 | Readiness pull request | the offer from `prepareAvailable`, the cap and confirmation, progress, review-and-merge line, re-inspection | Ploeg ADR-0194 |
 | S8 | First task to first pull request, measured | the guided last step, both clocks, the two figures in Insights | S4, S5 released |
-| S9 | GitHub Issues as the tracker, with the shared App key (D8) | the same App as tracker, Lists replaced by repositories' issues; the key mount and the runtime `appId` read | GitHub Issues hand-off in Ploeg (the team read reporting GitHub logins, see the `jira-tracker` change); a Ploeg read of the App's `appId` |
-| S10 | Hardening before hosted | Ploeg-only App key with short-lived read tokens; Unfold's ClickUp copy retired | a Ploeg route that mints read tokens; service reads and hand-off through Ploeg |
+| S9 | GitHub Issues as the tracker, through Ploeg | the same App as a tracker connection in Ploeg, repositories' issues read through Ploeg's Scope read; no key in Unfold | GitHub Issues hand-off in Ploeg (the team read reporting GitHub logins, see the `jira-tracker` change); ask 6 for GitHub Issues |
+| S10 | Remove Unfold's tracker credentials and direct reads | the Tasks page and hand-off through Ploeg for every source; ADR-0064 sealed tokens and people's linked tokens deleted; the legacy adapters in `src/task-providers` and `src/link-providers` and the GitHub App reader removed for installations whose Ploeg serves the reads | ask 6 released |
 | S11 | Move sources and repositories between projects | the project screens once a Client exists | S3 |
 
 ## Open Questions
 
 Each needs the owner. The plan follows the recommendation until he decides.
 
-1. **The ClickUp token copy in Unfold.** D3 and D5 put the token in Ploeg's
-   store only; Unfold's Tasks page and hand-off need it today. Recommended: v1
-   keeps ADR-0064's sealed copy as a named exception (section 5), retired in
-   S10 together with D8's hardening. Alternative: browse with people's own
-   links and make hand-off a Ploeg action in v1, which adds a Ploeg contract
-   to the critical path.
+1. **The ClickUp token copy in Unfold.** Decided by the owner on 2026-11-18
+   (D12, [ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)): no copy. Reads and hand-off go through Ploeg (ask 6), and
+   no personal links in v1.
 2. **Changing the spend cap at runtime.** v1 reads and confirms the cap the
    chart installs. Recommended: keep it so for self-hosted; a runtime Team
-   cap contract in Ploeg is needed for hosted and should be asked for with
-   S10.
+   cap contract in Ploeg is needed for hosted and should be asked for before
+   hosted.
 3. **Readiness pull request versus the 15 minutes.** Decided by the lead on
    2026-11-17: two clocks (Thesis). The first agent pull request of any kind
    stops the 15-minute clock; time to first task pull request is measured
    separately with no promise when a readiness pull request comes first.
 4. **The upstream asks of section 4.** Asks 1 to 3 are being raised as the
    proposed amendments to Ploeg ADR-0184, 0186 and 0193 (ploeg-hq/ploeg
-   follow-up PR). Recommended: raise asks 4 (onboarding values profile) and 5
-   (active forges in `/connections`) as issues in ploeg-hq, not as records.
+   follow-up PR); asks 1 and 2 are now Ploeg ADR-0195. Recommended: raise
+   asks 4 (onboarding values profile) and 5 (active forges in `/connections`)
+   as issues in ploeg-hq, and ask 6 (Scope and item read, hand-over action) as
+   a record, because it is a new operator contract.

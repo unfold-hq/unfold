@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-10-31
+date: 2026-11-18
 decision-makers: Ryan Grippeling
 review-by: 2027-01-31
 ---
@@ -119,5 +119,7 @@ Open questions for the owner, each with a recommendation. The implementation fol
 5. **Telling Ploeg about a saved source.** Recommended: a general Ploeg contract for registering a tracker project with a Team, which Unfold then adopts; Ploeg names no consumer.
 
 **2026-11-17.** The `self-serve-onboarding` change (S3) moved the store to system ADR-0048's model: `tracker_connections` is now `integration_accounts` with the role `tracker`, keyed by Tenant, provider, API root and account id, and a saved source without a Client belongs to its Tenant's Own work. Ids, bodies and sealed tokens migrate unchanged, and the API above is unchanged. The Tenant export names the entity `integration-accounts`.
+
+**2026-11-18.** Amended by system [ADR-0060](../../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md): Unfold keeps no tracker credential. The service-account token is no longer sealed in `internal_state`; the one paste is relayed to Ploeg's secret store and Unfold keeps only the Ploeg connection id. Removing the sealed token was planned as hardening (slice S10 of `self-serve-onboarding`); it is now the direction. Saving connections and sources from the screen, the configuration winning, Tenant Admin only and the audit records stand. Reading and handing off with the connection's token become reads and actions through Ploeg. Open question 3 is answered: no personal links in v1.
 
 Related: [Connect a task system](../operations/task-connections.md#clickup), [Working with Unfold from ClickUp](../operations/working-from-clickup.md), [0008](0008-task-connections-and-candidate-handoff.md) task connections, [0016](0016-sign-in-and-link-your-own-accounts.md) linked accounts.
