@@ -331,13 +331,12 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const cardArt = new CardArtGenerator(config);
   const upkeep = new StoreUpkeep(store, errors);
   const insight = new InsightService(store, config, applicationVersion, undefined, { upkeep: () => upkeep.run() });
-  const onboarding = new Onboarding({ store, ploeg, config, insight, stored: { repositories: () => trackerConnections.repositories.repositories().map(repository => ({ id: repository.id, name: repository.name, url: repository.url, state: trackerConnections.repositories.state(repository), registered: Boolean(repository.ploeg) })), sources: () => trackerConnections.sources().length, forgeAccounts: () => github.usable() } });
+  const onboarding = new Onboarding({ store, ploeg, config, insight, stored: { repositories: () => trackerConnections.repositories.repositories().map(repository => ({ id: repository.id, name: repository.name, url: repository.url, state: trackerConnections.repositories.state(repository) })), sources: () => trackerConnections.sources().length } });
   const clickup = new ClickUpOnboarding({
     steps: onboarding, api: new HttpPloegConnectionApi((user, path, options) => ploeg.operatorCall(user, path, options)), reads: ploeg, connections: trackerConnections, config, store, demo: ploeg.isDemo,
     personal: user => { try { const login = links?.describe(user.id, 'clickup').login; return { ids: [], names: login ? [user.name, login] : [user.name] }; } catch { return { ids: [], names: [user.name] }; } },
     audit: change => audit.record({ actor: auditActor(change.user), tenants: [change.tenant], fact: { kind: 'entity', action: change.action, entity: { type: change.entity, uid: change.uid, name: change.name, data: change.data }, outcome: 'success' } }),
   });
-  onboarding.useStepLines(manage => clickup.lines(manage));
   const readinessPrepare = new ReadinessPrepare({ store, ploeg, onboarding });
   onboarding.useReadiness(readinessPrepare);
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });
@@ -377,6 +376,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
     baseUrl: config.baseUrl, pinned: pinnedRelease(), plan: ploegSteps,
   });
+  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...github.lines(manage, context) }));
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);

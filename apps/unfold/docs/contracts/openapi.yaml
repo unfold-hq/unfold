@@ -4540,7 +4540,7 @@ paths:
       tags: [Ploeg]
       operationId: getConnectGithub
       summary: 'What the Connect GitHub page shows'
-      description: 'Whether this Ploeg serves the connect and register steps (from its `forge-connections` and `targets` read routes, Ploeg ADR-0195 and ADR-0193), the GitHub Apps and forge connections Ploeg holds (never a secret), the second-forge state, and the Integration Accounts Unfold stored, each carrying only the Ploeg connection id. It asks Ploeg only reads. `callbackUrl` is shown only to someone who manages the Tenant.'
+      description: 'Whether this Ploeg serves the connect and register steps (from its `forge-connections` and `targets` read routes, Ploeg ADR-0195 and ADR-0193), the GitHub Apps and forge connections Ploeg holds (never a secret), the second-forge state, and the Integration Accounts Unfold stored, each carrying only the Ploeg connection id with the state Ploeg reports now. It asks Ploeg only reads and writes nothing. `callbackUrl` is shown only to someone who manages the Tenant.'
       x-unfold-role: viewer
       responses:
         '200':
@@ -4549,12 +4549,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [demo, manage, served, secondForge, callbackUrl, apps, connections, accounts]
+                required: [demo, manage, served, secondForge, refused, callbackUrl, apps, connections, accounts]
                 properties:
                   demo: { type: boolean }
                   manage: { type: boolean }
                   served: { type: object, required: [connect, register], properties: { connect: { type: [boolean, 'null'] }, register: { type: [boolean, 'null'] } } }
-                  secondForge: { type: [object, 'null'], properties: { forges: { type: array, items: { type: string } }, waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } } } }
+                  secondForge: { type: [object, 'null'], description: '`unread` when Ploeg''s connections read failed: Unfold then starts no connection.', properties: { forges: { type: array, items: { type: string } }, unread: { type: boolean }, waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } } } }
+                  refused: { type: [object, 'null'], description: 'Ploeg refused the forge connections read; `install` names the install value when the installation has not opted in.', properties: { code: { type: string }, message: { type: string }, install: { type: [string, 'null'] } } }
                   callbackUrl: { type: [string, 'null'] }
                   apps: { type: array, items: { type: object, required: [id, slug, owner], properties: { id: { type: string }, slug: { type: string }, owner: { type: [string, 'null'] } } } }
                   connections: { type: array, items: { type: object, required: [id, kind, instance, method, source, state, invalidReason, account], properties: { id: { type: string }, kind: { type: string }, instance: { type: string }, method: { type: string }, source: { type: string, enum: [runtime, static] }, state: { type: string }, invalidReason: { type: [string, 'null'] }, account: { type: [string, 'null'] } } } }
@@ -4621,7 +4622,7 @@ paths:
       tags: [Ploeg]
       operationId: completeGithubConnection
       summary: 'Where GitHub sends the person back after creating or installing the App'
-      description: 'GitHub''s `redirect_url` and `setup_url`. The `state` must be one Unfold tied to this browser sign-in in the last ten minutes and not used before; Unfold forgets it, then relays the manifest `code`, or the `installation_id` and `setup_action`, to Ploeg once, in a request body, and stores and logs none of them. After the App is created, it redirects straight to its install page; after an install, back to `/?github=<outcome>#settings/connections/github` or `/?github_error=<code>#settings/connections/github`. A `state` that fails a check answers 400 `onboarding_state_invalid` as a page, and nothing is relayed.'
+      description: 'GitHub''s `redirect_url` and `setup_url`. The `state` must be one Unfold tied to this browser sign-in in the last ten minutes and not used before; Unfold forgets it, then relays the manifest `code`, or the `installation_id` and `setup_action`, to Ploeg in a request body, and stores and logs none of them. Unfold forgets the `state` once Ploeg completed or refused the flow, and keeps it when Ploeg could not answer, so reloading the page gets Ploeg''s `replayed` answer. After the App is created, it redirects straight to its install page; after an install, back to `/?github=<outcome>#settings/connections/github` or `/?github_error=<code>#settings/connections/github`. A `state` that fails a check answers 400 `onboarding_state_invalid` as a page, and nothing is relayed.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [] }
@@ -4665,7 +4666,7 @@ paths:
       tags: [Ploeg]
       operationId: registerGithubRepository
       summary: 'Check, then register, a repository through Ploeg'
-      description: 'Always runs Ploeg''s dry run first (`POST /api/v1/operator/targets?dryRun=true`, Ploeg ADR-0193). With `dryRun` true or left out it answers 200 with each check and `outcome` accepted or refused. With `dryRun: false` and an accepted dry run it registers the repository under the explicit lower-case `key`, stores it in Unfold (needs the `repositories.stored` flag, else 404 `repositories_off`), grants it to Own work and answers 201 with `repository`; a refused registration is 422 `target_refused` and stores nothing. `prepareAvailable` is Ploeg''s, never derived from reason text. 422 `registration_not_accepted` when the installation has not opted in.'
+      description: 'Always runs Ploeg''s dry run first (`POST /api/v1/operator/targets?dryRun=true`, Ploeg ADR-0193). With `dryRun` true or left out it answers 200 with each check and `outcome` accepted or refused. With `dryRun: false` and an accepted dry run it registers the repository under the explicit lower-case `key`, stores it in Unfold (needs the `repositories.stored` flag, else 404 `repositories_off`), grants it to Own work and answers 201 with `repository`; a refused registration is 422 `target_refused` and stores nothing. `prepareAvailable` is Ploeg''s, never derived from reason text. 422 `registration_not_accepted` when the installation has not opted in. 409 `repository_exists` when the Tenant already has the repository, checked before Ploeg is asked anything, so Ploeg never registers a repository Unfold then cannot store.'
       x-unfold-role: admin
       security:
         - { sessionCookie: [], unfoldRequest: [] }

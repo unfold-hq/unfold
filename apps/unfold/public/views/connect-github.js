@@ -88,6 +88,8 @@ function body() {
   const data = view.data;
   if (data.demo) return `${demoNote('Nothing on this page connects anything.')}${unavailable(data)}`;
   if (data.served.connect !== true) return unavailable(data);
+  if (data.refused) return callout({ tone: 'danger', title: data.refused.install ? 'Not opted in' : 'Ploeg refused to list the GitHub connections', body: `<p>${escape(data.refused.message)} (${escape(data.refused.code)})</p>${data.refused.install ? `<p>The person who installed Ploeg sets: <code>${escape(data.refused.install)}</code></p>` : ''}`, actions: button({ label: 'Check again', icon: 'refresh', size: 'sm', action: 'github-refresh' }) });
+  if (data.secondForge?.unread) return callout({ tone: 'attention', title: 'Ploeg could not be asked', body: '<p>Unfold could not read which forges this installation pushes to, so it starts no GitHub connection until it can. Check again in a minute.</p>', actions: button({ label: 'Check again', icon: 'refresh', size: 'sm', action: 'github-refresh' }) });
   const second = data.secondForge ? callout({ tone: 'attention', title: 'Waits for Ploeg', body: `<p>This installation pushes to ${escape(data.secondForge.forges.join(', '))}. Adding GitHub needs Ploeg ${escape(data.secondForge.waitsFor.release || `with ${data.secondForge.waitsFor.record}, not released yet`)}.</p>` }) : '';
   const readOnly = data.manage ? '' : callout({ tone: 'neutral', title: 'Ask an administrator', body: '<p>Only an administrator connects GitHub and registers repositories.</p>' });
   return `${readOnly}${second}${data.secondForge ? '' : appSection(data)}${connectionSection(data)}${repositorySection()}`;

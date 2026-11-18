@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import { PloegError, PloegOperatorRefusal, type PloegConnections } from './ploeg.ts';
-import { optInRefusals, secondForgeOpen, type OptInRefusal, type PloegSteps, type StepId } from './onboarding.ts';
+import { optInRefusals, secondForgeOpen, type ChecklistLine, type OptInRefusal, type PloegSteps, type StepId } from './onboarding.ts';
 import type { PloegRegistration, PublicRepository } from './stored-repositories.ts';
 import { defaultTenant, repositoryKey } from './tenancy.ts';
 import type { User } from './types.ts';
@@ -25,13 +25,14 @@ export type TargetOutcome = {
 /** `GET /api/onboarding/github`: whether this Ploeg serves the steps, the apps and connections it holds, and what Unfold stored. */
 export type GithubOverview = {
   demo: boolean; manage: boolean; served: { connect: boolean | null; register: boolean | null };
-  secondForge: { forges: string[]; waitsFor: { record: string; release: string | null } } | null;
+  secondForge: { forges: string[]; unread: boolean; waitsFor: { record: string; release: string | null } } | null;
+  refused: { code: string; message: string; install: string | null } | null;
   callbackUrl: string | null; apps: ConnectionApp[]; connections: ForgeConnection[];
   accounts: { id: string; connection: string; account: string | null; state: string; createdAt: string; createdBy: string }[];
 };
 
 type PloegCalls = {
-  operatorCall(user: User, path: string, options?: { method?: 'GET' | 'POST'; body?: unknown }): Promise<Record<string, unknown> | null>;
+  operatorCall(user: User, path: string, options?: { method?: 'GET' | 'POST'; body?: unknown; slow?: boolean }): Promise<Record<string, unknown> | null>;
   connections(user: User, fresh?: boolean): Promise<PloegConnections>;
   isDemo: boolean;
 };
@@ -42,8 +43,9 @@ type Steps = {
   notOptedIn(user: User, step: StepId, code: OptInRefusal): void;
 };
 type Repositories = {
+  admitRegistration(user: User, url: string): void;
   register(user: User, input: { url: string; baseBranch: string; integrationAccount?: string }, registration: PloegRegistration): PublicRepository;
-  repositories(): { key: string; tenant: string }[];
+  repositories(): { key: string; tenant: string; name: string; ploeg?: PloegRegistration }[];
 };
 type StateStore = { getSecret<T>(id: string): T | undefined; setSecret(id: string, value: unknown): void };
 type EntityFact = { action: 'create' | 'update'; type: string; uid: string; name: string; data?: Record<string, unknown> };
@@ -64,6 +66,7 @@ export type ManifestPage = { status: 200; action: string; manifest: string } | {
 export const callbackPath = '/api/onboarding/github/callback';
 const continuePath = '/api/onboarding/github/continue/';
 const tieTtlMs = 10 * 60_000;
+const connectGithubHref = '#settings/connections/github';
 const tiesId = 'onboarding:github-flows';
 const keyPattern = /^[a-z0-9][a-z0-9_.:-]{0,127}$/;
 const connectionId = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
@@ -160,7 +163,9 @@ function forgeConnection(entry: Record<string, unknown>): ForgeConnection {
  * slice S4; system ADR-0060). Ploeg owns the connection: it starts each flow and issues its `state` (Ploeg ADR-0195),
  * converts the manifest code, holds every key and registers each repository (Ploeg ADR-0193). Unfold ties each
  * `state` to the person's sign-in, sends the person to GitHub, relays the code or installation id once without keeping
- * it, and stores only the Ploeg connection id and the repositories Ploeg registered, granted to Own work.
+ * it, and stores only the Ploeg connection id and the repositories Ploeg registered, granted to Own work. The
+ * one-time step from Unfold to GitHub lives in this process's memory, so it assumes one Unfold replica, as its SQLite
+ * store does; a restart between starting and continuing only means starting again.
  */
 export class GithubConnections {
   private readonly options: Options;
@@ -183,8 +188,8 @@ export class GithubConnections {
     throw new PloegError(githubRefusals[fallback], fallback, `${words[error.code] ?? (error.message || 'Ploeg refused it.')} (Ploeg: ${error.code})`);
   }
 
-  private async call(user: User, path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return object(await this.options.ploeg.operatorCall(user, path, body === undefined ? {} : { method: 'POST', body }));
+  private async call(user: User, path: string, body?: Record<string, unknown>, slow = false): Promise<Record<string, unknown>> {
+    return object(await this.options.ploeg.operatorCall(user, path, body === undefined ? {} : { method: 'POST', body, ...(slow ? { slow } : {}) }));
   }
 
   private ties(): Record<string, Tie> {
@@ -196,37 +201,73 @@ export class GithubConnections {
     this.options.store.setSecret(tiesId, { ...this.ties(), [hash(state)]: { user: user.id, signIn: hash(signIn), at: this.now().toISOString(), flow, method } });
   }
 
-  private untie(state: string): Tie | undefined {
+  private tied(state: string): Tie | undefined { return this.ties()[hash(state)]; }
+
+  private untie(state: string): void {
     const ties = this.ties();
-    const key = hash(state);
-    const found = ties[key];
-    delete ties[key];
+    delete ties[hash(state)];
     this.options.store.setSecret(tiesId, ties);
-    return found;
   }
 
   private async secondForge(user: User): Promise<GithubOverview['secondForge']> {
     const { pair, secondForge } = this.options.plan;
-    const read = await this.options.ploeg.connections(user).catch(() => null);
-    const forges = [...new Set((read?.repositories ?? []).map(repository => repository.forge))].filter(forge => forge !== pair.forge);
-    return forges.length && !secondForgeOpen(this.options.plan, this.options.pinned) ? { forges, waitsFor: { record: secondForge.record, release: secondForge.release } } : null;
+    const waitsFor = { record: secondForge.record, release: secondForge.release };
+    if (secondForgeOpen(this.options.plan, this.options.pinned)) return null;
+    const read = await this.options.ploeg.connections(user, true).catch(() => null);
+    if (!read || !read.supported) return { forges: [], unread: true, waitsFor };
+    const forges = [...new Set(read.repositories.map(repository => repository.forge))].filter(forge => forge !== pair.forge);
+    return forges.length ? { forges, unread: false, waitsFor } : null;
   }
 
-  /** What the Connect GitHub page shows. Asks Ploeg only reads, and only for the steps it serves. */
+  /**
+   * What the Connect GitHub page shows. It asks Ploeg only reads and writes nothing: a refused read is shown with the
+   * install value that opts the installation in, and each connection's state is Ploeg's live one.
+   */
   async overview(user: User): Promise<GithubOverview> {
     const manage = this.options.steps.manages(user);
-    const base = { manage, callbackUrl: manage ? this.callbackUrl() : null, accounts: this.accounts() };
+    const base = { manage, callbackUrl: manage ? this.callbackUrl() : null, accounts: this.accounts(), refused: null };
     if (this.options.ploeg.isDemo) return { demo: true, served: { connect: false, register: false }, secondForge: null, apps: [], connections: [], ...base };
     const [connect, register] = await Promise.all([this.options.steps.available(user, 'connect-github', true), this.options.steps.available(user, 'register-repositories', true)]);
     const served = { connect: connect.served, register: register.served };
-    if (served.connect !== true) return { demo: false, served, secondForge: null, apps: [], connections: [], ...base };
-    const [connections, apps, secondForge] = await Promise.all([
-      this.call(user, 'forge-connections').then(data => items(data.connections, 200).map(forgeConnection).filter(entry => entry.kind === this.options.plan.pair.forge)),
+    if (served.connect === false) return { demo: false, served, secondForge: null, apps: [], connections: [], ...base };
+    let connections: ForgeConnection[];
+    try { connections = items((await this.call(user, 'forge-connections')).connections, 200).map(forgeConnection).filter(entry => entry.kind === this.options.plan.pair.forge); }
+    catch (error) {
+      if (!(error instanceof PloegOperatorRefusal) || error.status >= 500) return { demo: false, served: { ...served, connect: served.connect === true ? true : null }, secondForge: null, apps: [], connections: [], ...base };
+      if (error.status === 404 && error.code === 'not_found') return { demo: false, served: { ...served, connect: false }, secondForge: null, apps: [], connections: [], ...base };
+      const install = optIn.has(error.code) ? optInRefusals[error.code as OptInRefusal].value : null;
+      return { demo: false, served: { ...served, connect: true }, secondForge: null, apps: [], connections: [], ...base, refused: { code: error.code, message: install ? `Ploeg serves this step, but the installation has not opted in (${error.code}).` : error.message, install } };
+    }
+    const [apps, secondForge] = await Promise.all([
       this.call(user, 'connection-apps').then(data => items(data.apps, 50).map(entry => ({ id: short(entry.id, 128), slug: short(entry.slug, 100), owner: short(entry.owner, 100) || null }))).catch(() => []),
       this.secondForge(user),
     ]);
-    this.refreshAccounts(connections);
-    return { demo: false, served, secondForge, apps, connections, ...base, accounts: this.accounts() };
+    const live = new Map(connections.map(entry => [entry.id, entry]));
+    const accounts = base.accounts.map(entry => { const found = live.get(entry.connection); return { ...entry, state: found ? found.state : 'removed', account: found?.account ?? entry.account }; });
+    return { demo: false, served: { ...served, connect: true }, secondForge, apps, connections, ...base, accounts };
+  }
+
+  /**
+   * The Connect GitHub and Register repositories lines of the onboarding checklist, once Ploeg serves the steps: the
+   * second-forge state, then green from the connections and repositories made on this screen.
+   */
+  lines(manage: boolean, context: { otherForges: string[] }): Partial<Record<StepId, ChecklistLine>> {
+    const { pair, secondForge } = this.options.plan;
+    const ask = manage ? {} : { fix: 'Ask an administrator to connect this.' };
+    const link = (label: string) => manage ? { action: { label, href: connectGithubHref, kind: 'link' as const } } : {};
+    const list = (names: string[]) => names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+    const registered = this.options.repositories.repositories().filter(entry => entry.tenant === defaultTenant && entry.ploeg);
+    const blocked = context.otherForges.length > 0 && !secondForgeOpen(this.options.plan, this.options.pinned);
+    return {
+      'connect-github': blocked
+        ? { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'unavailable', reason: 'second_forge_unsupported', text: `This installation pushes to ${list(context.otherForges)}. Adding ${pair.forgeName} needs Ploeg ${secondForge.release ?? `with ${secondForge.record}, not released yet`}.`, waitsFor: { record: secondForge.record, release: secondForge.release }, ...ask }
+        : this.usable() > 0
+          ? { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'ok', text: `Ploeg holds a ${pair.forgeName} connection made from this screen.`, ...link('Add another installation') }
+          : { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'pending', text: `Create the ${pair.forgeName} App with ${pair.forgeName}’s App manifest flow, or install the App Ploeg already holds, on the repositories agents may work on. Ploeg keeps every key; Unfold keeps none.`, ...ask, ...link('Connect GitHub') },
+      'register-repositories': registered.length
+        ? { id: 'register-repositories', stage: 3, title: 'Register repositories', status: 'ok', text: `Ploeg registered ${registered.length === 1 ? '1 repository' : `${registered.length} repositories`} from this screen: ${list(registered.map(entry => entry.name))}.`, ...link('Register more') }
+        : { id: 'register-repositories', stage: 3, title: 'Register repositories', status: 'pending', text: 'Pick repositories the GitHub App reaches. Ploeg checks each one in a dry run before it registers it.', ...ask, ...link('Pick repositories') },
+    };
   }
 
   /**
@@ -247,6 +288,7 @@ export class GithubConnections {
     const callback = this.callbackUrl();
     if (!callback) throw new PloegError(409, 'onboarding_base_url_missing', 'Unfold has no baseUrl, so GitHub could not send you back. The person who installed Unfold sets baseUrl to its public address.');
     const secondForge = await this.secondForge(user);
+    if (secondForge?.unread) throw new PloegError(503, 'ploeg_unavailable', 'Unfold could not read which forges this installation pushes to, so it started no GitHub connection and sent Ploeg nothing. Try again in a minute.');
     if (secondForge) throw new PloegError(409, 'second_forge_unsupported', `This installation pushes to ${secondForge.forges.join(', ')}. Adding GitHub needs Ploeg ${secondForge.waitsFor.release ?? `with ${secondForge.waitsFor.record}, not released yet`}, so Unfold sent Ploeg nothing.`);
     let answer: Record<string, unknown>;
     try { answer = await this.call(user, 'connection-flows', { port: 'forge', kind: this.options.plan.pair.forge, instance: this.options.plan.pair.forge, method, redirectUri: callback, ...(app && method === 'github_app_installation' ? { app } : {}), ...(owner && method === 'github_app_manifest' ? { owner } : {}) }); }
@@ -270,30 +312,33 @@ export class GithubConnections {
 
   /** The one-time step from Unfold to GitHub for the person who started the flow, in the same sign-in. */
   continue(user: User | undefined, signIn: string | undefined, id: string): ManifestPage {
-    const handoff = this.handoffs.get(id);
-    this.handoffs.delete(id);
     for (const [key, entry] of this.handoffs) if (entry.expires < this.now().getTime()) this.handoffs.delete(key);
-    if (!handoff || !user || !signIn || handoff.user !== user.id || handoff.signIn !== hash(signIn) || handoff.expires < this.now().getTime()) return { status: 404 };
+    const handoff = this.handoffs.get(id);
+    if (!handoff || !user || !signIn || handoff.user !== user.id || handoff.signIn !== hash(signIn)) return { status: 404 };
+    this.handoffs.delete(id);
     return handoff.next.kind === 'redirect' ? { status: 303, location: handoff.next.url } : { status: 200, action: handoff.next.url, manifest: handoff.next.manifest };
   }
 
   /**
    * Handles GitHub sending the person back: checks that the `state` is one Unfold tied to this person's sign-in in
-   * the last ten minutes and forgets it, then relays the manifest code or the installation id to Ploeg once. Nothing
-   * GitHub sent is stored or logged. After the App is created, the person goes straight on to install it.
+   * the last ten minutes, then relays the manifest code or the installation id to Ploeg. It forgets the `state` once
+   * Ploeg completed the flow or refused it, and keeps it when Ploeg could not answer, so reloading the page gets Ploeg's
+   * `replayed` answer (Ploeg ADR-0195 section 11). Nothing GitHub sent is stored or logged. After the App is created,
+   * the person goes straight on to install it.
    */
   async callback(user: User | undefined, signIn: string | undefined, query: URLSearchParams): Promise<CallbackAnswer> {
     const state = query.get('state') ?? '';
     const code = query.get('code');
     const installation = query.get('installation_id');
-    const tie = state && state.length <= 512 ? this.untie(state) : undefined;
+    const tie = state && state.length <= 512 ? this.tied(state) : undefined;
     const method: FlowMethod | undefined = installation ? 'github_app_installation' : code ? 'github_app_manifest' : undefined;
     if (!tie || !user || !signIn || tie.user !== user.id || tie.signIn !== hash(signIn) || tie.method !== method || !this.options.steps.manages(user)) return { status: 400, code: 'onboarding_state_invalid' };
     const back = (outcome: string, value: string) => ({ status: 303 as const, location: `/?${outcome}=${encodeURIComponent(value)}#settings/connections/github` });
     try {
       if (method === 'github_app_manifest') {
         if (!/^[A-Za-z0-9_-]{1,200}$/.test(code!)) return { status: 400, code: 'onboarding_state_invalid' };
-        const answer = await this.call(user, 'connection-flows/complete', { state, code });
+        const answer = await this.call(user, 'connection-flows/complete', { state, code }, true);
+        this.untie(state);
         const app = object(answer.app);
         if (short(app.id, 128)) this.options.audit(user, { action: 'create', type: 'GitHub App', uid: short(app.id, 128), name: `GitHub App ${short(app.slug, 100) || short(app.id, 128)} created through Ploeg`, data: { change: 'created_from_manifest' } });
         const install = object(answer.installation);
@@ -306,12 +351,14 @@ export class GithubConnections {
       }
       if (!/^[1-9][0-9]{0,19}$/.test(installation!)) return { status: 400, code: 'onboarding_state_invalid' };
       const setupAction = query.get('setup_action') === 'request' ? 'request' : query.get('setup_action') === 'update' ? 'update' : 'install';
-      const answer = await this.call(user, 'connection-flows/complete', { state, installationId: installation, setupAction });
+      const answer = await this.call(user, 'connection-flows/complete', { state, installationId: installation, setupAction }, true);
+      this.untie(state);
       const connection = forgeConnection(object(answer.connection));
       if (!connection.id) return back('github', 'connected');
       this.saveAccount(user, connection);
       return back('github', connection.state === 'awaiting_consent' ? 'awaiting_consent' : 'connected');
     } catch (error) {
+      if (error instanceof PloegOperatorRefusal && error.status < 500) this.untie(state);
       try { this.refuse(user, 'connect-github', error, flowWords, 'github_flow_refused'); }
       catch (refused) { return back('github_error', refused instanceof PloegError ? refused.code : 'connection_unavailable'); }
       return back('github_error', 'connection_unavailable');
@@ -349,6 +396,7 @@ export class GithubConnections {
     if (!keyPattern.test(key)) throw new PloegError(400, 'invalid_input', 'Name the repository’s key yourself, in lower case: letters, digits and . _ : - only, such as acme-shop. Tasks pick it with the label repo/<key>.');
     if (!dryRun && !await this.options.stored()) throw new PloegError(404, 'repositories_off', 'Adding repositories from the screen is off: turn on the repositories.stored flag.');
     await this.options.steps.admit(user, 'register-repositories');
+    this.options.repositories.admitRegistration(user, `${githubOrigin}/${repository}`);
     const body = { connection, repository, key, ...(branch ? { branch } : {}) };
     const trial = await this.attempt(user, 'targets?dryRun=true', body, true);
     if (dryRun || trial.outcome === 'refused') return trial;
@@ -392,16 +440,6 @@ export class GithubConnections {
     const body = { id, tenant: defaultTenant, role: 'forge', provider: this.options.plan.pair.forge, baseUrl: githubOrigin, ploegConnection: connection.id, account: connection.account, state: connection.state, createdAt: existing?.createdAt ?? at, createdBy: existing?.createdBy ?? user.name, updatedAt: at, updatedBy: user.name };
     this.options.db.prepare("INSERT INTO integration_accounts(id,tenant,role,provider,base_url,account_id,created_at,body) VALUES(?,?,'forge',?,?,?,?,?) ON CONFLICT(tenant,provider,base_url,account_id) DO UPDATE SET body=excluded.body").run(id, defaultTenant, body.provider, githubOrigin, connection.id, body.createdAt, JSON.stringify(body));
     this.options.audit(user, { action: existing ? 'update' : 'create', type: 'Integration Account', uid: id, name: `GitHub connection ${connection.id}${connection.account ? ` (${connection.account})` : ''}`, data: { role: 'forge', provider: body.provider, ploegConnection: connection.id, state: connection.state } });
-  }
-
-  private refreshAccounts(connections: ForgeConnection[]): void {
-    for (const account of this.accounts()) {
-      const found = connections.find(entry => entry.id === account.connection);
-      const state = found ? found.state : 'removed';
-      if (state === account.state) continue;
-      const row = this.options.db.prepare('SELECT body FROM integration_accounts WHERE id=?').get(account.id) as { body: string } | undefined;
-      if (row) this.options.db.prepare('UPDATE integration_accounts SET body=? WHERE id=?').run(JSON.stringify({ ...JSON.parse(row.body), state, account: found?.account ?? account.account }), account.id);
-    }
   }
 }
 

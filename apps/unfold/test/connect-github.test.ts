@@ -16,7 +16,7 @@ const appKey = `app-key-${randomBytes(12).toString('hex')}`;
 const secrets = [manifestCode, installationId, firstState, secondState, appKey];
 
 type Call = { method: string; url: string; body: Record<string, unknown> };
-type FakeOptions = { served?: boolean; otherForge?: boolean; refuseFlow?: string; refuseTarget?: string };
+type FakeOptions = { served?: boolean; otherForge?: boolean; refuseFlow?: string; refuseTarget?: string; failCompleteOnce?: boolean; completeDelayMs?: number; connectionsFail?: boolean; refuseRead?: string; connectionState?: string };
 
 async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
   const calls: Call[] = [];
@@ -31,9 +31,11 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
     const send = (status: number, value: unknown) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...(value as object) }));
     const refuse = (status: number, code: string, extra: object = {}) => send(status, { error: { code, message: `refused: ${code}`, ...extra } });
     if (req.method === 'GET' && path === 'teams') return send(200, { teams: [{ id: 'bronze', paused: false, queueDepth: 0, roles: [], assignees: [], pinnedScopes: [] }] });
+    if (req.method === 'GET' && path === 'connections' && options.connectionsFail) return res.writeHead(500).end();
+    if (req.method === 'GET' && path === 'forge-connections' && options.refuseRead) return refuse(403, options.refuseRead);
     if (req.method === 'GET' && path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: options.otherForge ? [{ key: 'site', label: 'site', forge: 'forgejo', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: null, boards: [] }] : [] });
     if (options.served === false && (path === 'forge-connections' || path === 'targets')) return res.writeHead(404).end();
-    if (req.method === 'GET' && path === 'forge-connections') return send(200, { connections: calls.some(call => call.body.installationId) ? [{ id: 'github-acme', kind: 'github', instance: 'github', method: 'github_app_installation', source: 'runtime', state: 'active', invalidReason: null, account: { id: 4242, login: 'acme', installationId: Number(installationId) } }] : [] });
+    if (req.method === 'GET' && path === 'forge-connections') return send(200, { connections: calls.some(call => call.body.installationId) ? [{ id: 'github-acme', kind: 'github', instance: 'github', method: 'github_app_installation', source: 'runtime', state: options.connectionState ?? 'active', invalidReason: null, account: { id: 4242, login: 'acme', installationId: Number(installationId) } }] : [] });
     if (req.method === 'GET' && path === 'targets') return send(200, { targets: [] });
     if (req.method === 'GET' && path === 'connection-apps') return send(200, { apps: calls.some(call => call.body.code) ? [{ id: 'app-1', slug: 'ploeg-acme', owner: 'acme' }] : [] });
     if (req.method === 'POST' && path === 'connection-flows') {
@@ -42,6 +44,8 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
       return send(201, { flow: { id: manifest ? 'flow-1' : 'flow-2', method: body.method, expiresAt: '2026-11-18T12:15:00Z', state: manifest ? firstState : secondState }, next: manifest ? { manifest: { name: 'Ploeg acme', url: 'https://ploeg.example', redirect_url: body.redirectUri, setup_url: body.redirectUri, public: false }, postUrl: `https://github.com/settings/apps/new?state=${firstState}` } : { installUrl: `https://github.com/apps/ploeg-acme/installations/new?state=${secondState}` } });
     }
     if (req.method === 'POST' && path === 'connection-flows/complete') {
+      if (options.failCompleteOnce && body.installationId && calls.filter(call => call.body.installationId).length === 1) return res.writeHead(503).end();
+      if (options.completeDelayMs && body.installationId) await new Promise(resolve => setTimeout(resolve, options.completeDelayMs));
       if (body.code === manifestCode && body.state === firstState) return send(200, { app: { id: 'app-1', slug: 'ploeg-acme', privateKey: { store: 'kv', path: 'apps/app-1', version: 1 } }, flow: { id: 'flow-2', method: 'github_app_installation', state: secondState }, next: { installUrl: `https://github.com/apps/ploeg-acme/installations/new?state=${secondState}` } });
       if (body.installationId === installationId && body.state === secondState) return send(200, { connection: { id: 'github-acme', kind: 'github', instance: 'github', method: 'github_app_installation', source: 'runtime', state: 'active', account: { id: 4242, login: 'acme', installationId: Number(installationId) } } });
       return refuse(404, 'unknown_flow');
@@ -262,4 +266,104 @@ test('every code Connect GitHub answers with is in the error catalogue', () => {
     assert(Object.hasOwn(errorCatalogue, code), `${code} is in the catalogue`);
     assert(errorCatalogue[code].status.includes(status), `${code} lists ${status}`);
   }
+});
+
+async function connect(api: { url: string }, cookie: string) {
+  const started = await request(api.url, '/api/onboarding/github/flows', { method: 'POST', cookie, body: {} });
+  assert.equal(started.status, 201, started.text);
+  assert.equal((await navigate(api.url, `/api/onboarding/github/callback?code=${manifestCode}&state=${firstState}`, cookie)).status, 303);
+  return navigate(api.url, `/api/onboarding/github/callback?installation_id=${installationId}&setup_action=install&state=${secondState}`, cookie);
+}
+
+test('a completion Ploeg could not answer keeps the state, so reloading the callback gets Ploeg’s answer', async t => {
+  const { api, ploeg, cookie } = await live(t, { failCompleteOnce: true });
+  const first = await connect(api, cookie);
+  assert.equal(first.status, 303);
+  assert.match(first.headers.get('location')!, /github_error=/);
+  const again = await navigate(api.url, `/api/onboarding/github/callback?installation_id=${installationId}&setup_action=install&state=${secondState}`, cookie);
+  assert.equal(again.headers.get('location'), '/?github=connected#settings/connections/github');
+  assert.equal(ploeg.calls.filter(call => call.body.installationId).length, 2, 'the retry reached Ploeg, which answers a repeat with replayed');
+  assert.equal((await navigate(api.url, `/api/onboarding/github/callback?installation_id=${installationId}&setup_action=install&state=${secondState}`, cookie)).status, 400, 'after Ploeg completed it the state is used up');
+});
+
+test('a completion that takes Ploeg longer than five seconds still completes', { timeout: 30_000 }, async t => {
+  const { api, cookie } = await live(t, { completeDelayMs: 5_500 });
+  const done = await connect(api, cookie);
+  assert.equal(done.headers.get('location'), '/?github=connected#settings/connections/github');
+});
+
+test('a repository the Tenant already has is refused before Ploeg is asked to check or register it', async t => {
+  const { api, ploeg, cookie } = await live(t);
+  await connect(api, cookie);
+  const body = { connection: 'github-acme', repository: 'acme/shop', key: 'acme-shop', dryRun: false };
+  assert.equal((await request(api.url, '/api/onboarding/github/targets', { method: 'POST', cookie, body })).status, 201);
+  const before = ploeg.writes().length;
+  const again = await request(api.url, '/api/onboarding/github/targets', { method: 'POST', cookie, body: { ...body, key: 'acme-shop-2' } });
+  assert.equal(again.status, 409);
+  assert.equal(again.body.error.code, 'repository_exists');
+  const dry = await request(api.url, '/api/onboarding/github/targets', { method: 'POST', cookie, body: { ...body, dryRun: true } });
+  assert.equal(dry.status, 409);
+  assert.equal(ploeg.writes().length, before, 'Ploeg was asked nothing');
+});
+
+test('when Ploeg’s connections read fails, Unfold cannot rule out a second forge and starts no connection', async t => {
+  const { api, ploeg, cookie } = await live(t, { connectionsFail: true });
+  const started = await request(api.url, '/api/onboarding/github/flows', { method: 'POST', cookie, body: {} });
+  assert.equal(started.status, 503);
+  assert.equal(started.body.error.code, 'ploeg_unavailable');
+  assert.deepEqual(ploeg.writes(), []);
+  const overview = await request(api.url, '/api/onboarding/github', { cookie });
+  assert.equal(overview.body.secondForge.unread, true);
+});
+
+test('a refused forge connections read shows what to set instead of failing the page', async t => {
+  const { api, cookie } = await live(t, { refuseRead: 'permission_required' });
+  const overview = await request(api.url, '/api/onboarding/github', { cookie });
+  assert.equal(overview.status, 200, overview.text);
+  assert.equal(overview.body.refused.code, 'permission_required');
+  assert.match(overview.body.refused.install, /registerTargets/);
+});
+
+test('reading the page shows Ploeg’s live connection state and writes nothing', async t => {
+  const options: FakeOptions = {};
+  const { api, cookie } = await live(t, options);
+  await connect(api, cookie);
+  const rows = () => everyRow(api.app.store.db).replace(/"last_seen_at":"[^"]*"|"expires_at":"[^"]*"/g, '');
+  const before = rows();
+  options.connectionState = 'invalid';
+  const overview = await request(api.url, '/api/onboarding/github', { cookie });
+  assert.equal(overview.body.accounts[0].state, 'invalid');
+  assert.equal(JSON.parse((api.app.store.db.prepare("SELECT body FROM integration_accounts WHERE role='forge'").get() as { body: string }).body).state, 'active', 'the stored account is unchanged');
+  assert.equal(rows(), before, 'no row changed');
+});
+
+test('the step to GitHub is only for the sign-in that started it', async t => {
+  const { api, cookie } = await live(t);
+  const started = await request(api.url, '/api/onboarding/github/flows', { method: 'POST', cookie, body: {} });
+  const { cookie: other } = await login(api.url);
+  assert.equal((await navigate(api.url, started.body.continue, other)).status, 404);
+  assert.equal((await navigate(api.url, started.body.continue, cookie)).status, 200, 'the one-time step is still there for the right sign-in');
+});
+
+test('a state tied to one person is refused for another person, even with the same sign-in id', async () => {
+  const secrets = new Map<string, unknown>();
+  const completes: string[] = [];
+  const { GithubConnections } = await import('../src/forge-connections.ts');
+  const { ploegSteps } = await import('../src/onboarding.ts');
+  const github = new GithubConnections({
+    db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({}) }) } as never,
+    store: { getSecret: <T>(id: string) => secrets.get(id) as T, setSecret: (id: string, value: unknown) => { secrets.set(id, value); } },
+    ploeg: { isDemo: false, connections: async () => ({ demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: [], boards: [], unrouted: [], fetchedAt: '' }), operatorCall: async (_user, path) => { if (path.includes('complete')) completes.push(path); return { flow: { id: 'flow-1', state: firstState }, next: { manifest: '{}', postUrl: 'https://github.com/settings/apps/new' } }; } },
+    steps: { manages: () => true, admit: async () => undefined, available: async () => ({ served: true }), notOptedIn: () => undefined },
+    repositories: { admitRegistration: () => undefined, register: () => { throw new Error('unused'); }, repositories: () => [] },
+    stored: async () => true, audit: () => undefined, baseUrl: 'https://unfold.example', pinned: 'unknown', plan: ploegSteps,
+  });
+  const owner = { id: 'admin-1', name: 'One', role: 'admin' as const };
+  const intruder = { id: 'admin-2', name: 'Two', role: 'admin' as const };
+  const started = await github.start(owner, 'sign-in-1', {});
+  const handoff = started.continue.split('/').at(-1)!;
+  assert.equal(github.continue(intruder, 'sign-in-1', handoff).status, 404);
+  const answer = await github.callback(intruder, 'sign-in-1', new URLSearchParams({ code: manifestCode, state: firstState }));
+  assert.equal(answer.status, 400);
+  assert.deepEqual(completes, []);
 });

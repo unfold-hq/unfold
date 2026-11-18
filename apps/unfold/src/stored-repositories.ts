@@ -170,19 +170,20 @@ export class StoredRepositories {
   }
 
   /**
-   * Stores a repository Ploeg registered as a runtime Work Target and grants it to Own work, or records the new
-   * registration on the one the Tenant already has. Its forge host comes from Ploeg's forge connection, so it need not
-   * be one the configuration uses.
+   * Refuses, before Ploeg is asked anything, a repository Unfold could not store after Ploeg registered it: one the
+   * Tenant already has, stored or configured, or one past the limit of repositories added from the screen.
    */
-  register(user: User, input: { tenant?: string; url: string; baseBranch: string; integrationAccount?: string }, registration: PloegRegistration): PublicRepository {
-    const tenant = input.tenant ?? defaultTenant;
-    const { key } = forgeUrl(input.url);
-    const existing = this.repositories().find(entry => entry.tenant === tenant && entry.key === key);
-    if (!existing) return this.create(user, { tenant, url: input.url, baseBranch: input.baseBranch, ...(input.integrationAccount ? { integrationAccount: input.integrationAccount } : {}) }, registration);
+  admitRegistration(user: User, url: string, tenant = defaultTenant): void {
     if (!this.access.manages(user, tenant)) throw new TaskError(403, 'forbidden', `Only an administrator${this.access.enforced ? ` of Tenant ${tenant}` : ''} adds repositories.`);
-    const repository: StoredRepository = { ...existing, ploeg: registration, ...(input.integrationAccount ? { integrationAccount: this.forgeAccount(input.integrationAccount, tenant) } : {}), updatedAt: this.access.now(), updatedBy: user.name };
-    this.db.prepare('UPDATE repositories SET body=?, integration_account_id=? WHERE id=?').run(JSON.stringify(repository), repository.integrationAccount ?? null, repository.id);
-    return this.publicRepository(user, repository);
+    const { key } = forgeUrl(url);
+    const stored = this.repositories();
+    if (stored.some(entry => entry.tenant === tenant && entry.key === key) || this.configured().some(entry => ownership(entry).tenant === tenant && repositoryKey(entry.url) === key)) throw new TaskError(409, 'repository_exists', `This Tenant already has ${key}, so Unfold asked Ploeg nothing.`);
+    if (stored.length >= maxRepositories) throw new TaskError(409, 'repository_invalid', `Unfold keeps at most ${maxRepositories} repositories added from the screen. Remove one first; Unfold asked Ploeg nothing.`);
+  }
+
+  /** Stores a repository Ploeg registered as a runtime Work Target and grants it to Own work. Its forge host comes from Ploeg's forge connection, so it need not be one the configuration uses. */
+  register(user: User, input: { tenant?: string; url: string; baseBranch: string; integrationAccount?: string }, registration: PloegRegistration): PublicRepository {
+    return this.create(user, { tenant: input.tenant ?? defaultTenant, url: input.url, baseBranch: input.baseBranch, ...(input.integrationAccount ? { integrationAccount: input.integrationAccount } : {}) }, registration);
   }
 
   /** Stores a repository for `tenant` and grants it to the Tenant's Own work, which is created when it does not exist yet. */

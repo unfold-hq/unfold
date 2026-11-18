@@ -78,10 +78,10 @@ type PloegReads = {
   serves(user: User, route: string, fresh?: boolean): Promise<boolean | null>;
 };
 /** What Unfold's own store holds for the Tenant: repositories Admins added from the screen with their state, and how many saved task sources. */
-export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off'; registered?: boolean }[]; sources(): number; forgeAccounts?(): number };
+export type StoredEntries = { repositories(): { id: string; name: string; url: string; state: 'active' | 'shadowed' | 'off' }[]; sources(): number };
 type Recorder = { ingest(events: InsightEvent[], user: User): number };
 /** The line a later slice shows for a step this Ploeg serves, from what Unfold holds; none keeps the step's "Unfold adds its screen" line. */
-export type StepLines = (manage: boolean) => Partial<Record<StepId, ChecklistLine>>;
+export type StepLines = (manage: boolean, context: { otherForges: string[] }) => Partial<Record<StepId, ChecklistLine>>;
 type Readiness = { lines(user: User, input: { connections: PloegConnections | null; teams: PloegTeam[] | null; budget: TeamBudget[]; manage: boolean; fresh: boolean }): Promise<ReadinessLines> };
 type Options = { pinned?: string; store: StateStore; ploeg: PloegReads; config: Pick<AppConfig, 'repositories' | 'taskSources' | 'productEvents' | 'tenancy'>; insight?: Recorder; now?: () => Date; steps?: PloegSteps; stored?: StoredEntries; stepLines?: StepLines };
 
@@ -101,8 +101,6 @@ export const capGatedSteps: ReadonlySet<StepId> = new Set(['prepare-repository',
 export function secondForgeOpen(steps: PloegSteps, pinned: string): boolean {
   return steps.secondForge.release !== null && pinned !== 'unknown' && compareReleases(pinned, steps.secondForge.release) >= 0;
 }
-/** Where an Admin connects GitHub and registers repositories (OpenSpec change `self-serve-onboarding`, slice S4). */
-export const connectGithubHref = '#settings/connections/github';
 
 /**
  * Compares two Ploeg release versions such as `0.2.0` and `0.2.0-rc.108`: negative when `a` is older. A release
@@ -296,27 +294,11 @@ export class Onboarding {
     const otherForges = forges.filter(forge => forge !== pair.forge);
     const action = (value: ChecklistAction): ChecklistAction | undefined => manage ? value : undefined;
     const readOnly = manage ? {} : { fix: askAdmin };
-    const own = this.stepLines?.(manage) ?? {};
-    const count = (n: number) => n === 1 ? '1 repository' : `${n} repositories`;
-    const built: Partial<Record<StepId, () => ChecklistLine>> = {
-      'connect-github': () => otherForges.length && !secondForgeOpen(this.steps, this.pinned)
-        ? { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'unavailable', reason: 'second_forge_unsupported', text: `This installation pushes to ${list(otherForges)}. Adding ${pair.forgeName} needs Ploeg ${this.steps.secondForge.release ?? `with ${this.steps.secondForge.record}, not released yet`}.`, waitsFor: { record: this.steps.secondForge.record, release: this.steps.secondForge.release }, ...readOnly }
-        : (this.stored.forgeAccounts?.() ?? 0) > 0
-          ? { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'ok', text: `Ploeg holds a ${pair.forgeName} connection made from this screen.`, action: action({ label: 'Add another installation', href: connectGithubHref, kind: 'link' }) }
-          : { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'pending', text: `Create the ${pair.forgeName} App with ${pair.forgeName}’s App manifest flow, or install the App Ploeg already holds, on the repositories agents may work on. Ploeg keeps every key; Unfold keeps none.`, ...(manage ? {} : { fix: askAdmin }), action: action({ label: 'Connect GitHub', href: connectGithubHref, kind: 'link' }) },
-      'register-repositories': () => {
-        const registered = storedRepositories.filter(entry => entry.registered);
-        return registered.length
-          ? { id: 'register-repositories', stage: 3, title: 'Register repositories', status: 'ok', text: `Ploeg registered ${count(registered.length)} from this screen: ${list(registered.map(entry => entry.name))}.`, action: action({ label: 'Register more', href: connectGithubHref, kind: 'link' }) }
-          : { id: 'register-repositories', stage: 3, title: 'Register repositories', status: 'pending', text: 'Pick repositories the GitHub App reaches. Ploeg checks each one in a dry run before it registers it.', ...(manage ? {} : { fix: askAdmin }), action: action({ label: 'Pick repositories', href: connectGithubHref, kind: 'link' }) };
-      },
-    };
+    const own = this.stepLines?.(manage, { otherForges }) ?? {};
     const notServed = (id: StepId, title: string, configEntry: string, extra = ''): ChecklistLine => {
       const record = step(id);
       const known = served[id];
-      const screen = built[id];
       if (known === true && own[id]) return own[id];
-      if (known === true && screen) return screen();
       if (known === null) return { id, stage: record.stage, title, status: 'unknown', text: `Ploeg could not be asked whether it serves this step.${extra}`, fix: manage ? 'Check again in a minute.' : askAdmin, action: action({ label: 'Check again', kind: 'refresh' }) };
       const text = known ? `This Ploeg serves the step; Unfold adds its screen in a later release.${extra}` : `${unavailableText(record, this.pinned)}${extra}`;
       return { id, stage: record.stage, title, status: 'unavailable', text, reason: known ? 'unfold_step_pending' : 'ploeg_step_unavailable', waitsFor: { record: known ? 'a later Unfold release' : record.record, release: known ? null : record.release }, configEntry, fix: manage ? 'Until then, add it to the configuration the person who installed Ploeg and Unfold keeps.' : askAdmin, action: action({ label: 'Show the configuration entry', kind: 'config-entry' }) };
@@ -336,6 +318,7 @@ export class Onboarding {
       : notServed('connect-github', 'Connect GitHub', 'Ploeg: a GitHub forge with its App id and private key (Connect GitHub as a forge in Ploeg’s docs).', secondForge));
 
     const notReady = repositories.filter(repository => repository.readiness === 'not_ready');
+    const count = (n: number) => n === 1 ? '1 repository' : `${n} repositories`;
     const activeStored = storedRepositories.filter(entry => entry.state === 'active');
     const offStored = storedRepositories.filter(entry => entry.state === 'off');
     const shadowedStored = storedRepositories.filter(entry => entry.state === 'shadowed');
