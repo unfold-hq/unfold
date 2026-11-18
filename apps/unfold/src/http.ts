@@ -3,7 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { actionContext, channelOf, confirmationOf, describeAction, isAction, outcomeOf, recordedInputs } from './action-records.ts';
 import type { AppConfig, User, RuntimeKind, Session } from './types.ts';
 import { trackerDisplay } from './tracker-display.ts';
-import { Onboarding } from './onboarding.ts';
+import { Onboarding, pinnedRelease, ploegSteps } from './onboarding.ts';
+import { GithubConnections, invalidStatePage, manifestPage } from './forge-connections.ts';
 import { ClickUpOnboarding } from './clickup-onboarding.ts';
 import { clickUpRoute, isClickUpRoute } from './clickup-onboarding-http.ts';
 import { HttpPloegConnectionApi } from './ploeg-connection-api.ts';
@@ -336,7 +337,6 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     personal: user => { try { const login = links?.describe(user.id, 'clickup').login; return { ids: [], names: login ? [user.name, login] : [user.name] }; } catch { return { ids: [], names: [user.name] }; } },
     audit: change => audit.record({ actor: auditActor(change.user), tenants: [change.tenant], fact: { kind: 'entity', action: change.action, entity: { type: change.entity, uid: change.uid, name: change.name, data: change.data }, outcome: 'success' } }),
   });
-  onboarding.useStepLines(manage => clickup.lines(manage));
   const readinessPrepare = new ReadinessPrepare({ store, ploeg, onboarding });
   onboarding.useReadiness(readinessPrepare);
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });
@@ -371,6 +371,12 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   };
   const storedRepositoryWrites = async (): Promise<void> => { if (!await storedRepositories()) fault(404, 'repositories_off', 'Adding repositories from the screen is off: turn on the repositories.stored flag.'); };
   void storedRepositories();
+  const github = new GithubConnections({
+    db: store.db, store, ploeg, steps: onboarding, repositories: trackerConnections.repositories, stored: storedRepositories,
+    audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
+    baseUrl: config.baseUrl, pinned: pinnedRelease(), plan: ploegSteps,
+  });
+  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...github.lines(manage, context) }));
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
@@ -609,6 +615,23 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         res.end();
         return;
       }
+      if (method === 'GET' && path === '/api/onboarding/github/callback') {
+        const browser = auth.scope(req) === 'browser';
+        const answer = await github.callback(browser ? auth.user(req) : undefined, browser ? auth.signIn(req) : undefined, url.searchParams);
+        if (answer.status === 303) res.writeHead(303, { Location: answer.location, 'Cache-Control': 'no-store' }).end();
+        else res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'" }).end(invalidStatePage());
+        return;
+      }
+      const githubContinue = method === 'GET' ? path.match(/^\/api\/onboarding\/github\/continue\/([A-Za-z0-9_-]{32})$/) : null;
+      if (githubContinue) {
+        const browser = auth.scope(req) === 'browser';
+        const page = github.continue(browser ? auth.user(req) : undefined, browser ? auth.signIn(req) : undefined, githubContinue[1]);
+        if (page.status === 404) return fault(404, 'not_found', 'This step to GitHub was already used or has expired. Start Connect GitHub again.');
+        if (page.status === 303) { res.writeHead(303, { Location: page.location, 'Cache-Control': 'no-store' }).end(); return; }
+        const rendered = manifestPage(page.action, page.manifest);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': rendered.csp }).end(rendered.html);
+        return;
+      }
       if (method === 'POST' && path === '/api/auth/editor/rotate') {
         const rotated = auth.rotateEditor(auth.bearer(req));
         console.log(JSON.stringify({ level: 'info', event: 'editor.rotated', actor: rotated.user.id, familyExpiresAt: rotated.familyExpiresAt }));
@@ -775,6 +798,25 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           if (answer && 'redirect' in answer) { res.writeHead(303, { Location: answer.redirect, 'Cache-Control': 'no-store' }); res.end(); return; }
           if (answer) return json(res, answer.status, sanitize(answer.body));
           fault(404, 'not_found', 'Connect ClickUp has no such address. The API reference at /api/openapi.yaml lists the addresses it has.');
+        }
+        if (path === '/api/onboarding/github') {
+          if (method === 'GET') return json(res, 200, sanitize(await github.overview(user)));
+          fault(405, 'method', 'Read the Connect GitHub state with GET.');
+        }
+        if (path === '/api/onboarding/github/flows') {
+          if (method === 'POST') return json(res, 201, sanitize(await github.start(user, auth.scope(req) === 'browser' ? auth.signIn(req) : undefined, await body(req))));
+          fault(405, 'method', 'Start a GitHub connection with POST.');
+        }
+        const grantedRoute = path.match(/^\/api\/onboarding\/github\/connections\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\/repositories$/);
+        if (grantedRoute) {
+          if (method === 'GET') return json(res, 200, sanitize(await github.granted(user, grantedRoute[1])));
+          fault(405, 'method', 'List the repositories a GitHub connection reaches with GET.');
+        }
+        if (path === '/api/onboarding/github/targets') {
+          if (method !== 'POST') fault(405, 'method', 'Check or register a repository with POST.');
+          const outcome = await github.register(user, await body(req));
+          if (outcome.repository) { await storedRepositories(); trackerConnections.sync(); }
+          return json(res, outcome.repository ? 201 : 200, sanitize(outcome));
         }
         if (method === 'GET' && path === '/api/onboarding') { await storedRepositories(); return json(res, 200, sanitize(await onboarding.checklist(user, url.searchParams.get('refresh') === '1'))); }
         if (method === 'GET' && path === '/api/bootstrap') return json(res, 200, sanitize({

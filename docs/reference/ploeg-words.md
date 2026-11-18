@@ -140,6 +140,7 @@ MCP: unfold_get_work passes `closeReason` through on each Shift; unfold_now and 
 | `withdrawn_closed` | The task was closed before any Run started | — | same |  |
 | `withdrawn_by_operator` | An operator cancelled it | — | same |  |
 | `withdrawn_session_ended` | An operator closed it after its Unfold session ended | — | same |  |
+| `already_prepared` | The repository was already prepared before any Run started | — | same |  |
 | `operator_adopted` | An Unfold session took it over | — | same |  |
 | `operator_admission_expired` | The Unfold session never started | — | same |  |
 | `operator_completed` | The Unfold session completed it | — | same |  |
@@ -293,6 +294,8 @@ MCP: not exposed; unfold_get_work quotes the reason of the latest `work_item.<st
 | `work_item.epics_seen` | [Work Item](glossary.md#work-item) | The task’s epics changed | not exposed |  |
 | `work_item.dependencies_seen` | [Work Item](glossary.md#work-item) | The task’s blockers changed | not exposed |  |
 | `work_item.premise_checked` | [Work Item](glossary.md#work-item) | Checked the task before starting | not exposed |  |
+| `work_item.prepare_not_needed` | [Work Item](glossary.md#work-item) | Preparing the repository was not needed: it was already ready | not exposed |  |
+| `work_item.prepare_cancelled` | [Work Item](glossary.md#work-item) | Preparing the repository was cancelled | not exposed |  |
 | `pull_request.mergeable` | [Forge Event](glossary.md#forge-event) | The merge conflict is resolved | not exposed |  |
 | `pull_request.conflicted` | [Forge Event](glossary.md#forge-event) | The pull request has a merge conflict | not exposed |  |
 | `pull_request.reverted` | [Forge Event](glossary.md#forge-event) | The merged pull request was reverted | not exposed |  |
