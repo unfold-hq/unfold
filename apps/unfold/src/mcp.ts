@@ -9,6 +9,7 @@ import { mcpTasksExtension, openTaskId, sealTaskId, supportsTasks, taskCacheMs, 
 import { handOffSpend, teamSpendCap } from './hand-off-spend.ts';
 import type { McpEventsHandler } from './mcp-events.ts';
 import { catalogueMessage, errorCatalogue } from './error-catalogue.ts';
+import { completion, completionTarget, contextTask, promptList, promptMessages, PromptRefusal, teamChoices, workItemChoices, type McpPromptOptions } from './mcp-prompts.ts';
 import type { Readable, Writable } from 'node:stream';
 
 /** Legacy protocol revisions this server answers `initialize` with; the client's own revision wins when it is listed. */
@@ -90,7 +91,7 @@ const workRow = object({
 }, ['id', 'state', 'team', 'tracker', 'link', 'untrusted']);
 
 /** A stdio MCP server over one Unfold's HTTP API. `handle` answers one JSON-RPC message, and returns undefined for a notification. */
-export function createMcpServer(options: McpOptions) {
+export function createMcpServer(options: McpOptions & McpPromptOptions) {
   const base = options.url.replace(/\/+$/, '');
   const api = (options.apiUrl ?? options.url).replace(/\/+$/, '');
   const fetcher = options.fetch ?? fetch;
@@ -813,7 +814,7 @@ export function createMcpServer(options: McpOptions) {
       initializedClient = clientName(params?.clientInfo);
       const asked = params?.protocolVersion;
       const protocolVersion = (mcpProtocolVersions as readonly string[]).includes(asked) ? asked : mcpProtocolVersions[0];
-      return result(id, { protocolVersion, capabilities: supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, serverInfo, instructions });
+      return result(id, { protocolVersion, capabilities: withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), serverInfo, instructions });
     }
     const meta = params && typeof params === 'object' && params._meta && typeof params._meta === 'object' && !Array.isArray(params._meta) ? params._meta as Json : undefined;
     const declared = meta?.[versionKey];
@@ -835,7 +836,7 @@ export function createMcpServer(options: McpOptions) {
         if (!call.modern) return failure(id, -32601, `Method ${method} is not supported.`);
         return (options.tasks ? options.tasks.enabled() : Promise.resolve(false)).then(followable => {
           const extensions = { ...(apps ? { [mcpAppsExtension]: {} } : {}), ...(followable ? { [mcpTasksExtension]: {} } : {}) };
-          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withEvents({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events ? 'private' : 'public' });
+          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withEvents(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {})), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events ? 'private' : 'public' });
         });
       case 'tasks/get':
       case 'tasks/update':
@@ -855,9 +856,41 @@ export function createMcpServer(options: McpOptions) {
         if (!contents) return failure(id, call.modern ? -32602 : -32002, 'Resource not found.', { uri: typeof params?.uri === 'string' ? params.uri.slice(0, 200) : null });
         return complete({ contents, ...cacheable });
       }
+      case 'prompts/list':
+        if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ prompts: promptList(), ...cacheable });
+      case 'prompts/get':
+        if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
+        try { return complete(promptMessages(params?.name, params?.arguments)); }
+        catch (error) { if (error instanceof PromptRefusal) return failure(id, -32602, error.message); throw error; }
+      case 'completion/complete':
+        if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
+        return completeArgument(id, params, call, complete);
       default:
         if (call.modern && options.events && method.startsWith('events/')) return options.events.handle(method, params).then(answer => 'error' in answer ? failure(id, answer.error.code, answer.error.message, answer.error.data) : complete(answer.result));
         return failure(id, -32601, `Method ${method} is not supported.`);
+    }
+  }
+
+  function withPrompts(capabilities: Json, listing: Json): Json {
+    return options.prompts ? { ...capabilities, prompts: listing, completions: {} } : capabilities;
+  }
+
+  async function completeArgument(id: unknown, params: Json | undefined, call: Call, complete: (value: Json) => Json): Promise<Json> {
+    let target: ReturnType<typeof completionTarget>;
+    try { target = completionTarget(params); }
+    catch (error) { if (error instanceof PromptRefusal) return failure(id, -32602, error.message); throw error; }
+    if (!target.completes) return complete(completion([]));
+    try {
+      return complete(completion(await calling.run(call, async () => {
+        if (target.completes === 'work_item') return workItemChoices(await get('/api/ploeg/now'), target.typed);
+        if (options.role === 'viewer') return [];
+        const task = contextTask(target.context);
+        const teams = task ? (await get(`/api/task-sources/${task.source}/tasks/${task.task}/ploeg`)).teams : (await get('/api/ploeg/now')).teams;
+        return teamChoices(teams, target.typed);
+      })));
+    } catch {
+      return complete(completion([]));
     }
   }
 

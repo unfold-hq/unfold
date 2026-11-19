@@ -629,6 +629,24 @@ test('ping belongs to the 2025 revisions: a 2025-11-25 client pings, a 2026-07-2
   assert.equal((await post(unfold.url, {}, { token: token(), method: 'DELETE' })).status, 405, 'there is no session to delete');
 });
 
+test('over HTTP, unfold-mcp offers its prompts, and with no Ploeg to read a completion is empty while the prompt still works', async t => {
+  const { unfold, token } = await served(t);
+  const discovered = await post(unfold.url, { jsonrpc: '2.0', id: 1, method: 'server/discover' }, { token: token() });
+  assert.deepEqual(discovered.json.result.capabilities.prompts, {});
+  assert.deepEqual(discovered.json.result.capabilities.completions, {});
+  const init = await post(unfold.url, { jsonrpc: '2.0', id: 2, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: token(), version: null });
+  assert.deepEqual(init.json.result.capabilities.prompts, { listChanged: false });
+  const listed = await post(unfold.url, { jsonrpc: '2.0', id: 3, method: 'prompts/list' }, { token: token() });
+  assert.equal(listed.status, 200, listed.text);
+  assert.deepEqual(listed.json.result.prompts.map((prompt: { name: string }) => prompt.name), ['now', 'handoff', 'takeover']);
+  const completed = await post(unfold.url, { jsonrpc: '2.0', id: 4, method: 'completion/complete', params: { ref: { type: 'ref/prompt', name: 'takeover' }, argument: { name: 'work_item', value: '' } } }, { token: token() });
+  assert.equal(completed.status, 200, completed.text);
+  assert.deepEqual(completed.json.result.completion, { values: [], total: 0, hasMore: false });
+  const shown = await post(unfold.url, { jsonrpc: '2.0', id: 5, method: 'prompts/get', params: { name: 'takeover', arguments: { work_item: '184' } } }, { token: token() });
+  assert.equal(shown.status, 200, shown.text);
+  assert.match(shown.json.result.messages[0].content.text, /unfold_take_over tool, with id "184"/);
+});
+
 test('over HTTP, MCP Apps reaches only clients that declare it: per request for 2026-07-28, and remembered from initialize for 2025', async t => {
   const { unfold, token } = await served(t);
   const ui = { extensions: { 'io.modelcontextprotocol/ui': { mimeTypes: ['text/html;profile=mcp-app'] } } };
