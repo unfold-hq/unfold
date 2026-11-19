@@ -105,6 +105,7 @@ export function failure(error: unknown, id: string | undefined, origin: string):
   if (answered(error)) {
     if (error.status === 401) return signedOut;
     if (error.code === 'unreachable' || error.code === 'gateway_unavailable') return `Unfold could not reach the workbench at ${origin}. Check the connection with ${connect}, then ask again.`;
+    if (error.code === 'gateway_sign_in' || error.code === 'gateway_refused') return `An access gateway in front of the workbench at ${origin} wants a credential the editor did not send, or refused the one it sent. Run **Unfold: Set Access Gateway Headers**, then ask again.`;
     if (error.code === 'ploeg_unconfigured') return 'This workbench has no Ploeg connected, so it has no Work Items to read.';
     if (error.status === 404) return id ? `Work Item ${id} was not found, or it is outside the Teams you may read.` : 'Not found, or outside the Teams you may read.';
     if (error.status === 403) return 'Your Unfold user may not read this.';

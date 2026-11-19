@@ -78,6 +78,12 @@
         "category": "Unfold"
       },
       {
+        "command": "unfold.setAccessGatewayHeaders",
+        "title": "Set Access Gateway Headers",
+        "category": "Unfold",
+        "icon": "$(shield)"
+      },
+      {
         "command": "unfold.linkedAccounts",
         "title": "Linked Accounts",
         "category": "Unfold",

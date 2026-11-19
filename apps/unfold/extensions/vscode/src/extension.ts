@@ -10,7 +10,8 @@ import { HandOffNotifier, answerWorkItem, handOffStatus, type HandOffAlert, type
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { writeFile } from 'node:fs/promises';
-import { ApiError, UnfoldClient, normalizeServerUrl, parseUnfoldLink } from './client.js';
+import { ApiError, UnfoldClient, gatewayHeaderName, gatewayHeaderValue, gatewayWantsCredential, normalizeServerUrl, parseUnfoldLink } from './client.js';
+import { inputProblem, manageGatewayHeaders } from './gateway.js';
 import { browserLogin, codePrompt } from './browser-login.js';
 import { EvidenceDocuments, patchFileLine } from './evidence.js';
 import { NeedsYouNotifier, attentionEvent, type NeedsYouAlert, type NeedsYouDetail, type WorkItemPolicy } from './notifications.js';
@@ -133,6 +134,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     const register = (name: string, action: (...args: any[]) => Promise<unknown>) => context.subscriptions.push(vscode.commands.registerCommand(`unfold.${name}`, (...args: any[]) => this.perform(() => action(...args))));
     register('connect', () => this.connect());
     register('signOut', () => this.signOut());
+    register('setAccessGatewayHeaders', () => this.setAccessGatewayHeaders());
     register('connectAgentHost', () => this.connectAgentHost());
     register('agentsWindowStatus', () => this.agentsWindowStatus());
     register('openAgentsWindow', () => this.openAgentsWindow());
@@ -309,8 +311,9 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     catch (error) {
       if (error instanceof ApiError && error.status === 401) this.offline(error);
       const message = error instanceof Error ? error.message : 'The operation could not be completed.';
-      const next = await vscode.window.showErrorMessage(message, ...(error instanceof ApiError && error.status === 401 ? ['Sign in'] : []));
+      const next = await vscode.window.showErrorMessage(message, ...(error instanceof ApiError && error.status === 401 ? ['Sign in'] : gatewayWantsCredential(error) ? ['Set Access Gateway Headers'] : []));
       if (next === 'Sign in') await this.perform(() => this.connect());
+      if (next === 'Set Access Gateway Headers') await this.perform(() => this.setAccessGatewayHeaders());
     }
   }
 
@@ -318,24 +321,25 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.cachedBootstrap = undefined;
     this.lastSuccess = undefined;
     const needsLogin = error instanceof ApiError && error.status === 401;
-    this.tree.update([], needsLogin ? 'Sign in to your workbench' : 'Workbench unavailable — reconnect', 'unfold.connect');
+    const gateway = gatewayWantsCredential(error);
+    this.tree.update([], needsLogin ? 'Sign in to your workbench' : gateway ? 'An access gateway wants a credential — set its headers' : 'Workbench unavailable — reconnect', gateway ? 'unfold.setAccessGatewayHeaders' : 'unfold.connect');
     this.now.offline();
     this.lastNow = undefined;
     this.forgetHandOffs();
     this.nowView.badge = undefined;
-    this.nowView.message = needsLogin ? 'Your session has expired.' : 'Work continues on the workbench. Reconnect to see it.';
+    this.nowView.message = needsLogin ? 'Your session has expired.' : gateway ? 'An access gateway in front of the workbench wants a credential. Run Unfold: Set Access Gateway Headers.' : 'Work continues on the workbench. Reconnect to see it.';
     this.seenWaiting = undefined;
     this.tasks.update([], needsLogin ? 'Sign in to browse linked tasks' : 'Reconnect to browse linked tasks');
     this.ploeg.reset(needsLogin ? 'Sign in to inspect Ploeg work' : 'Reconnect to inspect Ploeg work');
     this.ploegView.message = undefined;
-    this.view.message = needsLogin ? 'Your session has expired.' : 'Work continues on the workbench. Reconnect to inspect it.';
+    this.view.message = needsLogin ? 'Your session has expired.' : gateway ? 'An access gateway in front of the workbench wants a credential. Run Unfold: Set Access Gateway Headers.' : 'Work continues on the workbench. Reconnect to inspect it.';
     this.view.badge = undefined;
     this.statusState = undefined;
     if (this.statusTicker) { clearInterval(this.statusTicker); this.statusTicker = undefined; }
-    this.status.text = needsLogin ? '$(account) Unfold: sign in' : '$(debug-disconnect) Unfold: offline';
+    this.status.text = needsLogin ? '$(account) Unfold: sign in' : gateway ? '$(shield) Unfold: access gateway' : '$(debug-disconnect) Unfold: offline';
     this.status.backgroundColor = undefined;
-    this.status.command = 'unfold.connect';
-    this.status.tooltip = needsLogin ? 'Sign in to your workbench' : 'Reconnect to your workbench';
+    this.status.command = gateway ? 'unfold.setAccessGatewayHeaders' : 'unfold.connect';
+    this.status.tooltip = needsLogin ? 'Sign in to your workbench' : gateway ? (error as ApiError).message : 'Reconnect to your workbench';
     void vscode.commands.executeCommand('setContext', 'unfold.connected', false);
     this.panels.offline(needsLogin ? 'Session expired. Use Unfold: Connect to sign in.' : 'Connection lost. The workbench keeps its state.');
     this.taskPanels.offline();
@@ -580,6 +584,11 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.connectionChanged();
     if (origin !== this.current.origin) this.current = new UnfoldClient(origin, this.context.secrets);
     await settings().update('serverUrl', origin, vscode.ConfigurationTarget.Global);
+    await this.signIn();
+  }
+
+  private async signIn(): Promise<void> {
+    const origin = this.current.origin;
     try { this.cachedBootstrap = await this.current.bootstrap(); }
     catch (error) {
       if (!(error instanceof ApiError) || error.status !== 401) throw error;
@@ -610,6 +619,20 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     }
     await this.refresh(true);
     await vscode.commands.executeCommand('unfold.now.focus');
+  }
+
+  async setAccessGatewayHeaders(): Promise<void> {
+    if (this.configurationError) throw this.configurationError;
+    const target = this.current;
+    const host = new URL(target.origin).host;
+    const changed = await manageGatewayHeaders(target, {
+      pick: async (choices, title, placeHolder) => vscode.window.showQuickPick(choices, { title, placeHolder, ignoreFocusOut: true }),
+      name: async () => vscode.window.showInputBox({ title: `Access gateway header for ${host}`, prompt: 'Header name, exactly as the access gateway expects it.', ignoreFocusOut: true, validateInput: inputProblem(gatewayHeaderName) }),
+      value: async name => vscode.window.showInputBox({ title: `Access gateway header for ${host}`, prompt: `Value of ${name}. It is kept in VS Code SecretStorage and sent only to ${target.origin}.`, password: true, ignoreFocusOut: true, validateInput: inputProblem(gatewayHeaderValue) }),
+    });
+    if (!changed || target !== this.current) return;
+    this.connectionChanged();
+    await this.signIn();
   }
 
   async signOut(): Promise<void> {

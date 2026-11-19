@@ -35,9 +35,34 @@ The demo runs a fixed repository fixture and real checks without AI calls or Plo
 
 Run **Unfold: Connect to Workbench** with the deployed HTTPS origin. When configured, **Sign in with <provider>** shows a short code such as `BCDF-GHJK` and opens the workbench's browser sign-in. After you sign in, the browser names the request and shows the same code: approve it only if the codes match. The editor then acts as you, with its own credential that lasts thirty days and that you can sign out under **Settings › Signed-in editors** in the browser. Local-account login is also supported.
 
-The editor credential, or the session cookie of a local-account login, stays in VS Code SecretStorage, scoped to that origin. There are no password or API-key settings. The extension runs in the local UI host even in a Remote SSH window, so the workbench must be reachable from your machine. HTTPS is required except for loopback development. Use an origin at `/`; reverse-proxy subpaths and browser-only SSO interception are unsupported.
+The editor credential, or the session cookie of a local-account login, stays in VS Code SecretStorage, scoped to that origin. There are no password or API-key settings. The extension runs in the local UI host even in a Remote SSH window, so the workbench must be reachable from your machine. HTTPS is required except for loopback development. Use an origin at `/`; reverse-proxy subpaths are unsupported. A workbench behind an access gateway needs that gateway's headers: see [Connect through an access gateway](#connect-through-an-access-gateway).
 
 The server enforces identity and session ownership. Viewers inspect visible sessions, operators change their own sessions, and administrators can access all sessions. Changing the connection invalidates pending actions so they cannot be submitted to the wrong workbench.
+
+## Connect through an access gateway
+
+Some installations put an access gateway in front of the workbench: an identity-aware proxy, such as Cloudflare Access, that sends a browser to a sign-in page before a request reaches Unfold. The extension is not a browser and never follows a redirect, so it cannot complete that sign-in. Its error says so and names the host or path the request was sent to, the status bar reads **Unfold: access gateway**, and both lead to the command below.
+
+When the gateway also accepts a credential in request headers, store it with **Unfold: Set Access Gateway Headers**:
+
+1. Choose **Add a header** and enter the header's name exactly as the gateway expects it.
+2. Enter its value. The box is masked, and the value is never shown again.
+3. Repeat for each header, then press Escape. The extension reconnects and continues with the workbench sign-in.
+
+For a [Cloudflare Access service token](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/), add `CF-Access-Client-Id` and `CF-Access-Client-Secret`, and have the gateway's operator give the application a Service Auth policy that includes the token. Any gateway that takes a fixed credential in a header works the same way.
+
+Your own Cloudflare Access session works too, without a service token and without asking the operator for anything. Run `cloudflared access login https://<workbench>`, then store the output of `cloudflared access token -app=https://<workbench>` as the header `cf-access-token` ([Cloudflare's command-line guide](https://developers.cloudflare.com/cloudflare-one/tutorials/cli/)). The gateway then knows it is you. The token lasts as long as the session the gateway's administrator configured, after which you store a new one.
+
+The extension then sends those headers with every request to that workbench: API calls, the live event stream and downloads. Things to know:
+
+- The headers are a second credential beside your Unfold sign-in, kept in VS Code SecretStorage under the workbench's origin. They never appear in settings, never reach the webview, and are never sent anywhere else, because the extension follows no redirect. **Sign Out** leaves them in place; remove them with the same command.
+- The extension refuses a header it sets itself, such as `Authorization`, `Cookie` and `Origin`. A gateway that takes its credential only in one of those cannot be passed this way, because your Unfold credential travels there.
+- A workbench takes at most 16 headers, each value on one line in printable ASCII.
+- A value that expires, such as a token you copied from a command-line sign-in, has to be replaced by hand. The extension then reports that the gateway refused the stored headers; your Unfold sign-in is kept.
+- The browser sign-in still opens your browser, which signs in to the gateway its own way.
+- VS Code's Agents window makes its own connection to the workbench and takes no headers, so behind an access gateway it stays **Not connected**. The same holds for the **Ploeg** server in VS Code chat when that server sits behind a gateway: its definition carries a URL only.
+
+The tests run the client against a local server that redirects to a sign-in page until it sees the headers. Against Cloudflare Access, checked on 2026-11-18: without headers the extension names the gateway's sign-in host, and with a service token Access does not know it reports that the gateway refused the stored headers. Not checked yet: a service token or a personal token the gateway admits, and the command in a desktop VS Code.
 
 ## Use Unfold from the Agents window
 
@@ -185,7 +210,7 @@ The extension reads the session list on every refresh. An open session panel als
 
 **While the window is in the background.** VS Code 1.141 shows an extension's notifications inside the window only. It sends no operating-system notification and does not flash the taskbar or bounce the Dock for them, and the extension API has no call that does. A notification that arrives while the window is unfocused stays until you return, because its hide timer starts only once the window has focus again ([`notificationsToasts.ts:381-415`](https://github.com/microsoft/vscode/blob/1.141.0/src/vs/workbench/browser/parts/notifications/notificationsToasts.ts#L381-L415)). VS Code 1.141 raises operating-system notifications only for its own chat and Agents window sessions, under `chat.notifyWindowOnConfirmation` and `chat.notifyWindowOnResponseReceived`, both `windowNotFocused` by default ([`chatWindowNotifier.ts:120-175`](https://github.com/microsoft/vscode/blob/1.141.0/src/vs/workbench/contrib/chat/browser/chatWindowNotifier.ts#L120-L175), [`sessionsWindowNotifier.ts:97-150`](https://github.com/microsoft/vscode/blob/1.141.0/src/vs/sessions/contrib/sessions/browser/sessionsWindowNotifier.ts#L97-L150)). Those notifications cover sessions that VS Code itself shows, so they can also cover an Unfold session opened in the Agents window; they do not cover this extension's notifications. For an operating-system notification outside VS Code, keep an Unfold browser tab open with desktop notifications turned on in Preferences.
 
-Cookies remain in the extension host. The webview receives public session data through a narrow message protocol, never login secrets, inference keys or Kubernetes credentials. Its scripts and styles are packaged locally; the content security policy blocks network connections and remote code. The server origin is application-scoped, so workspace settings cannot redirect it. There is no cross-origin credential forwarding or disabled certificate verification.
+Cookies remain in the extension host. The webview receives public session data through a narrow message protocol, never login secrets, inference keys or Kubernetes credentials. Its scripts and styles are packaged locally; the content security policy blocks network connections and remote code. The server origin is application-scoped, so workspace settings cannot redirect it. [Access gateway headers](#connect-through-an-access-gateway) stay in SecretStorage too and go only to the workbench they were stored for. There is no cross-origin credential forwarding or disabled certificate verification.
 
 The extension implements no analytics or background repository uploads. Drafts can persist in local webview state; saved instructions and evidence follow the workbench's retention policy.
 

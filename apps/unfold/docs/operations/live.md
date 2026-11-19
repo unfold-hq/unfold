@@ -477,6 +477,20 @@ Behind an ingress controller or load balancer, the socket's peer is the proxy, n
 
 When the peer is one of them, Unfold reads `X-Forwarded-For` from the right and takes the first address that is not a trusted proxy. That address keys the local sign-in throttle (10 failed attempts per five minutes), the editor sign-in start limit (20 per ten minutes), the [Request intake rate limit](request-intake.md#rate-limit), the per-address [rate limits](../contracts/api.md#rate-limits) of SCIM, `unfold-mcp` over HTTP, the public webhook receivers and sign-in, and the source address the [security audit](audit-siem.md) records for a browser request and an `unfold-mcp` request over HTTP. Without `trustedProxies`, or from a peer that is not listed, the header is ignored, because any client can write it. List only the proxies, such as the ingress controller's pod network, never `0.0.0.0/0`: a listed range whose other addresses reach Unfold directly lets those clients choose their own address.
 
+### Behind an access gateway
+
+An access gateway is an identity-aware proxy, such as Cloudflare Access, that makes a browser sign in before a request reaches Unfold. The browser passes it and then signs in to Unfold as usual. A client that is not a browser gets the gateway's redirect instead of the Unfold API, so decide per client how it gets through:
+
+| Client | Through the gateway |
+| --- | --- |
+| Browser | Signs in to the gateway, then to Unfold |
+| VS Code extension | Sends the request headers a person stores with **Unfold: Set Access Gateway Headers** ([extension guide](../../extensions/vscode/README.md#connect-through-an-access-gateway), [ADR 0074](../adrs/0074-the-editor-sends-access-gateway-headers-a-person-stores-for-one-workbench.md)). Give the gateway a credential it accepts in headers, such as a service token, and a policy that admits it |
+| VS Code's Agents window | Takes no headers. It dials the workbench's WebSocket address itself with its connection token, so it does not pass |
+
+Every other client that calls the workbench without a browser, such as `unfold-mcp` over HTTP or an identity provider's SCIM calls, meets the same redirect unless the gateway exempts its path or the client sends a credential the gateway accepts.
+
+The gateway's credential admits a client to the gateway and nothing more: Unfold still asks every request for its own sign-in, and its roles, Tenants and audit are unchanged. A service token is shared by everyone who holds it, so rotate it when someone who had it leaves.
+
 ## Security headers
 
 Every response starts with these headers; a route may set a stricter `Content-Security-Policy` of its own, such as the sandboxed policy on retained evidence files, but never removes one.
