@@ -2,9 +2,10 @@ import { state, onForget, disconnect } from '../core/state.js';
 import { api } from '../core/api.js';
 import { escape, renderHtml, announce, notify } from '../core/dom.js';
 import { badge, button, callout, demoNote, ploegUnconfigured, skeleton } from '../core/ui.js';
+import { attemptRepository, pickRepositories, pickerState, repositoriesMarkup } from '../core/forge-repositories.js';
 import { shell } from '../shell.js';
 
-const fresh = () => ({ data: null, error: '', loading: false, busy: '', picked: '', granted: null, grantedError: '', keys: {}, results: {} });
+const fresh = () => ({ data: null, error: '', loading: false, ...pickerState() });
 const view = fresh();
 onForget(() => Object.assign(view, fresh()));
 
@@ -20,16 +21,6 @@ const states = {
   token_missing: { tone: 'danger', label: 'Key missing' },
   removed: { tone: 'neutral', label: 'Removed' },
 };
-
-/**
- * The key Unfold suggests for a repository: its `owner/name` in lower case with every other character a hyphen.
- * The Admin may change it; Unfold sends only the key they confirm.
- * @param {string} repository
- * @returns {string}
- */
-export function suggestedKey(repository) {
-  return repository.toLowerCase().replace(/[^a-z0-9_.:-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 128);
-}
 
 function unavailable(data) {
   if (data.demo) return callout({ tone: 'neutral', title: 'Demo', body: '<p>The demo connects nothing: it has no Ploeg to hold a GitHub App or register a repository.</p>' });
@@ -57,29 +48,7 @@ function connectionSection(data) {
   return `<section class="card settings-card" aria-labelledby="github-connections-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="github-connections-title">Installations Ploeg holds</h2></div></header><ol class="health-list">${rows}</ol></section>`;
 }
 
-function resultMarkup(result) {
-  if (!result) return '';
-  const checks = result.checks.length ? `<ul class="health-list">${result.checks.map(check => `<li class="health-detail">${badge({ tone: check.result === 'pass' ? 'success' : check.result === 'fail' ? 'danger' : 'neutral', label: check.result === 'pass' ? 'Passed' : check.result === 'fail' ? 'Failed' : 'Unknown', size: 'sm' })} ${escape(check.name)}${check.text ? `: ${escape(check.text)}` : ''}</li>`).join('')}</ul>` : '';
-  const readiness = result.readiness === 'not_ready' ? `<p class="health-detail">Not ready${result.reasons.length ? `: ${escape(result.reasons.join(', '))}` : ''}.${result.prepareAvailable ? ' Ploeg can open a pull request that adds the AGENTS.md (Prepare a repository on the checklist).' : ''}</p>` : '';
-  return `<p class="health-detail">${escape(result.message)}${result.reason ? ` (${escape(result.reason)})` : ''}</p>${readiness}${checks}`;
-}
-
-function repositorySection() {
-  if (!view.picked) return '';
-  if (view.grantedError) return callout({ tone: 'danger', title: 'Could not list the repositories', body: `<p>${escape(view.grantedError)}</p>` });
-  if (!view.granted) return skeleton({ rows: 3 });
-  const rows = view.granted.repositories.map(entry => {
-    const id = `github-key-${suggestedKey(entry.repository)}`;
-    const key = view.keys[entry.repository] ?? entry.key ?? suggestedKey(entry.repository);
-    const result = view.results[entry.repository];
-    const done = entry.registered || result?.repository;
-    const status = done ? badge({ tone: 'success', label: 'Registered', size: 'sm' }) : entry.canWrite ? '' : badge({ tone: 'attention', label: 'Read-only for the App', size: 'sm' });
-    const controls = done || !entry.canWrite ? '' : `<div class="field"><label class="field-label" for="${escape(id)}">Key</label><input id="${escape(id)}" data-github-key="${escape(entry.repository)}" maxlength="128" autocomplete="off" spellcheck="false" value="${escape(key)}"><p class="field-hint">Lower case. Tasks pick this repository with the label repo/&lt;key&gt;.</p></div><div class="checklist-confirm">${button({ label: 'Check', size: 'sm', icon: 'check', action: 'github-check', data: { repository: entry.repository }, busy: view.busy === `check-${entry.repository}` })}${result?.dryRun && result.outcome === 'accepted' ? button({ label: 'Register', variant: 'primary', size: 'sm', icon: 'plus', action: 'github-register', data: { repository: entry.repository }, busy: view.busy === `register-${entry.repository}` }) : ''}</div>`;
-    return `<li class="health-check"><div class="health-main"><div class="health-heading"><h3 class="health-title">${escape(entry.repository)}</h3>${status}</div>${controls}${resultMarkup(result)}</div></li>`;
-  }).join('');
-  const body = rows ? `<ol class="health-list">${rows}</ol>` : '<p class="card-body">The installation reaches no repository. Add repositories to it on GitHub, then reload.</p>';
-  return `<section class="card settings-card" aria-labelledby="github-repositories-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="github-repositories-title">Repositories the installation reaches</h2><p class="card-subtitle">Ploeg checks each one in a dry run before it registers it. A registered repository is stored in Unfold and granted to Own work.</p></div></header>${body}</section>`;
-}
+const words = { prefix: 'github', check: { action: 'github-check' }, register: { action: 'github-register' }, title: 'Repositories the installation reaches', subtitle: 'Ploeg checks each one in a dry run before it registers it. A registered repository is stored in Unfold and granted to Own work.', empty: 'The installation reaches no repository. Add repositories to it on GitHub, then reload.', readOnly: 'Read-only for the App' };
 
 function body() {
   if (state.ploegStatus === 'unconfigured') return ploegUnconfigured();
@@ -92,7 +61,7 @@ function body() {
   if (data.secondForge?.unread) return callout({ tone: 'attention', title: 'Ploeg could not be asked', body: '<p>Unfold could not read which forges this installation pushes to, so it starts no GitHub connection until it can. Check again in a minute.</p>', actions: button({ label: 'Check again', icon: 'refresh', size: 'sm', action: 'github-refresh' }) });
   const second = data.secondForge ? callout({ tone: 'attention', title: 'Waits for Ploeg', body: `<p>This installation pushes to ${escape(data.secondForge.forges.join(', '))}. Adding GitHub needs Ploeg ${escape(data.secondForge.waitsFor.release || `with ${data.secondForge.waitsFor.record}, not released yet`)}.</p>` }) : '';
   const readOnly = data.manage ? '' : callout({ tone: 'neutral', title: 'Ask an administrator', body: '<p>Only an administrator connects GitHub and registers repositories.</p>' });
-  return `${readOnly}${second}${data.secondForge ? '' : appSection(data)}${connectionSection(data)}${repositorySection()}`;
+  return `${readOnly}${second}${data.secondForge ? '' : appSection(data)}${connectionSection(data)}${repositoriesMarkup(view, words)}`;
 }
 
 function render() {
@@ -139,35 +108,11 @@ async function start(control) {
   }
 }
 
-async function pick(control) {
-  view.picked = control.dataset.connection; view.granted = null; view.grantedError = ''; view.results = {}; view.busy = `pick-${view.picked}`; render();
-  try { view.granted = await api(`/api/onboarding/github/connections/${encodeURIComponent(view.picked)}/repositories`); }
-  catch (error) { if (error.status !== 401) view.grantedError = error.message || 'Ploeg did not list the repositories.'; }
-  view.busy = ''; render();
-}
-
-async function attempt(control, dryRun) {
-  const repository = control.dataset.repository;
-  const input = [...document.querySelectorAll('[data-github-key]')].find(element => element.dataset.githubKey === repository);
-  const key = input ? input.value.trim() : view.keys[repository];
-  view.keys[repository] = key;
-  view.busy = `${dryRun ? 'check' : 'register'}-${repository}`; render();
-  try {
-    const result = await api('/api/onboarding/github/targets', { method: 'POST', body: JSON.stringify({ connection: view.picked, repository, key, dryRun }) });
-    view.results[repository] = result;
-    announce(result.message);
-    if (result.repository) notify(`${repository} is registered as ${key}.`);
-  } catch (error) {
-    if (error.status !== 401) { view.results[repository] = { dryRun, outcome: 'refused', reason: error.code || null, message: error.message || 'Ploeg refused the repository.', checks: [], readiness: 'unknown', reasons: [], prepareAvailable: false }; notify(error.message || 'Ploeg refused the repository.', true); }
-  }
-  view.busy = ''; render();
-}
-
 /** Connect GitHub (`#settings/connections/github`): create or install the GitHub App through Ploeg, then pick and register repositories. */
 export default {
   id: 'connect-github',
   match: hash => hash === 'settings/connections/github' ? {} : null,
   enter,
   render,
-  actions: { 'github-refresh': load, 'github-start': start, 'github-pick': pick, 'github-check': control => attempt(control, true), 'github-register': control => attempt(control, false) },
+  actions: { 'github-refresh': load, 'github-start': start, 'github-pick': control => pickRepositories(view, '/api/onboarding/github', control, render), 'github-check': control => attemptRepository(view, '/api/onboarding/github', control, true, render), 'github-register': control => attemptRepository(view, '/api/onboarding/github', control, false, render) },
 };

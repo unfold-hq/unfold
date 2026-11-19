@@ -144,6 +144,17 @@ test('each Work Item action over stdio calls Unfold\'s route only after the pers
   }
 });
 
+test('a confirmation that never comes back ends the action with a refusal that names the Unfold page, and changes nothing', async t => {
+  const ploeg = await fakePloeg(t);
+  const server = await application('live', config => { config.ploeg = ploeg.config; }); t.after(() => server.close());
+  const token = credential(server, server.app.store.getUserByName('admin')!.id);
+  const answer = await overStdio(server.url, token, 'unfold_approve_work', { id: '106' }, 'fail');
+  assert.equal(answer.elicited.length, 1);
+  assert.equal(answer.result.isError, true);
+  assert.equal(answer.result.content[0].text, `The confirmation did not come back, so nothing was changed. Do it in Unfold instead: ${server.url}/#work/106`);
+  assert.equal(ploeg.posted.length, 0);
+});
+
 test('an action tool refuses a viewer, and work in the wrong state, before asking the person anything', async t => {
   const ploeg = await fakePloeg(t);
   const server = await application('live', config => { config.ploeg = ploeg.config; }); t.after(() => server.close());

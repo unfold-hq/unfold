@@ -4,3 +4,4 @@ dist/
 .screenshots/
 dist-release/
 media/core/
+media/agent/

@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { copyFile, cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 
 export const coreModules = ['states.js', 'format.js', 'reasons.js', 'blackboard.js', 'checkout.js', 'progress.js', 'terms.js', 'agents-window.js', 'tracker-registry.js'];
 const source = new URL('../../../public/core/', import.meta.url);
@@ -13,3 +13,13 @@ for (const name of coreModules) {
   await copyFile(new URL(name, source), new URL(name, target));
 }
 await writeFile(new URL('package.json', target), '{ "type": "module" }\n');
+
+const agentFiles = [
+  { from: '../../../skills/operate-agent-session/', to: '../media/agent/skills/operate-agent-session/' },
+  { from: '../../claude-code/', to: '../media/agent/plugin/' }
+];
+
+await rm(new URL('../media/agent/', import.meta.url), { recursive: true, force: true });
+for (const { from, to } of agentFiles) {
+  await cp(new URL(from, import.meta.url), new URL(to, import.meta.url), { recursive: true });
+}

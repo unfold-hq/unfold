@@ -1,6 +1,7 @@
+import { randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AccessTokenVerifier, KeysUnavailable, TokenRefused, challenge, metadataPath, resourceMetadata, type AccessToken, type McpHttpSettings } from './mcp-auth.ts';
-import { confirmationLedger, createMcpServer, mcpModernProtocolVersions, mcpProtocolVersions } from './mcp.ts';
+import { confirmationLedger, createMcpServer, mcpModernProtocolVersions, mcpProtocolVersions, type McpOutbound } from './mcp.ts';
 import type { McpTasks, TaskKeyRing } from './mcp-tasks.ts';
 import { lowerRole, subjectUserId } from './oidc.ts';
 import { narrowedMemberships, type Membership } from './tenancy.ts';
@@ -9,6 +10,7 @@ import type { User, UserRole } from './types.ts';
 import type { McpAuditEntry } from './audit/service.ts';
 import { clientAddress } from './client-address.ts';
 import type { McpEventsHandler } from './mcp-events.ts';
+import { unfoldMcpIcons } from './mcp-icons.ts';
 
 /** What the MCP endpoint inside the Unfold server needs from the rest of it. */
 export type McpHttpOptions = {
@@ -47,6 +49,9 @@ const maxBodyBytes = 1_048_576;
 const delegationMs = 120_000;
 const appsMemoryMs = 86_400_000;
 const appsMemoryEntries = 10_000;
+const confirmationWaitMs = 120_000;
+const tokenMarginMs = 5_000;
+const streamHeartbeatMs = 15_000;
 const knownVersions: readonly string[] = [...mcpModernProtocolVersions, ...mcpProtocolVersions];
 
 function send(res: ServerResponse, status: number, value: unknown, headers: Record<string, string> = {}): void {
@@ -61,6 +66,17 @@ function problem(res: ServerResponse, status: number, code: string, message: str
 function rpcError(res: ServerResponse, status: number, id: unknown, code: number, message: string, data?: unknown): void {
   send(res, status, { jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data === undefined ? {} : { data }) } });
 }
+
+function acceptsStream(req: IncomingMessage): boolean {
+  return (header(req, 'accept') ?? '').split(',').some(type => type.split(';')[0].trim().toLowerCase() === 'text/event-stream');
+}
+
+function streamEvent(res: ServerResponse, value: unknown): void {
+  if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+  res.write(`event: message\ndata: ${JSON.stringify(value)}\n\n`);
+}
+
+type Waiting = { resolve(value: Record<string, any>): void; reject(error: Error): void };
 
 function header(req: IncomingMessage, name: string): string | undefined {
   const value = req.headers[name];
@@ -86,6 +102,10 @@ async function readBody(req: IncomingMessage): Promise<Buffer | undefined> {
 
 /**
  * Serves `unfold-mcp` as stateless Streamable HTTP with JSON responses, behind an OAuth 2.1 resource-server check.
+ * A 2025 client that declared form elicitation and accepts `text/event-stream` gets its confirming `tools/call` as a
+ * stream instead: the confirmation goes out on it as `elicitation/create`, the client's answer comes back as its own
+ * POST, matched here by the person, the client and an unguessable request id, and the stream closes with the result.
+ * Only this process can match the answer; anything else is refused, and the call ends without acting.
  * Each request's access token is verified, its subject is mapped to an Unfold account, and the tools then call
  * Unfold's API as that account with a short-lived credential of this process. The caller's token goes no further
  * than that credential: a Ploeg change made with it exchanges the token for a person token and never forwards it.
@@ -97,16 +117,18 @@ export function createMcpHttp(options: McpHttpOptions) {
   const metadataPaths = new Set(['/.well-known/oauth-protected-resource', metadataPath(endpoint)]);
   const verifier = new AccessTokenVerifier(settings, { ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.now ? { now: options.now } : {}) });
   const confirmations = confirmationLedger();
+  const icons = unfoldMcpIcons(resource.origin);
   const taskCache: McpTasks['cache'] = new Map();
   const metadata = resourceMetadata(settings);
-  const appClients = new Map<string, number>();
+  const appClients = new Map<string, { until: number; apps: boolean; elicitation: boolean }>();
+  const waiting = new Map<string, Waiting>();
   const now = () => options.now?.() ?? Date.now();
-  const declaredApps = (key: string) => { const until = appClients.get(key); if (until !== undefined && until <= now()) appClients.delete(key); return until !== undefined && until > now(); };
-  const rememberApps = (key: string, declared: boolean) => {
+  const rememberedClient = (key: string) => { const entry = appClients.get(key); if (entry !== undefined && entry.until <= now()) appClients.delete(key); return entry !== undefined && entry.until > now() ? entry : undefined; };
+  const rememberClient = (key: string, apps: boolean, elicitation: boolean) => {
     appClients.delete(key);
-    if (!declared) return;
+    if (!apps && !elicitation) return;
     if (appClients.size >= appsMemoryEntries) appClients.delete(appClients.keys().next().value!);
-    appClients.set(key, now() + appsMemoryMs);
+    appClients.set(key, { until: now() + appsMemoryMs, apps, elicitation });
   };
   if (settings.audience === 'client-id') console.error(JSON.stringify({ level: 'warn', event: 'mcp.client_audience', message: 'UNFOLD_MCP_TOKEN_AUDIENCE=client-id: a token whose aud names a client id in UNFOLD_MCP_CLIENT_IDS is accepted instead of one for UNFOLD_MCP_RESOURCE, so a token that client got for another resource is accepted too' }));
 
@@ -148,6 +170,14 @@ export function createMcpHttp(options: McpHttpOptions) {
     try { message = JSON.parse(raw.toString('utf8')); } catch { return rpcError(res, 400, null, -32700, 'Parse error.'); }
     if (!message || typeof message !== 'object' || Array.isArray(message)) return rpcError(res, 400, null, -32600, 'Expected one JSON-RPC request object.');
     if (message.id === undefined) { res.writeHead(202, { 'Cache-Control': 'no-store' }); res.end(); return; }
+    if (message.method === undefined && ('result' in message || 'error' in message)) {
+      const key = JSON.stringify([user.id, token.client ?? '', message.id]);
+      const pending = typeof message.id === 'string' ? waiting.get(key) : undefined;
+      options.audit?.({ ...caller, user, ...(token.client ? { client: token.client } : {}), method: 'response', status: pending ? 202 : 400, outcome: pending ? 'success' : 'failure' });
+      if (!pending) return problem(res, 400, 'unknown_response', 'No call of this server waits for this answer, so nothing was done. Call the tool again to be asked again.');
+      if (message.error !== undefined) pending.reject(new Error('The client refused the request.')); else pending.resolve(message.result && typeof message.result === 'object' && !Array.isArray(message.result) ? message.result : {});
+      res.writeHead(202, { 'Cache-Control': 'no-store' }); res.end(); return;
+    }
     const { id, method, params } = message;
     const versionHeader = header(req, 'mcp-protocol-version');
     const declared = params?._meta?.['io.modelcontextprotocol/protocolVersion'];
@@ -165,25 +195,48 @@ export function createMcpHttp(options: McpHttpOptions) {
       const sentName = named ? header(req, 'mcp-name') : undefined;
       if (named && sentName !== undefined && decodeHeader(sentName) !== named.value) return rpcError(res, 400, id, -32020, `Header mismatch: Mcp-Name does not match the ${named.what}.`);
     }
-    const delegated = options.delegate(user, delegationMs, { source: 'request', userId: user.id, accessToken: authorization[1], subject: token.subject, expiresAt: token.expiresAt });
     const appsKey = JSON.stringify([user.id, token.client ?? '', header(req, 'user-agent') ?? '']);
+    const remembered = modern ? undefined : rememberedClient(appsKey);
+    const waitMs = Math.min(confirmationWaitMs, token.expiresAt - tokenMarginMs - now());
+    const streamable = !modern && method === 'tools/call' && remembered?.elicitation === true && acceptsStream(req) && waitMs > 0;
+    const delegated = options.delegate(user, delegationMs + (streamable ? waitMs : 0), { source: 'request', userId: user.id, accessToken: authorization[1], subject: token.subject, expiresAt: token.expiresAt });
     let answer: any;
     try {
       const follow = options.tasks;
       const tasks: McpTasks | undefined = follow ? { enabled: () => follow.enabled(user), keys: () => follow.keys(), tenantOf: source => follow.tenantOf(user, source), cache: taskCache } : undefined;
       const events = modern && options.events && await options.events.enabled(user).catch(() => false) ? options.events.handler(user) : undefined;
-      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, ...(!modern && declaredApps(appsKey) ? { mcpApps: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
+      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
+      if (streamable && server.confirmsFirst(String(params?.name))) server.connect(askOnStream(res, user.id, token.client ?? '', waitMs));
       answer = await server.handle(message);
-      if (!modern && method === 'initialize' && answer?.result) rememberApps(appsKey, server.declaredMcpApps());
+      if (!modern && method === 'initialize' && answer?.result) rememberClient(appsKey, server.declaredMcpApps(), server.declaredFormElicitation());
     } finally { delegated.revoke(); }
     console.log(JSON.stringify({ level: 'info', event: 'mcp.request', actor: user.id, method: String(method).slice(0, 64), ...(method === 'tools/call' ? { tool: String(params?.name ?? '').slice(0, 64) } : {}), protocol: modern ? 'stateless' : 'legacy', ...(token.audience === 'client' ? { audience: 'client' } : {}) }));
     const code = answer?.error?.code;
     const status = code === undefined ? 200 : modern && code === -32601 ? 404 : modern || [-32020, -32021, -32022].includes(code) ? 400 : 200;
     options.audit?.({ ...caller, user, ...(token.client ? { client: token.client } : {}), method: String(method).slice(0, 64), ...(method === 'tools/call' ? { tool: String(params?.name ?? '').slice(0, 64) } : {}), status, outcome: status === 200 && answer?.error === undefined && answer?.result?.isError !== true ? 'success' : 'failure', delegation: delegated.token });
+    if (res.headersSent) { if (!res.writableEnded && !res.destroyed) { streamEvent(res, answer); res.end(); } return; }
     send(res, status, answer);
   }
 
+  function askOnStream(res: ServerResponse, principal: string, client: string, waitMs: number): McpOutbound {
+    return (method, params) => new Promise((resolve, reject) => {
+      const id = `unfold-${randomBytes(18).toString('base64url')}`;
+      const key = JSON.stringify([principal, client, id]);
+      const settle = (finish: () => void) => { if (waiting.get(key) !== entry) return; waiting.delete(key); clearTimeout(timer); clearInterval(heartbeat); res.off('close', closed); finish(); };
+      const entry: Waiting = { resolve: value => settle(() => resolve(value)), reject: error => settle(() => reject(error)) };
+      const closed = () => entry.reject(new Error('The client closed the stream.'));
+      const timer = setTimeout(() => entry.reject(new Error('The client did not answer in time.')), waitMs);
+      const heartbeat = setInterval(() => { if (!res.destroyed && !res.writableEnded) res.write(': waiting for the person\n\n'); }, streamHeartbeatMs);
+      if (res.destroyed || res.writableEnded) { clearTimeout(timer); clearInterval(heartbeat); return reject(new Error('The client closed the stream.')); }
+      waiting.set(key, entry);
+      res.once('close', closed);
+      streamEvent(res, { jsonrpc: '2.0', id, method, params });
+    });
+  }
+
   return {
+    /** Ends every call that waits for a confirmation without acting, as when the process shuts down. */
+    close(): void { for (const pending of [...waiting.values()]) pending.reject(new Error('Unfold is shutting down.')); },
     /** Whether a request path is the MCP endpoint or its protected resource metadata. */
     handles(path: string): boolean { return path === endpoint || metadataPaths.has(path); },
     async handle(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {

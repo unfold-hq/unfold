@@ -2,8 +2,8 @@
 type: how-to
 audience: [contributor, operator, agent]
 owner: unfold
-last_verified: 2026-11-16
-verified_by: "Rewritten for GitHub Actions on 2026-11-16 against .github/workflows, .github/actions, scripts/release_train_pin.py and scripts/verify-gate.mjs. The rows kept from the previous forge describe failures of scripts, tools and tests that still run the same way; their run and pull request numbers refer to the archived Forgejo repository. No GitHub Actions run had failed in these ways yet."
+last_verified: 2026-11-19
+verified_by: "Visual Studio Marketplace parts updated on 2026-11-19 against .github/workflows/on_release_published.yml, scripts/marketplace_version.py, scripts/publish_release.py and scripts/release_preflight.py; no Marketplace publication observed yet. Rewritten for GitHub Actions on 2026-11-16 against .github/workflows, .github/actions, scripts/release_train_pin.py and scripts/verify-gate.mjs. The rows kept from the previous forge describe failures of scripts, tools and tests that still run the same way; their run and pull request numbers refer to the archived Forgejo repository. No GitHub Actions run had failed in these ways yet."
 ---
 # Troubleshoot CI and releases
 
@@ -23,6 +23,7 @@ Every run and log on `unfold-hq/unfold` is public: `gh run list --repo unfold-hq
 | `build-contexts` fails in a CVE budget step | The image built, but Grype found a critical or high finding over the budget in [`apps/unfold/ops/security/cve-budgets.yaml`](../../apps/unfold/ops/security/cve-budgets.yaml). The job summary's *What is over the budget* table lists each finding with its advisory, package, installed and fixed version and path in the image, and the error annotation names them. | Rerun once Wolfi ships the fix (the build takes the newest package), or move the base digest. Add a reviewed statement to [`apps/unfold/ops/vex/statements`](../../apps/unfold/ops/vex/README.md) only when the code is unreachable; never raise the budget. |
 | The distribute job fails its anonymous pull with HTTP 401 | A new GHCR package starts private. | Make the package public in its settings, then rerun only the distribute job. |
 | Open VSX refuses `--trusted-publishing` | `ovsx` is older than 1.4.0, the extension does not exist yet on Open VSX, or Trusted Publishing is not set up for this repository and workflow. | Move `ovsx` forward, publish the first `unfold-hq.unfold` with a token, or fix the publisher's Trusted Publishing settings. |
+| `vsce publish --oidc` fails | No Trusted Publishing policy on the Marketplace publisher `unfold-hq` names owner `unfold-hq`, repository `unfold` and workflow `on_release_published.yml`, or the job lost `id-token: write`. | Add or fix the policy at https://marketplace.visualstudio.com/manage/publishers/unfold-hq, then rerun the extension job; it reuses the VSIXes already on the release. |
 | The extension job fails with "already published without" an asset | The release was published before its assets were attached; GitHub keeps a published release immutable. | Never publish an Unfold release by hand; the distribute job does it. Delete the release and its tag only if no artifact was published, otherwise release the next candidate. |
 | `on_ploeg_pin.yml` fails with "Auto merge is not allowed" | Auto-merge is off in the repository settings. | Allow auto-merge, then rerun the job. |
 | A Ploeg pin merged, but no **[Workflow] On Source Change** run followed | A merge made with `GITHUB_TOKEN` starts no push run. | Expected: the next release train checks the head that holds it. |

@@ -42,6 +42,25 @@ export function workItemMessageRefusal(item: Pick<PloegItem, 'id' | 'state' | 'p
   return workItemRefusals.message;
 }
 
+/** Whether a message is the prompt VS Code 1.147 sends from the Fix Checks or Address Comments banner of a session with a pull request. */
+export const isPullRequestBannerPrompt = (text: unknown) => typeof text === 'string' && /^\/(fix-ci|act-on-feedback)(\s|$)/.test(text.trimStart());
+
+/**
+ * What Fix Checks or Address Comments on a Work Item session is told: Ploeg runs the Work Item, so the banner's prompt
+ * starts nothing, and the reply names what does instead (a steer for its next Round, or Try Again) and what that spends.
+ */
+export function workItemBannerReply(item: Pick<PloegItem, 'id' | 'state' | 'team' | 'pullRequest' | 'latestShift'>): string {
+  const shift = item.latestShift;
+  const head = `Ploeg runs #${item.id}, so Fix Checks and Address Comments start nothing here.`;
+  const restart = `Try Again restarts it from Round 1 once you confirm, and spends from Team ${item.team}'s budget${shift ? `, up to ${money(shift.budgetUsd)} like its last attempt` : ''}.`;
+  switch (item.state) {
+    case 'leased': case 'queued': return `${head} Type what it should fix instead: your message is saved as a steer for its next Round, which spends from the attempt already open${shift ? ` (${money(shift.spentUsd)} of ${money(shift.budgetUsd)} spent)` : ''}, and nothing more.`;
+    case 'needs_human': case 'stale': return `${head} ${restart} Type what it should fix to restart it with that note instead; that asks you first too.`;
+    case 'awaiting_review': return `${head} Ask for changes on ${item.pullRequest?.number ? `pull request #${item.pullRequest.number}` : 'its pull request'} on the forge. Ploeg restarts it only once it stops and needs you; then ${restart}`;
+    default: return workItemMessageRefusal(item);
+  }
+}
+
 /** The refusal for an action dispatched on a Work Item session's session or chat channel. */
 export function workItemRefusal(actionType: unknown): string {
   switch (actionType) {
@@ -142,9 +161,36 @@ const activityText = (entry: WorkItemRecord, by?: string) => {
 /** The status bits of a Work Item session before the viewer's own read and archive flags. */
 export const workItemStatus = (entry: WorkItemRecord) => statusBits[entry.activity.status];
 
+/** The `_meta` key under which VS Code 1.147 reads a session's pull requests and issues, for its pull-request pill, CI and Inbox. */
+export const sessionArtifactsMetaKey = 'agentHost/sessionArtifacts';
+
+const webLink = (url: string | null | undefined) => { try { return url && ['https:', 'http:'].includes(new URL(url).protocol) ? url : undefined; } catch { return undefined; } };
+const onGitHub = (url: string) => ['github.com', 'www.github.com'].includes(new URL(url).hostname);
+const trackerTask = (item: Pick<PloegItem, 'provider' | 'externalId'>) => {
+  const tracker = findTaskProvider(item.provider)?.label ?? 'tracker';
+  const reference = ploegTrackerReference(item.provider, item.externalId) ?? item.externalId;
+  return reference ? `${tracker} task ${reference}` : `${tracker} task`;
+};
+
+/**
+ * A Work Item's tracker issue and pull request as VS Code session artifacts, oldest first as VS Code stores them. The
+ * pull request is an artifact the work produced, the issue a reference it came from; `isGitHub` holds only for github.com,
+ * so a pull request on another forge shows as a plain link and VS Code reads no CI for it.
+ */
+export function workItemArtifacts(item: Pick<PloegItem, 'id' | 'provider' | 'externalId' | 'url' | 'pullRequest'>): Json[] {
+  const issue = item.provider === 'manual' || item.provider === 'ploeg' ? undefined : webLink(item.url);
+  const pullRequest = webLink(item.pullRequest?.url);
+  const number = item.pullRequest?.number;
+  return [
+    ...(issue ? [{ id: `wi-${item.id}-issue`, type: 'issue', label: trackerTask(item), isArtifact: false, link: issue, isGitHub: onGitHub(issue) }] : []),
+    ...(pullRequest ? [{ id: `wi-${item.id}-pull-request`, type: 'pullRequest', label: number ? `Pull request #${number}` : 'Pull request', isArtifact: true, link: pullRequest, isGitHub: onGitHub(pullRequest) }] : []),
+  ];
+}
+
 function meta(entry: WorkItemRecord): Json {
   const { item } = entry;
-  return { [workItemMetaKey]: { id: item.id, team: item.team, state: item.state, url: item.url, provider: item.provider, externalId: item.externalId, pullRequest: item.pullRequest ? { url: item.pullRequest.url, number: item.pullRequest.number } : null, round: item.latestShift?.round ?? null, budgetUsd: item.latestShift?.budgetUsd ?? null, spentUsd: item.latestShift?.spentUsd ?? null, ...(entry.activity.reason ? { reason: entry.activity.reason } : {}), stale: entry.stale, readOnly: true } };
+  const artifacts = workItemArtifacts(item);
+  return { ...(artifacts.length ? { [sessionArtifactsMetaKey]: artifacts } : {}), [workItemMetaKey]: { id: item.id, team: item.team, state: item.state, url: item.url, provider: item.provider, externalId: item.externalId, pullRequest: item.pullRequest ? { url: item.pullRequest.url, number: item.pullRequest.number } : null, round: item.latestShift?.round ?? null, budgetUsd: item.latestShift?.budgetUsd ?? null, spentUsd: item.latestShift?.spentUsd ?? null, ...(entry.activity.reason ? { reason: entry.activity.reason } : {}), stale: entry.stale, readOnly: true } };
 }
 
 /**
@@ -242,9 +288,7 @@ export function briefText(item: PloegItem, by?: string): string {
   const team = ` Team ${item.team} runs it.`;
   if (item.provider === 'manual') return `${by ? `Handed off by ${by}.` : 'Handed off to Ploeg.'}${team}`;
   if (item.provider === 'ploeg') return `Proposed by an agent${item.sourceWorkItemId ? ` while it worked on #${item.sourceWorkItemId}` : ''}.${team}`;
-  const tracker = findTaskProvider(item.provider)?.label ?? 'tracker';
-  const reference = ploegTrackerReference(item.provider, item.externalId) ?? item.externalId;
-  const task = reference ? `${tracker} task ${reference}` : `${tracker} task`;
+  const task = trackerTask(item);
   return `From ${item.url ? `[${task}](${item.url})` : task}${by ? `, handed off by ${by}` : ''}.${team}`;
 }
 
