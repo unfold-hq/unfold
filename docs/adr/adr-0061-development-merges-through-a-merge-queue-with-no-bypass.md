@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-19
 decision-makers: Ryan Grippeling
 ---
@@ -66,3 +66,4 @@ The settings themselves are applied by the owner in the repository; [Repository 
 
 * Amends [ADR-0055](adr-0055-github-unfold-hq-is-the-project-home.md), decision 8 and its branch rule.
 * 2026-11-19 — Proposed. The workflows and the pin script support the queue; the repository settings are not applied yet.
+* 2026-11-19 — Accepted by the owner: merge method Merge commit, every required check green, at most three entries built at once, and no bypass actors. The repository settings are applied after this change merges.
