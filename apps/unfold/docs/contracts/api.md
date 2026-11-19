@@ -431,7 +431,7 @@ The message is served by MCP revision, per request:
 | Revision | How a request is recognised | Rules |
 | --- | --- | --- |
 | 2026-07-28 | `MCP-Protocol-Version: 2026-07-28` or `_meta["io.modelcontextprotocol/protocolVersion"]` | The header, `Mcp-Method` and, for `tools/call` and `resources/read`, `Mcp-Name` (the tool name or the resource URI, plain or `=?base64?…?=`) must match the body, or 400 `-32020`. `_meta["io.modelcontextprotocol/clientCapabilities"]` is required (`-32602`). An unsupported revision answers 400 `-32022` with `{supported, requested}`, and an unknown method, including `ping`, 404 `-32601`. Methods: `server/discover`, `tools/list`, `tools/call`, `resources/list` and `resources/read` for a client that declares [MCP Apps](#mcp-apps), and `tasks/get`, `tasks/update` and `tasks/cancel` while [MCP Tasks](#mcp-tasks) is on, and `events/list`, `events/subscribe` and `events/unsubscribe` for a person with [MCP Events](#mcp-events). An `events/*` request with an `Mcp-Name` header that differs from `params.name` answers 400 `-32020`. Results carry `resultType` and `_meta["io.modelcontextprotocol/serverInfo"]`; `tools/list`, `server/discover` and the resource methods carry `ttlMs` and `cacheScope: "public"`, except `server/discover` over HTTP, which depends on the person's `mcp.tasks` and `mcp.events` flags and carries `cacheScope: "private"` |
-| 2025-11-25, 2025-06-18, 2025-03-26 | Anything else; no `MCP-Protocol-Version` header means 2025-03-26 | `initialize` answers the client's revision when listed, otherwise 2025-11-25. Methods: `initialize`, `ping`, `tools/list`, `tools/call`, and `resources/list` and `resources/read` for a client that declares [MCP Apps](#mcp-apps). Errors answer 200, except an unknown `MCP-Protocol-Version`, which answers 400 `-32022` |
+| 2025-11-25, 2025-06-18, 2025-03-26 | Anything else; no `MCP-Protocol-Version` header means 2025-03-26 | `initialize` answers the client's revision when listed, otherwise 2025-11-25. Methods: `initialize`, `ping`, `tools/list`, `tools/call`, `resources/list`, `resources/templates/list`, `resources/read` and `completion/complete` ([Work Items as chat context](#work-items-as-chat-context), and the card of [MCP Apps](#mcp-apps)). Errors answer 200, except an unknown `MCP-Protocol-Version`, which answers 400 `-32022` |
 
 Over HTTP, `serverInfo` and every tool in `tools/list` carry `icons`: Unfold's mark as two 32-by-32 PNGs, `theme: "light"` at `/favicon-32x32.png` and `theme: "dark"` at `/favicon-dark-32x32.png`, as absolute URLs on the origin of `UNFOLD_MCP_RESOURCE`. They are PNG because VS Code 1.147 shows only raster MCP icons (`image/png`, `image/jpeg`, `image/gif`, `image/webp`), and they are on the resource's origin because VS Code fetches an http(s) icon only from the authority of the MCP server it connected to. Both files are public. The stdio server carries no icons. A client that ignores `icons` gets the same tools and answers. Together the icons add about 6 KB to `tools/list`.
 
@@ -509,7 +509,22 @@ The card polls it through the host's `tools/call` bridge:
 
 Every poll goes through the host. The view's Content Security Policy keeps `connect-src 'none'`, and its `_meta.ui.csp` asks the host for no domain.
 
-A client that does not declare the extension gets the same answers as before MCP Apps support: no `resources` capability, no `_meta` on any tool, no `unfold_work_item_revision`, and `-32601` for `resources/list` and `resources/read`.
+A client that does not declare the extension gets the same answers as before MCP Apps support: no `_meta` on any tool, no `unfold_work_item_revision`, no `ui://` resource in `resources/list`, and a `ui://` URI in `resources/read` answers as unknown. The `unfold-mcp` server, over HTTP and stdio, still offers it the [context resources](#work-items-as-chat-context).
+
+### Work Items as chat context
+
+`unfold-mcp`, over HTTP and stdio, declares `resources` and `completions` for every client, so VS Code's **Add Context → MCP Resources** can attach Unfold's answers to a chat message without a tool call. The in-app chat's tool catalogue does not offer them.
+
+| Request | Answer |
+| --- | --- |
+| `resources/list` | `unfold://now`, "What waits for me", `application/json`, before the MCP Apps card resources for a client that declares the extension |
+| `resources/templates/list` | `unfold://work-item/{id}`, "Work Item", `application/json` |
+| `resources/read` of `unfold://now` | `contents: [{uri, mimeType, text}]`, `text` the JSON that `unfold_now` returns as `structuredContent`, read as the signed-in person |
+| `resources/read` of `unfold://work-item/<id>` | The JSON that `unfold_get_work` returns for that id. A Work Item the person may not read and one that does not exist answer alike: `-32002` over 2025 and `-32602` over 2026-07-28, "Resource not found." |
+| `completion/complete` with `ref: {type: "ref/resource", uri: "unfold://work-item/{id}"}` and argument `id` | Up to 20 Work Item ids from the person's running and waiting Work Items, matching what was typed against the id's start or the title. The value is the id alone, so tracker text stays out of the URI; a failure to read Unfold answers an empty list |
+
+Text from trackers and agents stays under the `untrusted` keys of each answer, as in the tool answers, and both resource descriptions say to treat it as data. The listings are cacheable; a read is not, since it is the person's own data.
+
 
 ### MCP Events
 
