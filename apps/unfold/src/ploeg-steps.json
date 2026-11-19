@@ -15,6 +15,20 @@
       "release": null
     },
     {
+      "id": "connect-gitlab",
+      "stage": 2,
+      "record": "Ploeg ADR-0195",
+      "read": "forge-connections",
+      "release": null
+    },
+    {
+      "id": "connect-gitlab-service-account",
+      "stage": 2,
+      "record": "the release after 0.2.0-rc.130 that includes ploeg-hq/ploeg#464",
+      "read": null,
+      "release": null
+    },
+    {
       "id": "register-repositories",
       "stage": 3,
       "record": "Ploeg ADR-0193",
@@ -60,5 +74,14 @@
   "secondForge": {
     "record": "Ploeg ADR-0192",
     "release": null
+  },
+  "gitlab": {
+    "forge": "gitlab",
+    "forgeName": "GitLab",
+    "instance": "gitlab",
+    "mint": {
+      "record": "the release after 0.2.0-rc.130 that includes ploeg-hq/ploeg#464",
+      "release": null
+    }
   }
 }
