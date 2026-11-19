@@ -12,8 +12,10 @@ D(
   AAAA('docs', '100::', CF_PROXY_ON),
   AAAA('docs-staging', '100::', CF_PROXY_ON),
 
-  MX('@', 0, '.'),
-  TXT('@', 'v=spf1 -all'),
+  MX('@', 71, 'route1.mx.cloudflare.net.'),
+  MX('@', 36, 'route2.mx.cloudflare.net.'),
+  MX('@', 17, 'route3.mx.cloudflare.net.'),
+  TXT('@', 'v=spf1 include:_spf.mx.cloudflare.net ~all'),
   TXT('_dmarc', 'v=DMARC1; p=reject'),
   TXT('_gh-unfold-hq-o', '41a6656e33'),
 
