@@ -198,6 +198,12 @@ Select a task to open its task view. The description is rendered from the tracke
 
 **Start a supervised session** prepares operator-led work instead: choose the team and authorization, then confirm the workbench and task revision. A stale revision requires a fresh preview. Repeating the same import reopens its existing session; it does not create another paid attempt. Import prepares queued work; Start begins execution. Standalone import requires an interactive source and repository. In shared mode, registered Vikunja and ClickUp targets can bind to the existing Ploeg Work Item, which is claimed on Start. Import itself does not mutate the tracker. Source text cannot select another repository or change execution authority.
 
+## See which Work Item changed a file
+
+On VS Code 1.145 or later, open the Timeline of a file in a Git repository and keep the **Unfold** source on. It lists the Work Items whose merged pull request changed the file, with the title, merge date and pull request number. Choose one to open the Work Item; the pull request icon beside it opens the pull request.
+
+For each file the extension runs one `git log --first-parent -- <file>` in its repository and matches those commits to the merge and head SHAs of the pull requests on your done Work Items for the same repository. That list is read once per repository through your own sign-in, from the newest closed Work Items of up to six of your Teams, and kept for ten minutes; **Refresh** in the Timeline reads it again. A pull request merged by rebase shows only on the file its last commit changed, and older Work Items beyond those pages are not listed. Signed out, in an untrusted workspace or in the demo, the source lists nothing. Older editors get no Unfold source.
+
 ## Bring back evidence
 
 The **Brief** tab shows the review candidate when capture is available. **Download Git bundle**, **Download patch** and **Download manifest** each ask for a local destination. **Unfold: Download Review Candidate** offers the same choices.

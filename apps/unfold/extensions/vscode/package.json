@@ -1066,6 +1066,13 @@
           "when": "editorHasSelection && isWorkspaceTrusted && !isSessionsWindow",
           "group": "unfold"
         }
+      ],
+      "timeline/item/context": [
+        {
+          "command": "unfold.openPullRequest",
+          "when": "timelineItem == unfold.workItem",
+          "group": "inline"
+        }
       ]
     },
     "walkthroughs": [
