@@ -10,6 +10,7 @@ import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
 import { briefText, noAgentMessages, noRunMessages, ploegRunToolName, workItemActivity, workItemMessageRefusal, workItemRefusals } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
+import { unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
 import { runChatChannel } from '../src/ahp/runs.ts';
 import { condenseTraceback } from '../src/ahp/tracebacks.ts';
@@ -880,7 +881,46 @@ test('a message on a running Work Item is saved as a note for the next Round, na
   assert.deepEqual(JSON.parse(f.state.writes[1].body), { commandId: JSON.parse(f.state.writes[1].body).commandId, text: 'Start with the tests.' }, 'queued work has no open Shift to name');
 });
 
-test('a note Ploeg could not take is retried under the same command id', { timeout: testTimeout(20_000) }, async t => {
+const screenshot = { type: 'embeddedResource', label: 'Screenshot 2026-11-19.png', displayKind: 'image', contentType: 'image/png', data: 'iVBORw0KGgo=' };
+const outsideFile = { type: 'resource', label: 'invoice.pdf', uri: 'file:///Users/someone/Downloads/invoice.pdf' };
+
+test('a note with a screenshot or a file from outside the repositories says in its reply that only the text reaches the Team', { timeout: testTimeout(20_000) }, async t => {
+  const f = await commanding(t);
+  const chat = defaultChatOf('unfold:/wi-202');
+  await f.client.rpc('subscribe', { channel: chat });
+  const text = 'Fix what is circled.';
+  const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-shot', message: { text, origin: { kind: 'user' }, attachments: [screenshot, outsideFile] } });
+  assert.equal((await f.answered(sent)).params.rejectionReason, undefined);
+  const notice = unsentAttachmentsNotice(['Screenshot 2026-11-19.png', 'invoice.pdf']);
+  await f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === 'note-shot');
+  const reply = f.client.inbox.find(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'note-shot')!.params.action.part.content;
+  assert.equal(reply, `${workItemCommandText.noteSaved}\n\n${notice}`);
+  assert.equal(notice, 'Only your text reaches the Team. Unfold cannot pass attachments on yet, so `Screenshot 2026-11-19.png` and `invoice.pdf` stayed in VS Code.');
+  assert.deepEqual(f.state.writes.map(write => write.path), ['work-items/202/notes'], 'one note, nothing else started');
+  assert.equal(JSON.parse(f.state.writes[0].body).text, text, 'the text reaches Ploeg unchanged');
+  assert.ok(!JSON.stringify(f.state.writes).includes(screenshot.data), 'the attachment\'s content never leaves the host');
+  const state = (await f.client.rpc('subscribe', { channel: chat })).snapshot.state;
+  assert.equal(state.turns.find((entry: Json) => entry.id === 'note-shot').responseParts[0].content, reply, 'the line stays in the chat');
+
+  const plain = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-repo', message: { text: 'Look at totals.ts.', origin: { kind: 'user' }, attachments: [{ type: 'resource', label: 'totals.ts', uri: 'file:///unfold-repositories/order-service/src/totals.ts' }, { type: 'resource', label: 'review', displayKind: 'skill', uri: 'file:///Users/someone/.claude/skills/review/SKILL.md' }, { type: 'simple', label: '/steer', displayKind: 'command', _meta: { command: 'steer' } }] } });
+  assert.equal((await f.answered(plain)).params.rejectionReason, undefined);
+  await f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === 'note-repo');
+  const parts = f.client.inbox.filter(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'note-repo').map(message => message.params.action.part.content);
+  assert.deepEqual(parts, [workItemCommandText.noteSaved], 'a repository file, a skill and a command get no such line');
+});
+
+test('a message with a screenshot on a Work Item that needs a person says, beside the restart question, that only the text reaches the Team', { timeout: testTimeout(20_000) }, async t => {
+  const f = await commanding(t);
+  const chat = defaultChatOf('unfold:/wi-204');
+  await f.client.rpc('subscribe', { channel: chat });
+  f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'restart-shot', message: { text: 'Fix what is circled.', origin: { kind: 'user' }, attachments: [screenshot] } });
+  await f.requested(chat);
+  const explanation = f.client.inbox.find(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'restart-shot')!.params.action.part.content;
+  assert.ok(explanation.endsWith(`\n\n${unsentAttachmentsNotice(['Screenshot 2026-11-19.png'])}`), explanation);
+  assert.equal(f.state.writes.length, 0, 'the message alone restarts nothing');
+});
+
+test('a note Ploeg could not take is retried under the same command id',{ timeout: testTimeout(20_000) }, async t => {
   const f = await commanding(t);
   const chat = defaultChatOf('unfold:/wi-202');
   await f.client.rpc('subscribe', { channel: chat });

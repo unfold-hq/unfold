@@ -780,13 +780,14 @@ export class Engine {
 
   /**
    * Records an operator instruction for the next execution. `turnId` is the turn an agent host client opened for it,
-   * kept on the event so every client shows the instruction under the same turn.
+   * kept on the event so every client shows the instruction under the same turn. `unsentAttachments` names the
+   * attachments of the person's message that the Team does not receive; only their names are kept.
    */
-  message(id: string, text: string, user: User, turnId?: string): Session | Promise<Session> {
+  message(id: string, text: string, user: User, turnId?: string, unsentAttachments: readonly string[] = []): Session | Promise<Session> {
     const session = this.owned(id, user);
     if (['exporting', 'completed', 'cancelled', 'failed'].includes(session.status)) throw new EngineError(409, 'invalid_state', 'Start a new session to change finished work.');
     text = this.text(text, 'message', 20000);
-    const record = () => { const current = this.owned(id, user); this.save(current, 'message', user.id, { text, role: 'operator', applies: 'next_execution', live: false, ...(turnId ? { turnId } : {}) }); return current; };
+    const record = () => { const current = this.owned(id, user); this.save(current, 'message', user.id, { text, role: 'operator', applies: 'next_execution', live: false, ...(turnId ? { turnId } : {}), ...(unsentAttachments.length ? { unsentAttachments: [...unsentAttachments] } : {}) }); return current; };
     const binding = this.authority?.current(id);
     if (!binding && ['paused', 'interrupted'].includes(session.status) && !this.active.has(id) && this.managed(session)) throw new EngineError(409, 'session_stranded', this.strandedMessage(session));
     if (!binding) return record();

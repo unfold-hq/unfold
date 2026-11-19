@@ -33,6 +33,7 @@ import { WorkItemCommands, openShiftOf, promptClosedActions, promptInputNeeded, 
 import { PloegClient, PloegError, type PloegDetail } from '../ploeg.ts';
 import type { PloegContractGate } from '../ploeg-compatibility.ts';
 import { refusalPlacement, refusalReply } from './refusals.ts';
+import { unsentAttachments, unsentAttachmentsEvent, unsentAttachmentsNotice } from './attachments.ts';
 import { editorLink, openElsewherePart, withLeadingPart, type EditorTarget, type EditorWindow } from './editor-window.ts';
 import { ChatSessions, chatChatUri, chatProvider, chatSessionUri } from './chats.ts';
 import type { ChatService } from '../chat/service.ts';
@@ -1028,6 +1029,13 @@ export class AgentHost {
     return [{ type: 'chat/responsePart', turnId: active.id, part: { ...part } }];
   }
 
+  /** The line that tells the person which of their attachments the Team does not receive, in the turn of their message. */
+  private unsentAttachmentsPart(projection: Projection, names: unknown): Json[] {
+    const turn = projection.activeTurn;
+    if (!turn || !Array.isArray(names) || !names.length) return [];
+    return this.addPart(projection, { kind: 'markdown', id: `${turn.id}-unsent-attachments`, content: unsentAttachmentsNotice(names.map(String)) });
+  }
+
   private reduce(projection: Projection, session: Session, event: Event): Json[] {
     projection.cursor = event.id;
     const data = event.data as Json;
@@ -1058,6 +1066,7 @@ export class AgentHost {
           const notice = this.instructionNotice(projection, session, event);
           if (notice.startsWith('Queued')) projection.queuedInstructions++;
           actions.push(...this.addPart(projection, { kind: 'systemNotification', content: notice }));
+          actions.push(...this.unsentAttachmentsPart(projection, data.unsentAttachments));
           if (!['running', 'waiting_input', 'exporting'].includes(session.status)) actions.push(...this.closeTurn(projection, 'complete', event.at));
           break;
         }
@@ -1148,6 +1157,7 @@ export class AgentHost {
       case turnResumedEvent: actions.push(...this.resumeTurn(projection, session, event)); break;
       case 'candidate.ready': { const turn = projection.activeTurn; if (turn) actions.push(...this.addPart(projection, { kind: 'systemNotification', content: 'A reviewable candidate has been captured.' }), ...candidateEdits(session, turn, this.loadedCandidateEdits(this.store.getSession(session.id) ?? session))); break; }
       case choiceEvents.offered: actions.push(...this.offerChoice(projection, session, event)); break;
+      case unsentAttachmentsEvent: ensureTurn(); actions.push(...this.unsentAttachmentsPart(projection, data.names)); break;
       case choiceEvents.answered: actions.push(...this.choiceAnswered(projection, session, event)); break;
       case choiceEvents.reported: actions.push(...this.choiceReply(projection, session, event)); break;
       case 'session.completed': actions.push(...this.finalOutcome(projection, session, event), ...this.closeTurn(projection, 'complete', event.at)); break;
@@ -1676,6 +1686,8 @@ export class AgentHost {
     const projection = this.projection(session);
     const turn = projection.activeTurn ?? projection.turns.at(-1);
     if (turn) this.broadcast(chatChannel(pending.id), { type: 'chat/turnStarted', turnId: turn.id, startedAt: turn.startedAt, message: turn.message }, origin);
+    const unsent = unsentAttachments(message, repositoriesDirectory);
+    if (unsent.length) this.store.appendEvent(session.id, unsentAttachmentsEvent, pending.user.id, { names: unsent });
     try { await this.engine.start(session.id, pending.user); }
     catch (error) { this.broadcast(pending.uri, { type: 'session/creationFailed', error: { errorType: (error as Json)?.code ?? 'start_failed', message: (error as Error)?.message ?? 'Could not start the session' } }); }
     return undefined;
@@ -1962,7 +1974,8 @@ export class AgentHost {
     const user = client.user;
     const own = (viewer: Client) => viewer.user.id === user.id;
     const opening = { text, origin: 'user' as const };
-    const { prompt, replaced } = this.workItemCommands.ask(user, found.entry, 'requeue', queued ? { opening } : { ownTurnId: action.turnId, opening }, text);
+    const unsent = unsentAttachments(action.message, repositoriesDirectory);
+    const { prompt, replaced } = this.workItemCommands.ask(user, found.entry, 'requeue', { ...(queued ? {} : { ownTurnId: action.turnId }), opening, unsentAttachments: unsent }, text);
     if (queued) { this.echo(client, channel, action, origin, own); this.broadcast(channel, { type: 'chat/pendingMessageRemoved', kind: action.kind, id: action.id }, undefined, own); }
     if (replaced) this.publishPromptDismissed(user, replaced);
     if (!queued) this.echo(client, channel, action, origin, own);
@@ -1993,7 +2006,7 @@ export class AgentHost {
     const { text, queued } = message;
     const turnId = queued ? `${entry.publicId}-note-${randomUUID()}` : String(action.turnId);
     let reply: string;
-    try { reply = (await this.workItemCommands.note(user, entry, text, turnId, openShiftOf(projected))).reply; }
+    try { reply = (await this.workItemCommands.note(user, entry, text, turnId, openShiftOf(projected), unsentAttachments(action.message, repositoriesDirectory))).reply; }
     catch (error) {
       if (!(error instanceof PloegError)) throw error;
       return error.code === 'ploeg_notes_unsupported' ? workItemRefusals.message : error.message;
@@ -2445,7 +2458,7 @@ export class AgentHost {
         const projection = this.projection(session);
         const turnId = this.acceptableTurnId(projection, action.turnId) ?? randomUUID();
         projection.origins.set(`turn:${turnId}`, origin);
-        try { await this.engine.message(session.id, text, client.user, turnId); }
+        try { await this.engine.message(session.id, text, client.user, turnId, unsentAttachments(action.message, repositoriesDirectory)); }
         catch (error) {
           projection.origins.delete(`turn:${turnId}`);
           if ((error as { code?: unknown })?.code !== 'session_stranded') throw error;
@@ -2495,7 +2508,7 @@ export class AgentHost {
         const settled = () => { this.echo(client, channel, action, origin); this.broadcast(channel, { type: 'chat/pendingMessageRemoved', kind: action.kind, id: action.id }); };
         const choose = async () => { const recovery = await this.engine.recovery(session.id, client.user); settled(); return this.offerForMessage(client, session, text, origin, undefined, recovery); };
         if (ended || this.openChoice(this.projection(session))) return choose();
-        try { await this.engine.message(session.id, text, client.user); }
+        try { await this.engine.message(session.id, text, client.user, undefined, unsentAttachments(action.message, repositoriesDirectory)); }
         catch (error) {
           if ((error as { code?: unknown })?.code !== 'session_stranded') throw error;
           return intent !== 'steer' && this.chatAsks.covers(session) ? this.askInline(client, channel, session, action, text, origin, true) : choose();
