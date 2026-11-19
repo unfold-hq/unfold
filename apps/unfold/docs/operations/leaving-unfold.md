@@ -91,7 +91,7 @@ Fields are the stored columns in camelCase. A column that holds JSON is parsed i
 | `flag-overrides`, `flag-rollouts`, `flag-segments`, `flag-audit`, `flag-choices` | Feature flag overrides, rollouts, segments and their audit trail, and each person's Labs choices. |
 | `card-themes`, `card-theme-versions`, `card-assets` and the other `card-*` entities | Run card themes, their uploaded images, and each person's card collection and the records behind it. |
 | `run-judgements`, `tripwire-hits`, `tripwire-runs`, `decider-kinds` | What Unfold's judges and decider said about Runs. |
-| `now-snoozes`, `agent-host-views`, `status-notes` | Per-person Now snoozes and editor views, and the Status page notes. |
+| `now-snoozes`, `agent-host-views`, `changeset-reviews`, `status-notes` | Per-person Now snoozes, editor views and reviewed-file ticks, and the Status page notes. |
 | `audit-records`, `audit-anchors`, `audit-checkpoints` | The Tenant's security audit trail as OCSF events in their hash chain, the retention anchors the chain verifies from after older records were removed, and the daily signed checkpoints of its head. |
 | `billing-mappings`, `billing-lines` | The price and billing tool target per Client, and one billing line per accepted Work Item and per reversal. |
 | `account-states`, `scim-users`, `scim-groups`, `scim-group-members` | Disabled accounts, and the people and groups the identity provider provisioned through SCIM. |
