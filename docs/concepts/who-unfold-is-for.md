@@ -55,4 +55,4 @@ In hosted Unfold each Agency's work lives in its own Tenant: its own namespaces,
 
 ## Where the work is
 
-The work is on the Unfold board in Vikunja under the label `theme/agency-offering`, split by `phase/1-self-hosted` and `phase/2-hosted`. The research behind the decisions is in the [agency pricing strategy](../research/2026-09-29-agency-pricing-strategy.md) and [fair credit pricing](../research/2026-09-29-fair-credit-pricing.md) records.
+The work is on the Unfold board in ClickUp ([The board](../contributing/way-of-working.md#the-board)), split into the self-hosted phase and the hosted phase. Older records cite tickets of the earlier Vikunja board as `VIK-<id>`. The research behind the decisions is in the [agency pricing strategy](../research/2026-09-29-agency-pricing-strategy.md) and [fair credit pricing](../research/2026-09-29-fair-credit-pricing.md) records.

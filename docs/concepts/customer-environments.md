@@ -3,7 +3,7 @@ type: explanation
 audience: [owner, contributor, agent]
 owner: unfold
 last_verified: 2026-11-17
-verified_by: "Source read on 2026-11-01 of unfold origin/development (apps/unfold/src/tenancy.ts, tenant-scope.ts, oidc.ts, config.ts, tracker-connections.ts, tenant-export.ts, ops/helm/unfold/values.yaml), ploeg-hq/ploeg origin/development 7419f2f (no tenant_id in Go; ADR-0178, 0179 and 0181 proposed), the owner's cluster repository main (kubernetes/apps/authentik, kubernetes/apps/security/access-plane, kubernetes/apps/network/cloudflare-tunnel, ADR-0056, 0057, 0059) and the owner's production cluster repository main (infra/unfold-staging-edge.tf, kubernetes/apps/unfold-staging). Identity broker facts from the vendors' documentation on the same day. Prompted by the owner on 2026-11-01 after Unfold staging went live behind Cloudflare Access with a one-time PIN. Nothing was run. On 2026-11-17 the owner chose the broker (ADR-0058) and to move staging to it directly; role mapping by email and domain was re-read in apps/unfold/src/oidc.ts (commit 2e044790)."
+verified_by: "Source read on 2026-11-01 of unfold origin/development (apps/unfold/src/tenancy.ts, tenant-scope.ts, oidc.ts, config.ts, tracker-connections.ts, tenant-export.ts, ops/helm/unfold/values.yaml), ploeg-hq/ploeg origin/development 7419f2f (no tenant_id in Go; ADR-0178, 0179 and 0181 proposed), the operator's cluster repository main (kubernetes/apps/authentik, kubernetes/apps/security/access-plane, kubernetes/apps/network/cloudflare-tunnel, ADR-0056, 0057, 0059) and the production cluster's repository main (infra/unfold-staging-edge.tf, kubernetes/apps/unfold-staging). Identity broker facts from the vendors' documentation on the same day. Prompted by the owner on 2026-11-01 after Unfold staging went live behind Cloudflare Access with a one-time PIN. Nothing was run. On 2026-11-17 the owner chose the broker (ADR-0058) and to move staging to it directly; role mapping by email and domain was re-read in apps/unfold/src/oidc.ts (commit 2e044790)."
 ---
 
 # Customer environments
@@ -43,13 +43,13 @@ A dedicated cluster per customer is not in scope; ADR-0009 keeps it as the pilot
 
 | Who | How they sign in | What it depends on |
 |---|---|---|
-| The owner's staff on the owner's staging cluster Unfold | Unfold's OIDC against the owner's staging cluster Authentik, which signs in only through the owner's Google Workspace domain, only for people in the access-plane roster (an ADR of the owner's cluster) | the owner's staging cluster, and the LAN or VPN: Authentik is published on the internal gateway only |
-| The owner's staff on Unfold staging | a one-time PIN from Cloudflare Access for the owners' email domain, then a local Unfold account (`auth.localLogin: true`) | Cloudflare; two logins |
+| Staff on the staging cluster's own Unfold | Unfold's OIDC against the staging cluster Authentik, which signs in only through one Google Workspace domain, only for people in the access-plane roster (an ADR of the operator's cluster repository) | the staging cluster, and the LAN or VPN: Authentik is published on the internal gateway only |
+| Staff on Unfold staging | a one-time PIN from Cloudflare Access for the operator's email domain, then a local Unfold account (`auth.localLogin: true`) | Cloudflare; two logins |
 | A customer | nothing | |
 
 Three facts close off the easy paths:
 
-- **Authentik cannot serve people outside the LAN.** The Cloudflare tunnel publishes the staging Authentik host for exactly two paths, the discovery document and signing keys of `unfold-kubernetes`; everything else answers 404. A browser on the internet cannot reach the authorize endpoint, and Cloudflare Access cannot use Authentik as its identity provider. An ADR of the owner's cluster names publishing the identity provider as a decision that "deserves its own record". Authentik also runs one server replica, pinned to the high-CPU nodes, one of which is the unstable `fringe-workstation`.
+- **Authentik cannot serve people outside the LAN.** The Cloudflare tunnel publishes the staging Authentik host for exactly two paths, the discovery document and signing keys of `unfold-kubernetes`; everything else answers 404. A browser on the internet cannot reach the authorize endpoint, and Cloudflare Access cannot use Authentik as its identity provider. An ADR of the operator's cluster names publishing the identity provider as a decision that "deserves its own record". Authentik also runs one server replica, pinned to the high-CPU nodes, one of which is the unstable `fringe-workstation`.
 - **Authentik is single-tenant by design here.** One brand, one Google source, no enrolment, a Git roster as the allow-list. Real Authentik tenancy is an Enterprise feature, documented as alpha in 2026.8, with a licence per tenant ([tenancy](https://docs.goauthentik.io/sys-mgmt/tenancy/)).
 - **Cloudflare Access is the wrong layer for customers.** Seats are counted per person who authenticates and new people are blocked once seats run out; an account holds at most 50 identity providers by default ([account limits](https://developers.cloudflare.com/cloudflare-one/account-limits/)); and Access gives the application no Tenant or role. It stays in front of staging and the operators' consoles, not in front of customers.
 
@@ -61,7 +61,7 @@ Proposed, for the owner to decide. They follow the order the owner chose on 2026
 
 Unfold already does OIDC with discovery, PKCE and a JWKS check (`apps/unfold/src/oidc.ts`). Every installation signs people in through it, and `auth.localLogin: false` removes the password form, the `POST /api/login` route and the bootstrap administrator. The chart already refuses `false` without `config.auth.oidc`. Cloudflare Access stays in front of staging as a second wall, with the same identity provider, so a person signs in once and both layers see the same session.
 
-Staging moves to the broker of direction 2 directly, with the owner's organisation as its first Tenant (decided 2026-11-17). The interim step chosen on 2026-11-01, signing in to staging with Google Workspace directly, is skipped, so no Google OAuth client is made for it. Until the broker runs, the owner's staff sign in to staging through the owner's staging cluster Authentik, the same way as on the owner's own Unfold, from a browser on that cluster's network; local login goes off once that works. An installation that does use Google directly can: `auth.oidc.roles` accepts `email:<address>` for a verified address and `hd:<domain>` for a Workspace domain besides group names (`entitledRole` in `apps/unfold/src/oidc.ts`).
+Staging moves to the broker of direction 2 directly, with the operator's organisation as its first Tenant (decided 2026-11-17). The interim step chosen on 2026-11-01, signing in to staging with Google Workspace directly, is skipped, so no Google OAuth client is made for it. Until the broker runs, staff sign in to staging through the staging cluster Authentik, the same way as on that cluster's own Unfold, from a browser on that cluster's network; local login goes off once that works. An installation that does use Google directly can: `auth.oidc.roles` accepts `email:<address>` for a verified address and `hd:<domain>` for a Workspace domain besides group names (`entitledRole` in `apps/unfold/src/oidc.ts`).
 
 ### 2. One customer identity broker, with an organisation per Tenant
 
@@ -90,7 +90,7 @@ For the owner the choice is between Zitadel and moving Authentik to the producti
 | What a mistake can reach | one organisation's settings | applications, sources and policies are global, so one bad policy reaches every customer |
 | Cost | none for the open source build | open source core; tenancy needs Enterprise |
 
-The owner chose **Zitadel on the production cluster** on 2026-11-17 ([ADR-0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md)), not on the owner's staging cluster, because customer sign-in must not depend on the owner's staging cluster ([ADR-0040](../adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md)). The owner's staff reach it through federation: the owner's organisation in Zitadel links Google Workspace (or the owner's staging cluster Authentik, once it is published), so staff keep one Google sign-in and the security-key check of an ADR of the owner's cluster.
+The owner chose **Zitadel on the production cluster** on 2026-11-17 ([ADR-0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md)), not on the staging cluster, because customer sign-in must not depend on the staging cluster ([ADR-0040](../adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md)). Staff reach it through federation: the operator's organisation in Zitadel links Google Workspace (or the staging cluster Authentik, once it is published), so staff keep one Google sign-in and the security-key check of an ADR of the operator's cluster repository.
 
 ### 3. A Tenant is an object in Git with an owner screen
 
@@ -107,7 +107,7 @@ The *New customer* form opens a pull request that adds the customer's `Tenant` f
 | Broker organisation, the three role groups, an invitation to the first admin | the broker's API | ADR-0017 |
 | Namespaces for Runs and previews, default-deny network policies, a resource quota, the sandboxed RuntimeClass | the Kubernetes API | ADR-0009, [ADR-0045](../adr/adr-0045-agent-code-runs-under-kata-or-gvisor-chosen-by-what-the-node-and-the-work-need.md) |
 | LiteLLM team and budget, with the Tenant's model routing | LiteLLM's admin API | ADR-0009 |
-| An OpenBao path and a write-only role for the Tenant's connections | OpenBao, through a role that may create Tenant paths and nothing else | an ADR of the owner's cluster, Connections direction 6 |
+| An OpenBao path and a write-only role for the Tenant's connections | OpenBao, through a role that may create Tenant paths and nothing else | an ADR of the operator's cluster repository, Connections direction 6 |
 | The Tenant in Ploeg, and an operator consumer bound to it | Ploeg's API | Ploeg ADR-0178 |
 
 The reconciler is a small Kubernetes operator for the `Tenant` resource (decided 2026-11-01). It holds the rights to make namespaces, call the broker and LiteLLM, and write OpenBao; Unfold's web process, which faces the internet, holds none of them. It may only open a pull request on the cluster repository and read `Tenant` status. Kubernetes gives the operator retries, status conditions and events; Git gives every customer a reviewed history.
@@ -139,9 +139,9 @@ The preview controller of Ploeg ADR-0181 creates each preview in the Tenant's pr
 
 Each is the owner's to decide. The owner answered 1, 3, 4 and 5 on 2026-11-01, and 2 and 6 on 2026-11-17.
 
-1. ~~Staff sign-in on staging before the broker exists.~~ Answered on 2026-11-01 with Google Workspace directly, for Access and Unfold (an ADR of the owner's production cluster); replaced on 2026-11-17 by moving staging to the broker directly. Publishing the owner's staging cluster Authentik was not chosen.
+1. ~~Staff sign-in on staging before the broker exists.~~ Answered on 2026-11-01 with Google Workspace directly, for Access and Unfold (an ADR of the production cluster's repository); replaced on 2026-11-17 by moving staging to the broker directly. Publishing the staging cluster Authentik was not chosen.
 2. ~~The broker.~~ Zitadel on the production cluster, with an organisation per Tenant ([ADR-0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md)).
 3. ~~Self-hosted or managed.~~ Self-hosted on the production cluster.
 4. ~~Where the reconciler runs.~~ A `Tenant` custom resource and operator, with the `Tenant` files in Git.
 5. ~~Self sign-up.~~ Every customer starts with one of the owner's operators, for now.
-6. ~~Local login on staging before the broker.~~ It goes off once a staff member has signed in to staging through the owner's staging cluster Authentik, the interim sign-in chosen on 2026-11-17.
+6. ~~Local login on staging before the broker.~~ It goes off once a staff member has signed in to staging through the staging cluster Authentik, the interim sign-in chosen on 2026-11-17.

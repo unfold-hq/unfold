@@ -4,7 +4,8 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../src/auth.ts';
-import { githubRefusalTable } from '../src/forge-connections.ts';
+import { GithubConnections, githubRefusalTable } from '../src/forge-connections.ts';
+import { ploegSteps } from '../src/onboarding.ts';
 import { errorCatalogue } from '../src/error-catalogue.ts';
 import { application, login, request } from './api-support.ts';
 import { testTimeout } from './timeframes.ts';
@@ -17,7 +18,7 @@ const appKey = `app-key-${randomBytes(12).toString('hex')}`;
 const secrets = [manifestCode, installationId, firstState, secondState, appKey];
 
 type Call = { method: string; url: string; body: Record<string, unknown> };
-type FakeOptions = { served?: boolean; otherForge?: boolean; refuseFlow?: string; refuseTarget?: string; failCompleteOnce?: boolean; completeDelayMs?: number; connectionsFail?: boolean; refuseRead?: string; connectionState?: string };
+type FakeOptions = { served?: boolean; otherForge?: boolean; refuseFlow?: string; refuseTarget?: string; failCompleteOnce?: boolean; completeDelayMs?: number; refuseRead?: string; connectionState?: string };
 
 async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
   const calls: Call[] = [];
@@ -32,7 +33,6 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
     const send = (status: number, value: unknown) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...(value as object) }));
     const refuse = (status: number, code: string, extra: object = {}) => send(status, { error: { code, message: `refused: ${code}`, ...extra } });
     if (req.method === 'GET' && path === 'teams') return send(200, { teams: [{ id: 'bronze', paused: false, queueDepth: 0, roles: [], assignees: [], pinnedScopes: [] }] });
-    if (req.method === 'GET' && path === 'connections' && options.connectionsFail) return res.writeHead(500).end();
     if (req.method === 'GET' && path === 'forge-connections' && options.refuseRead) return refuse(403, options.refuseRead);
     if (req.method === 'GET' && path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: options.otherForge ? [{ key: 'site', label: 'site', forge: 'forgejo', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: null, boards: [] }] : [] });
     if (options.served === false && (path === 'forge-connections' || path === 'targets')) return res.writeHead(404).end();
@@ -224,18 +224,58 @@ test('until Ploeg serves the connection routes, Connect GitHub is refused with p
   assert.equal(checklist.body.stages.find((entry: { id: string }) => entry.id === 'connect-github').reason, 'ploeg_step_unavailable');
 });
 
-test('an installation that already pushes to another forge waits for Ploeg ADR-0192 and sends no connection request', async t => {
+test('an installation that already pushes to another forge connects GitHub, because the pinned Ploeg serves several forges (Ploeg ADR-0192)', async t => {
   const { api, ploeg, cookie } = await live(t, { otherForge: true });
   const overview = await request(api.url, '/api/onboarding/github', { cookie });
-  assert.deepEqual(overview.body.secondForge.forges, ['forgejo']);
+  assert.equal(overview.body.secondForge, null);
   const started = await request(api.url, '/api/onboarding/github/flows', { method: 'POST', cookie, body: {} });
-  assert.equal(started.status, 409);
-  assert.equal(started.body.error.code, 'second_forge_unsupported');
-  assert.deepEqual(ploeg.writes(), []);
+  assert.equal(started.status, 201, started.text);
+  assert.equal(ploeg.writes().filter(call => call.url.endsWith('/connection-flows')).length, 1);
   const checklist = await request(api.url, '/api/onboarding', { cookie });
   const line = checklist.body.stages.find((entry: { id: string }) => entry.id === 'connect-github');
+  assert.notEqual(line.reason, 'second_forge_unsupported');
+  assert.doesNotMatch(line.text, /pushes to forgejo/);
+});
+
+function standalone(pinned: string, read: 'other-forge' | 'fails') {
+  const sent: string[] = [];
+  const connections = async () => {
+    if (read === 'fails') throw new Error('connections read failed');
+    return { demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: [{ key: 'site', label: 'site', forge: 'forgejo', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: null, boards: [] }], boards: [], unrouted: [], fetchedAt: '' };
+  };
+  const github = new GithubConnections({
+    db: { prepare: () => ({ all: () => [], get: () => undefined, run: () => ({}) }) } as never,
+    store: { getSecret: () => undefined, setSecret: () => undefined },
+    ploeg: { isDemo: false, connections: connections as never, operatorCall: async (_user, path) => { sent.push(path); return { flow: { id: 'flow-1', state: firstState }, next: { manifest: JSON.stringify({ name: 'Ploeg' }), postUrl: 'https://github.com/settings/apps/new' } }; } },
+    steps: { manages: () => true, admit: async () => undefined, available: async () => ({ served: true }), notOptedIn: () => undefined },
+    repositories: { admitRegistration: () => undefined, register: () => { throw new Error('unused'); }, repositories: () => [] },
+    stored: async () => true, audit: () => undefined, baseUrl: 'https://unfold.example', pinned, plan: ploegSteps,
+  });
+  return { github, sent };
+}
+
+const owner = { id: 'admin-1', name: 'One', role: 'admin' as const };
+
+test('below the Ploeg release with ADR-0192, an installation on another forge is refused with second_forge_unsupported and nothing is sent', async () => {
+  const { github, sent } = standalone('0.2.0-rc.108', 'other-forge');
+  await assert.rejects(github.start(owner, 'sign-in-1', {}), (error: unknown) => error instanceof Error && (error as { code?: string }).code === 'second_forge_unsupported' && (error as { status?: number }).status === 409 && /needs Ploeg 0\.2\.0-rc\.109/.test(error.message));
+  assert.deepEqual(sent, []);
+  const line = github.lines(true, { otherForges: ['forgejo'] })['connect-github']!;
   assert.equal(line.reason, 'second_forge_unsupported');
-  assert.equal(line.waitsFor.record, 'Ploeg ADR-0192');
+  assert.deepEqual(line.waitsFor, { record: 'Ploeg ADR-0192', release: '0.2.0-rc.109' });
+});
+
+test('from the Ploeg release with ADR-0192, an installation on another forge starts a connection', async () => {
+  const { github, sent } = standalone('0.2.0-rc.109', 'other-forge');
+  await github.start(owner, 'sign-in-1', {});
+  assert.deepEqual(sent, ['connection-flows']);
+  assert.notEqual(github.lines(true, { otherForges: ['forgejo'] })['connect-github']!.reason, 'second_forge_unsupported');
+});
+
+test('below the Ploeg release with ADR-0192, a failed connections read rules out no second forge and starts no connection', async () => {
+  const { github, sent } = standalone('0.2.0-rc.108', 'fails');
+  await assert.rejects(github.start(owner, 'sign-in-1', {}), (error: unknown) => (error as { code?: string }).code === 'ploeg_unavailable' && (error as { status?: number }).status === 503);
+  assert.deepEqual(sent, []);
 });
 
 test('an installation that has not opted in turns its install line red, and a refused registration stores nothing', async t => {
@@ -310,16 +350,6 @@ test('a repository the Tenant already has is refused before Ploeg is asked to ch
   const dry = await request(api.url, '/api/onboarding/github/targets', { method: 'POST', cookie, body: { ...body, dryRun: true } });
   assert.equal(dry.status, 409);
   assert.equal(ploeg.writes().length, before, 'Ploeg was asked nothing');
-});
-
-test('when Ploeg’s connections read fails, Unfold cannot rule out a second forge and starts no connection', async t => {
-  const { api, ploeg, cookie } = await live(t, { connectionsFail: true });
-  const started = await request(api.url, '/api/onboarding/github/flows', { method: 'POST', cookie, body: {} });
-  assert.equal(started.status, 503);
-  assert.equal(started.body.error.code, 'ploeg_unavailable');
-  assert.deepEqual(ploeg.writes(), []);
-  const overview = await request(api.url, '/api/onboarding/github', { cookie });
-  assert.equal(overview.body.secondForge.unread, true);
 });
 
 test('a refused forge connections read shows what to set instead of failing the page', async t => {

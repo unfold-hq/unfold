@@ -3,7 +3,7 @@ type: reference
 audience: [contributor, agent]
 owner: unfold
 last_verified: 2026-11-16
-verified_by: "OpenHands row measured with 18 headless OpenHands 1.16.0 runs on 2026-10-11; the hook outcome reproduced with and without a mise shim under a fresh home. Load matrix from Ploeg's adapters (apps/ploeg/pkg/harness/adapters, pkg/worker/adapters.go, task.go) and the owner's staging cluster Team configuration; Claude Code rows measured with headless probes on 2.1.296 (PR #308). OpenHands, opencode and Codex rows marked inferred were read from their sources and docs, not measured. Codex app import: source-command-* folders written by the openai.chatgpt extension with external-agent-import-sync-enabled = true, checked 2026-10-17 (they stopped after setting it to false). The generation and check pipeline was run with APM 0.35.0 on 2026-11-16, and agents-check was seen failing on a hand-edited apps/unfold/AGENTS.md."
+verified_by: "OpenHands row measured with 18 headless OpenHands 1.16.0 runs on 2026-10-11; the hook outcome reproduced with and without a mise shim under a fresh home. Load matrix from Ploeg's adapters (apps/ploeg/pkg/harness/adapters, pkg/worker/adapters.go, task.go) and the staging cluster Team configuration; Claude Code rows measured with headless probes on 2.1.296 (PR #308). OpenHands, opencode and Codex rows marked inferred were read from their sources and docs, not measured. Codex app import: source-command-* folders written by the openai.chatgpt extension with external-agent-import-sync-enabled = true, checked 2026-10-17 (they stopped after setting it to false). The generation and check pipeline was run with APM 0.35.0 on 2026-11-16, and agents-check was seen failing on a hand-edited apps/unfold/AGENTS.md."
 ---
 
 # Agent instructions
