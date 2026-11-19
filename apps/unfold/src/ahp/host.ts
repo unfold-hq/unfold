@@ -2775,7 +2775,11 @@ export class AgentHost {
         return;
       }
       if (parseAnnotationsChannel(channel)) { const refused = this.review.dispatchAnnotation(client, channel, action, origin); if (refused) reject(refused); return; }
-      if (isAutomationsChannel(channel)) { reject(this.automations.refuse(action)); return; }
+      if (isAutomationsChannel(channel)) {
+        const refused = action.type === 'automation/removed' ? await this.automations.remove(client.user, String(action.resource ?? '')) : this.automations.refuse(action);
+        if (refused) reject(refused); else this.echo(client, channel, action, origin, viewer => viewer.user.id === client.user.id);
+        return;
+      }
       const terminal = parseTerminalChannel(channel);
       if (terminal) { reject((isWorkItemSession(terminal.sessionId) ? client.subscriptions.has(channel) : this.sessionFor(client.user, sessionChannel(terminal.sessionId))) ? readOnlyTerminal : 'Terminal not found'); return; }
       if (client.terminals?.has(channel)) { reject(noClientShell); return; }

@@ -507,6 +507,7 @@ export function refusalSentence(entry) {
     case 'team_cannot_write': return `${reason || `${team || 'The Team'} has no Role that writes code`}. Give the Team a writing Role, or pick another Team.`;
     case 'budget_exhausted': return `${reason || `${team || 'The Team'} has spent its budget for this period`}. Wait for the next period, raise the cap, or pick another Team.`;
     case 'harness_refuses_repository': return `${reason || `A Role of ${team || 'the Team'} runs a harness that refuses this repository`}. Pick a Team on another harness, or remove the file the harness refuses.`;
+    case 'binding_paused': return `${reason || `The route that takes this task to ${team || 'its Team'} is paused`}. Resume the route, then assign the task again.`;
     default: return `Ploeg did not queue this task: ${sentenceEnd(entry?.reason) || 'it gave no reason'}.`;
   }
 }

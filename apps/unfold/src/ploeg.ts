@@ -98,7 +98,7 @@ export type PloegNowQuestion = { id: string; text: string; typed: boolean; role:
 /** The latest Round of a waiting row where a shadow reviewer's verdict differs from the acting reviewers', from the Runs Now already lists (no detail read), so an older disagreement is not shown. Run rows carry no Shift, so Rounds of different Shifts count as one. */
 export type PloegNowDisagreement = { round: number; acting: string; shadow: string };
 /** Why Ploeg's routing refused a tracker task (Ploeg ADR-0038), or why its intake gate did not start it (Ploeg ADR-0187: `team_unknown`, `team_missing`, `team_cannot_write`, `budget_exhausted`, `harness_refuses_repository`). `unclassified` is a refusal Ploeg recorded before it named codes, or a code this Unfold does not know; its `reason` explains it. */
-export type PloegRefusalCode = 'label_missing' | 'label_not_allowed' | 'label_unregistered' | 'multiple_labels' | 'labels_unread' | 'no_board_rule' | 'target_not_ready' | 'team_unknown' | 'team_missing' | 'team_cannot_write' | 'budget_exhausted' | 'harness_refuses_repository' | 'unclassified';
+export type PloegRefusalCode = 'label_missing' | 'label_not_allowed' | 'label_unregistered' | 'multiple_labels' | 'labels_unread' | 'no_board_rule' | 'target_not_ready' | 'team_unknown' | 'team_missing' | 'team_cannot_write' | 'budget_exhausted' | 'harness_refuses_repository' | 'binding_paused' | 'unclassified';
 /** A tracker task Ploeg could not start because routing refused it. It is not a Work Item: none exists. `board` names the task source whose provider and project match the task, or is empty; `link` says whether `url` is the task itself, the tracker's root or absent. */
 export type PloegRefusal = { provider: string; externalId: string; externalScope: string; team: string; title: string; labels: string[]; code: PloegRefusalCode; reason: string; allowedLabels: string[]; refusedAt: string; board: string; url: string; link: 'task' | 'tracker' | 'none' };
 /** A repository Ploeg can route work to (Ploeg ADR-0129): a registered target keyed by its target key, or one a board names directly, keyed `owner/name@branch`. `lastForgeEventAt` is when its forge last sent Ploeg an event in the last `eventWindowDays`. */
@@ -315,7 +315,7 @@ function link(value: unknown): string {
   } catch { return ''; }
 }
 function envelope(value: unknown, versions: unknown[] = ['1.0']): Record<string, unknown> { const data = record(value); if (!versions.includes(data.schemaVersion)) throw invalid(); return data; }
-const refusalCodes: PloegRefusalCode[] = ['label_missing', 'label_not_allowed', 'label_unregistered', 'multiple_labels', 'labels_unread', 'no_board_rule', 'target_not_ready', 'unclassified'];
+const refusalCodes: PloegRefusalCode[] = ['label_missing', 'label_not_allowed', 'label_unregistered', 'multiple_labels', 'labels_unread', 'no_board_rule', 'target_not_ready', 'binding_paused', 'unclassified'];
 const refusalCodesAhead: PloegRefusalCode[] = ['team_unknown', 'team_missing', 'team_cannot_write', 'budget_exhausted', 'harness_refuses_repository'];
 function routeRefusal(value: unknown): Omit<PloegRefusal, 'board' | 'url' | 'link'> {
   const data = record(value);

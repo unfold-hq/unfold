@@ -13,6 +13,7 @@ import { writeFile } from 'node:fs/promises';
 import { ApiError, UnfoldClient, gatewayHeaderName, gatewayHeaderValue, gatewayWantsCredential, normalizeServerUrl, parseUnfoldLink } from './client.js';
 import { inputProblem, manageGatewayHeaders } from './gateway.js';
 import { browserLogin, codePrompt } from './browser-login.js';
+import { UnfoldAuthentication, authenticationApi, unfoldAuthenticationId, unfoldAuthenticationLabel } from './auth-provider.js';
 import { EvidenceDocuments, patchFileLine } from './evidence.js';
 import { NeedsYouNotifier, attentionEvent, type NeedsYouAlert, type NeedsYouDetail, type WorkItemPolicy } from './notifications.js';
 import { SessionPanels, type PanelHost, type PanelTab, type InstructionOutcome } from './panel.js';
@@ -88,6 +89,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private failures = 0;
   private lastSuccess?: Date;
   private readonly mcpServersChanged = new vscode.EventEmitter<void>();
+  private readonly authentication = authenticationApi(vscode);
+  private accounts?: UnfoldAuthentication;
   private readonly timelineChanged = new vscode.EventEmitter<undefined>();
   private readonly timeline = new UnfoldTimeline({
     parseRemote,
@@ -130,7 +133,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     context.subscriptions.push(vscode.window.registerWebviewPanelSerializer('unfold.session', { deserializeWebviewPanel: async (panel, state: { sessionId?: string } | undefined) => { const id = typeof state?.sessionId === 'string' && /^[a-zA-Z0-9_-]+$/.test(state.sessionId) ? state.sessionId : undefined; if (!id) { panel.dispose(); return; } this.panels.adopt(id, panel); } }));
     context.subscriptions.push(this.view.onDidChangeVisibility(event => { if (event.visible) void this.refresh(); }));
     context.subscriptions.push(this.nowView.onDidChangeVisibility(event => { if (event.visible) { this.nowReadAt = 0; void this.refresh(); } }));
-    context.subscriptions.push(context.secrets.onDidChange(event => { if (event.key === this.current.secretKey) this.connectionChanged(); }));
+    context.subscriptions.push(context.secrets.onDidChange(event => { if (event.key === this.current.secretKey) this.connectionChanged(); if (event.key.startsWith('unfold.session:')) void this.accounts?.refresh(); }));
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('unfold.serverUrl')) {
         const configured = settings().get('serverUrl', '');
@@ -138,6 +141,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
         this.connectionChanged();
         try { this.current = new UnfoldClient(configured, context.secrets); this.configurationError = undefined; void this.refresh(); }
         catch (error) { this.configurationError = error as Error; this.offline(error); }
+        void this.accounts?.refresh();
       }
       if (event.affectsConfiguration('unfold.refreshIntervalSeconds')) { clearInterval(this.timer); this.timer = this.poll(); }
       if (event.affectsConfiguration(`unfold.${provideServersSetting}`)) this.mcpServersChanged.fire();
@@ -146,7 +150,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     context.subscriptions.push(vscode.window.onDidChangeWindowState(state => { if (state.focused && this.cachedBootstrap) void this.registerEditorWindow(); }));
     const register = (name: string, action: (...args: any[]) => Promise<unknown>) => context.subscriptions.push(vscode.commands.registerCommand(`unfold.${name}`, (...args: any[]) => this.perform(() => action(...args))));
     register('connect', () => this.connect());
-    register('signOut', () => this.signOut());
+    register('signOut', () => this.accounts ? this.accounts.signOut() : this.signOut());
+    this.registerAccount();
     register('setAccessGatewayHeaders', () => this.setAccessGatewayHeaders());
     register('connectAgentHost', () => this.connectAgentHost());
     register('agentsWindowStatus', () => this.agentsWindowStatus());
@@ -641,6 +646,26 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     if (origin !== this.current.origin) this.current = new UnfoldClient(origin, this.context.secrets);
     await settings().update('serverUrl', origin, vscode.ConfigurationTarget.Global);
     await this.signIn();
+  }
+
+  private registerAccount(): void {
+    const api = this.authentication;
+    if (!api) return;
+    const accounts = new UnfoldAuthentication({
+      origin: () => this.configurationError ? undefined : this.current.origin,
+      credential: async origin => origin === this.current.origin ? this.context.secrets.get(this.current.secretKey) : undefined,
+      account: async origin => {
+        if (origin !== this.current.origin) return 'signed-out';
+        try { const { user } = await this.current.bootstrap(); return { id: user.id, name: user.name }; }
+        catch (error) { return error instanceof ApiError && error.status === 401 && !gatewayWantsCredential(error) ? 'signed-out' : 'unreachable'; }
+      },
+      signIn: async () => { if (this.configurationError) throw this.configurationError; await this.signIn(); },
+      signOut: () => this.signOut(),
+      expired: () => { void api.offerSignIn(unfoldAuthenticationId); },
+    });
+    this.accounts = accounts;
+    this.context.subscriptions.push(accounts, api.register(unfoldAuthenticationId, unfoldAuthenticationLabel, accounts satisfies vscode.AuthenticationProvider));
+    void accounts.refresh();
   }
 
   private async signIn(): Promise<void> {
