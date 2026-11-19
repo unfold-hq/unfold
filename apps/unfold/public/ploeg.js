@@ -7,7 +7,7 @@ import { markdown } from './core/markdown.js';
 import { count as formatCount, money, moneyHtml, plural, duration, dateTime, decimal, time as clockTime } from './core/format.js';
 import * as ui from './core/ui.js';
 import { workItemState, runOutcome, runState, verdict as verdictMeta, failureReason, failureNote, runFailure, runFailureText, auditEvent, actorName, displayState, unreportedOutcome, closeReasonLabel, withdrawnReason, costStatuses, costStatusWord } from './core/states.js';
-import { listReason, routingWarning, detailReason, needsYouBlocks, reasonGlyph, sessionReason, reviewHold, failingChecks } from './core/reasons.js';
+import { listReason, routingWarning, detailReason, needsYouBlocks, reasonGlyph, sessionReason, reviewHold, failingChecks, retryable } from './core/reasons.js';
 import { grafanaTeam, runExplorer } from './core/observability.js';
 import { checkoutTarget, checkoutCommand, checkoutLink } from './core/checkout.js';
 import { agentsWindowButton } from './agents-window.js';
@@ -683,7 +683,9 @@ const reasonLinks = {
 
 /**
  * The actions of a Needs-you decision box, as numbered steps. Each link-out appears once, on the first step that
- * needs it, and exactly one control is primary: the pull request or tracker task that step points at. When Ploeg
+ * needs it, and exactly one control is primary: the pull request or tracker task that step points at. For a person who
+ * may restart work (`model.canWrite`), the last step offers Try again (`work-retry`) on a reason that names a restart
+ * and waits on no question, primary when no link-out is, and names the tracker as the other way. When Ploeg
  * reported no link, the tracker step names the task to find and offers to copy its key.
  * `primary` is that control for the phone action bar, or '' when it is disabled.
  */
@@ -697,6 +699,7 @@ export function decisionPlan(detail, model, reason) {
   const reader = lastReaderRun(detail);
   const used = new Set();
   let primary = null;
+  let linked = false;
   const control = (kind, variant) => {
     if (used.has(kind)) return '';
     if (kind === 'pr' && !pr) return '';
@@ -706,6 +709,7 @@ export function decisionPlan(detail, model, reason) {
       ? linkButton({ href: pr, label: `Open pull request${prNumber ? ` #${prNumber}` : ''}`, glyph: 'pull-request', variant: main ? 'primary' : 'secondary', linkOut: 'pr' })
       : tracker.href ? linkButton({ href: tracker.href, label: tracker.label, glyph: 'external', variant: main ? 'primary' : 'secondary', linkOut: 'tracker' }) : '';
     if (main && html) primary = { kind, html };
+    if (html) linked = true;
     return html;
   };
   const question = model.canWrite ? waitingQuestion(detail, reason) : null;
@@ -721,16 +725,20 @@ export function decisionPlan(detail, model, reason) {
   if (reason.code === 'unknown') main.actions.push('<button type="button" class="button ghost" data-action="work-section" data-id="work-activity">Read its history</button>');
   if (question) main.actions.unshift(primary.html);
   entries.push(main);
+  const retry = model.canWrite && !question && retryable(reason) ? ui.button({ label: 'Try again', icon: 'refresh', variant: primary ? 'secondary' : 'primary', action: 'work-retry', data: { id: item.id } }) : '';
+  if (retry && !primary) primary = { kind: 'retry', html: retry };
   const trackerHtml = control('tracker');
   if (trackerHtml) requeue.actions.push(trackerHtml);
   if (question) requeue.text = escape(`Or answer in ${trackerOr(item.provider, 'the tracker')} and assign the task to the Team again there.`);
+  if (retry) requeue.text = escape(item.provider === 'manual' ? 'Then press Try again.' : `Then press Try again. Assigning the task to the Team again in ${trackerOr(item.provider)} also starts it again.`);
   entries.push(requeue);
-  if (!primary) {
+  if (!linked && !question) {
     const key = trackerReference(item) ? String(item.externalId ?? '').trim() : '';
     const where = trackerOr(item.provider, trackerOf(item.provider)?.fixture ? 'the demo tracker' : 'its tracker');
     trackerEntry.actions.unshift(`<span class="work-find">Find <strong class="mono">${escape(key || `#${item.id}`)}</strong> in ${escape(where)}</span>`);
     if (key) trackerEntry.actions.splice(1, 0, ui.button({ label: `Copy ${key}`, icon: 'copy', variant: 'secondary', action: 'work-copy-ref', data: { value: key } }));
   }
+  if (retry) requeue.actions.unshift(retry);
   return { entries, primary: primary?.html || '' };
 }
 

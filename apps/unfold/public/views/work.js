@@ -19,7 +19,8 @@ import { actionsCsv, actionsJson, engineRows, newestFirst, recordRow } from '../
 import { linkedChangedEvent } from './linked-sessions.js';
 import { answerDialogMarkup, answerField, noteDialogMarkup, noteLimit } from '../blackboard-view.js';
 import { answerLimit, answerNote, resumeOffer, waitingQuestion, waitingQuestions, writeError } from '../core/blackboard.js';
-import { detailReason } from '../core/reasons.js';
+import { detailReason, retryable, retryCaution } from '../core/reasons.js';
+import { retryMarkup, retryNotice } from '../start.js';
 import { attachSession, sessionParts } from './session.js';
 import { announcesTripwire, tripwireCheckLabel } from '../core/tripwire.js';
 import { takeControlDialogMarkup, takeControlOffer } from '../core/take-over.js';
@@ -1286,6 +1287,50 @@ async function submitAnswer(data, form, event) {
   await sendWrite(id, 'requeue', { commandId, expectedState: 'needs_human', ...(resume ? { resume: true } : {}) }, continued);
 }
 
+function retryDialog(detail) {
+  const entry = { ...detail.item, latestShift: detail.shifts?.[0] ?? detail.item.latestShift ?? null };
+  const options = { form: 'work-retry', demo: Boolean(detail.demo || state.bootstrap?.mode === 'demo'), caution: retryCaution(detailReason(detail)) };
+  return { entry, markup: extra => retryMarkup(entry, { ...options, ...extra }) };
+}
+
+function openRetry(control) {
+  const detail = currentDetail();
+  if (!detail || !retryable(detailReason(detail)) || work.writeBusy || !canAddContext()) return;
+  const dialog = openPloegDialog(retryDialog(detail).markup());
+  dialog.querySelector('#loop-retry-note')?.focus();
+  dialog.addEventListener('close', () => { (control?.isConnected ? control : $('[data-action="work-retry"]'))?.focus({ preventScroll: true }); }, { once: true });
+}
+
+async function submitRetry(data, form) {
+  const detail = currentDetail();
+  const dialog = form.closest('dialog');
+  if (!detail || data.id !== detail.item.id) { dialog?.close(); return; }
+  if (work.writeBusy) return;
+  const id = detail.item.id;
+  const { entry, markup } = retryDialog(detail);
+  const note = String(data.note || '').trim();
+  work.writeBusy = true;
+  dialog.innerHTML = markup({ busy: true });
+  let result;
+  try {
+    result = await api(`/api/ploeg/work-items/${encodeURIComponent(id)}/requeue`, { method: 'POST', body: JSON.stringify({ commandId: crypto.randomUUID(), expectedState: detail.item.state, ...(note ? { note } : {}) }) });
+  } catch (error) {
+    work.writeBusy = false;
+    dialog.innerHTML = markup({ error: error.message || 'Ploeg did not answer.' });
+    const field = dialog.querySelector('#loop-retry-note');
+    if (field) { field.value = note; field.focus(); }
+    return;
+  }
+  work.writeBusy = false;
+  dialog.close();
+  track('work.retry');
+  notify(retryNotice(entry, result));
+  if (!visible() || work.detailId !== id) return;
+  await Promise.all([loadOverview({ fresh: true, quiet: true }).catch(() => {}), loadDetail(id, { fresh: true, quiet: true }).catch(() => {})]);
+  renderWork();
+  if (!document.activeElement || document.activeElement === document.body) focusTitle();
+}
+
 async function submitNote(data, form) {
   const id = form.dataset.id;
   const detail = currentDetail();
@@ -1540,6 +1585,7 @@ export default {
     'work-context-add': () => openContext(),
     'work-ask-open': () => openAsk(),
     'work-answer-open': () => openAnswer(),
+    'work-retry': openRetry,
     'work-note-open': () => openNote(),
     'work-take-control': () => openTakeControl(),
     'work-fire-routine': fireRoutine,
@@ -1553,7 +1599,7 @@ export default {
     'trace-dispute': openCrackStep('dispute'),
     'trace-resolve': openCrackStep('resolve'),
   },
-  forms: { 'trace-step': submitTraceStep, 'work-context': submitContext, 'work-ask': submitAsk, 'work-steer': submitSteer, 'work-answer': submitAnswer, 'work-note': submitNote, 'work-take-control': submitTakeControl, 'work-hand-back': submitHandBack },
+  forms: { 'trace-step': submitTraceStep, 'work-context': submitContext, 'work-ask': submitAsk, 'work-steer': submitSteer, 'work-answer': submitAnswer, 'work-retry': submitRetry, 'work-note': submitNote, 'work-take-control': submitTakeControl, 'work-hand-back': submitHandBack },
   inputs: { '[data-run-log-search]': searchRunLog },
   changes: {
     '#ploeg-team': changeTeam,

@@ -3,7 +3,7 @@ import { takeOverMarks, takeOverOf } from './take-over.js';
 
 const toMs = value => { if (typeof value === 'number') return Number.isFinite(value) ? value : null; const at = Date.parse(value ?? ''); return Number.isFinite(at) ? at : null; };
 const openStates = new Set(['working', 'waiting', 'idle']);
-const harnessNames = { 'claude-code': 'Claude Code', opencode: 'OpenCode', codex: 'Codex', acp: 'ACP agent' };
+const harnessNames = { 'claude-code': 'Claude Code', opencode: 'OpenCode', codex: 'Codex', acp: 'ACP agent', 'vscode-copilot': 'VS Code Copilot' };
 const harnessName = harness => harnessNames[harness] ?? String(harness || 'Agent');
 const overlap = (a, b) => Math.max(0, Math.min(a.to, b.to) - Math.max(a.from, b.from));
 const touches = (a, b) => a.from <= b.to && b.from <= a.to;

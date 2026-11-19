@@ -21,6 +21,9 @@ const waitingKinds = new Set(['permission_prompt', 'idle_prompt', 'elicitation_d
 const editingTools = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 const shareTranscript = process.env.UNFOLD_SHARE_TRANSCRIPT === '1';
 const remoteApproval = process.env.UNFOLD_REMOTE_APPROVAL === '1';
+const inVsCode = process.argv.includes('--vscode');
+const harness = inVsCode ? 'vscode-copilot' : 'claude-code';
+const terminalTool = inVsCode ? 'run_in_terminal' : 'Bash';
 
 function stateDir() {
   const base = process.env.CLAUDE_PLUGIN_DATA || join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'unfold-claude-code');
@@ -74,7 +77,7 @@ function transcriptFacts(transcriptPath) {
 }
 
 function learn(input, state) {
-  const facts = transcriptFacts(input.transcript_path);
+  const facts = transcriptFacts(inVsCode ? '' : input.transcript_path);
   state.harnessVersion = facts.version || state.harnessVersion || '';
   state.model = String(input.model ?? '') || state.model || facts.model || '';
   if (facts.title) state.title = facts.title.slice(0, 160);
@@ -103,7 +106,7 @@ function remoteUrl() {
 async function report(input, state, event, extra = {}) {
   const repo = repository(input.cwd ?? process.cwd());
   const answer = await post('/api/linked-sessions/events', {
-    harness: 'claude-code', sessionId: input.session_id, event, harnessVersion: state.harnessVersion, model: state.model,
+    harness, sessionId: input.session_id, event, harnessVersion: state.harnessVersion, model: state.model,
     repository: repo?.remote ?? '', branch: repo && repo.branch !== 'HEAD' ? repo.branch : '', remoteUrl: remoteUrl(),
     ...(state.title ? { title: state.title } : {}),
     ...(process.env.UNFOLD_WORK_ITEM ? { workItem: process.env.UNFOLD_WORK_ITEM } : {}), ...extra,
@@ -216,7 +219,7 @@ async function handle(input) {
           const agent = typeof input.agent_type === 'string' && input.agent_type ? input.agent_type.slice(0, 80) : input.agent_id ? 'subagent' : mainAgent;
           if (!path.startsWith('..')) remember(tracked(state, top).written, path.split('\\').join('/'), writtenText(input.tool_name, input.tool_input), agent);
         }
-      } else if (input.tool_name === 'Bash') {
+      } else if (input.tool_name === terminalTool) {
         await commits(input, state);
         if (process.env.UNFOLD_PUSH_AGENT_TRACE === '1') pushAgentTrace({ cwd: input.cwd ?? process.cwd(), command: String(input.tool_input?.command ?? ''), deadlineMs: Number(process.env.UNFOLD_PUSH_AGENT_TRACE_TIMEOUT_MS) || 8000 });
         const found = pullRequests(input);

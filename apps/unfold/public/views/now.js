@@ -19,7 +19,7 @@ import { linkedWaitingCard } from '../core/linked-waiting.js';
 import { handedOffCard } from '../core/handed-off.js';
 import { permissionsChangedEvent } from '../core/linked-permissions.js';
 import { taskStandings } from '../handoff.js';
-import { handedMarkup, handedNotice, labelledTeam, pendingHandoffs, retryMarkup, roomOf, sheetMarkup, startCard, startQueue, suggestedTeam, taskKey } from '../start.js';
+import { handedMarkup, handedNotice, labelledTeam, pendingHandoffs, retryMarkup, retryNotice, roomOf, sheetMarkup, startCard, startQueue, suggestedTeam, taskKey } from '../start.js';
 
 const baselineKey = 'unfold.nowSince';
 const view = Object.assign(state.now, { summary: { data: null, error: null }, summaryRequest: 0, shown: null, since: undefined, caughtUp: false, hiddenAt: null, refreshing: false, keepFocus: false, linked: null, handed: null, snoozeOpen: null, showSnoozed: false, showOlder: false });
@@ -472,7 +472,7 @@ async function retry(data) {
     const result = await api(`/api/ploeg/work-items/${encodeURIComponent(entry.id)}/requeue`, { method: 'POST', body: JSON.stringify({ commandId: crypto.randomUUID(), expectedState: entry.state, ...(note ? { note } : {}) }) });
     dialog.close();
     track('now.loop_retry');
-    notify(result.demo ? 'This is the demo: nothing restarted and nothing was spent.' : `Started “${entry.title || `Work Item ${entry.id}`}” again from Round ${result.fromRound ?? 1}.`);
+    notify(retryNotice(entry, result));
     loadNow('manual');
   } catch (error) {
     dialog.innerHTML = retryMarkup(entry, { demo: Boolean(view.data?.demo), error: error.message || 'Ploeg did not answer.' });
