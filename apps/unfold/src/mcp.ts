@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 import { strictBase64url } from './mcp-auth.ts';
 import { appOnlyTool, cardRevision, cardRevisionDefinition, mcpAppResources, mcpAppToolMeta, mcpAppsExtension, readMcpAppResource, supportsMcpApps, withRevision } from './mcp-apps.ts';
+import { mcpSkillsExtension, readSkillResource, skillCatalogue, skillEntry, skillResourceList } from './mcp-skills.ts';
 import { mcpTasksExtension, openTaskId, sealTaskId, supportsTasks, taskCacheMs, taskPollIntervalMs, type HandOffRef, type McpTasks } from './mcp-tasks.ts';
 import { handOffSpend, teamSpendCap } from './hand-off-spend.ts';
 import type { McpEventsHandler } from './mcp-events.ts';
@@ -43,9 +44,10 @@ export function confirmationLedger(): Confirmations { return { key: randomBytes(
  * declares the Tasks extension follows a confirmed `unfold_hand_off` as a task, and so does a 2025-11-25 client that
  * declared core `tasks` in its `initialize` and asks for one; `coreTasks` says that a 2025 client declared core `tasks`
  * in an `initialize` this server instance did not see. `events` serves MCP Events to a
- * 2026-07-28 client when the person may use them. `icons` go on `serverInfo` and on every tool.
+ * 2026-07-28 client when the person may use them. `skills` serves the plugin's skills through the MCP Skills extension
+ * (SEP-2640) while the `mcp.skills` flag is on for the person. `icons` go on `serverInfo` and on every tool.
  */
-export type McpOptions = { url: string; apiUrl?: string; token?: string; version?: string; timeoutMs?: number; fetch?: typeof fetch; stateFile?: string; now?: () => Date; principal?: string; role?: string; confirmations?: Confirmations; mcpApps?: boolean; elicitation?: boolean; tasks?: McpTasks; coreTasks?: boolean; events?: McpEventsHandler; icons?: McpIcon[] };
+export type McpOptions = { url: string; apiUrl?: string; token?: string; version?: string; timeoutMs?: number; fetch?: typeof fetch; stateFile?: string; now?: () => Date; principal?: string; role?: string; confirmations?: Confirmations; mcpApps?: boolean; elicitation?: boolean; tasks?: McpTasks; coreTasks?: boolean; events?: McpEventsHandler; skills?: boolean; icons?: McpIcon[] };
 
 type Reason = { code: string; chip: string; sentence: string; fix: string; requeue: string; action: string; headline?: string | null; variant?: string | null; run?: { id: string; role: string; round: number; text: string } | null };
 type Reasons = { listReason(item: unknown, options?: { demo?: boolean }): Reason | null; detailReason(detail: unknown): Reason | null; routingWarning(item: unknown): { chip: string; sentence: string; fix: string } | null; waitingGroup(item: unknown): 'review' | 'needs' | 'proposed' };
@@ -864,7 +866,7 @@ export function createMcpServer(options: McpOptions & McpPromptOptions & McpReso
       const asked = params?.protocolVersion;
       const protocolVersion = (mcpProtocolVersions as readonly string[]).includes(asked) ? asked : mcpProtocolVersions[0];
       const coreTasks = await coreTasksOn() ?{ tasks: { cancel: {}, requests: { tools: { call: {} } } } } : {};
-      return result(id, { protocolVersion, capabilities: { ...withContext(withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), { listChanged: false }), ...coreTasks }, serverInfo, instructions });
+      return result(id, { protocolVersion, capabilities: { ...withSkills(withContext(withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), { listChanged: false }), { listChanged: false }), ...coreTasks }, serverInfo, instructions });
     }
     const meta = params && typeof params === 'object' && params._meta && typeof params._meta === 'object' && !Array.isArray(params._meta) ? params._meta as Json : undefined;
     const declared = meta?.[versionKey];
@@ -881,12 +883,13 @@ export function createMcpServer(options: McpOptions & McpPromptOptions & McpReso
     const complete = (value: Json) => result(id, call.modern ? { ...value, resultType: 'complete', _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo } } : value);
     const apps = supportsMcpApps(call.capabilities) || (!call.modern && options.mcpApps === true);
     const cacheable = call.modern ? { ttlMs: 3_600_000, cacheScope: 'public' } : {};
+    const personal = call.modern ? { ttlMs: 300_000, cacheScope: 'private' } : {};
     switch (method) {
       case 'server/discover':
         if (!call.modern) return failure(id, -32601, `Method ${method} is not supported.`);
         return (options.tasks ? options.tasks.enabled() : Promise.resolve(false)).then(followable => {
           const extensions = { ...(apps ? { [mcpAppsExtension]: {} } : {}), ...(followable ? { [mcpTasksExtension]: {} } : {}) };
-          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withEvents(withContext(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {}), {})), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events ? 'private' : 'public' });
+          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withSkills(withEvents(withContext(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {}), {})), {}), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events || options.skills ? 'private' : 'public' });
         });
       case 'tasks/get':
       case 'tasks/update':
@@ -899,18 +902,29 @@ export function createMcpServer(options: McpOptions & McpPromptOptions & McpReso
       case 'tools/list': return (call.modern ? Promise.resolve(false) : coreTasksOn()).then(coreTasks => complete({ tools: tools.filter(tool => apps || !appOnlyTool(tool.name)).map(tool => { const ui = apps ? mcpAppToolMeta(tool.name) : undefined; return { name: tool.name, title: tool.title, ...icons, description: tool.description, inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, ...(coreTasks && tool.name === 'unfold_hand_off' ? { execution: { taskSupport: 'optional' } } : {}), annotations: tool.readOnly === false ? { title: tool.title, readOnlyHint: false, destructiveHint: tool.destructive === true, idempotentHint: false, openWorldHint: true } : { title: tool.title, readOnlyHint: true, idempotentHint: true, openWorldHint: false }, ...(ui ? { _meta: ui } : {}) }; }), ...cacheable }));
       case 'tools/call': return apps || !appOnlyTool(params?.name) ? callTool(id, params, call, complete) : failure(id, -32602, `Unknown tool ${String(params?.name)}.`);
       case 'resources/list':
-        if (!apps && !options.contextResources) return failure(id, -32601, `Method ${method} is not supported.`);
-        return complete({ resources: [...(options.contextResources ? contextResources() : []), ...(apps ? mcpAppResources() : [])], ...cacheable });
+        if (!apps && !options.contextResources && !options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ resources: [...(options.contextResources ? contextResources() : []), ...(apps ? mcpAppResources() : []), ...(options.skills ? skillResourceList() : [])], ...(options.skills ? personal : cacheable) });
       case 'resources/templates/list':
         if (!options.contextResources) return failure(id, -32601, `Method ${method} is not supported.`);
         return complete({ resourceTemplates: contextTemplates(), ...cacheable });
       case 'resources/read': {
+        const skillFile = options.skills ? readSkillResource(params?.uri) : undefined;
+        if (skillFile) return complete({ contents: skillFile, ...personal });
         const context = options.contextResources ? contextRead(params?.uri) : undefined;
         if (context) return readContext(id, params!.uri, context, call, complete);
-        if (!apps) return options.contextResources ? resourceNotFound(id, params?.uri, call) : failure(id, -32601, `Method ${method} is not supported.`);
+        if (!apps) return options.contextResources || options.skills ? resourceNotFound(id, params?.uri, call) : failure(id, -32601, `Method ${method} is not supported.`);
         const contents = readMcpAppResource(params?.uri);
         if (!contents) return resourceNotFound(id, params?.uri, call);
         return complete({ contents, ...cacheable });
+      }
+      case 'skills/list':
+        if (!options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ skills: skillCatalogue.entries, ...personal });
+      case 'skills/get': {
+        if (!options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        const skill = skillEntry(params?.uri);
+        if (!skill) return failure(id, -32602, 'Unfold serves no skill at this URI; skills/list names the skills it serves.', { uri: typeof params?.uri === 'string' ? params.uri.slice(0, 200) : null });
+        return complete({ skill, ...personal });
       }
       case 'prompts/list':
         if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
@@ -973,6 +987,10 @@ export function createMcpServer(options: McpOptions & McpPromptOptions & McpReso
     } catch {
       return complete(completion([]));
     }
+  }
+
+  function withSkills(capabilities: Json, resources: Json): Json {
+    return options.skills ? { ...capabilities, resources: capabilities.resources ?? resources, extensions: { ...capabilities.extensions, [mcpSkillsExtension]: {} } } : capabilities;
   }
 
   function withEvents(capabilities: Json): Json {

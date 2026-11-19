@@ -401,6 +401,20 @@
         "labs": false
       }
     },
+    "mcp.skills": {
+      "state": "ENABLED",
+      "variants": { "on": true, "off": false },
+      "defaultVariant": "off",
+      "metadata": {
+        "kind": "permission",
+        "owner": "Ryan Grippeling",
+        "created": "2026-11-19",
+        "title": "Skills over MCP",
+        "description": "Lets unfold-mcp over HTTPS serve the Unfold plugin's skills unfold and link-work-item through the MCP Skills extension (SEP-2640, io.modelcontextprotocol/skills), so a client without the plugin, such as a Copilot agent session in VS Code 1.147, can load them once the person allows skills from the server. The text is read at start-up from the files the plugin ships (extensions/claude-code/skills), each with its SHA-256 digest and size, so a changed skill shows as a changed manifest. Read-only. While on, initialize and server/discover declare the extension and resources, and skills/list, skills/get, resources/list and resources/read serve the skill:// files; while off, none of that exists. Evaluated per person on the server. The stdio server never serves skills. Keep it off until one exchange in VS Code 1.147 is captured.",
+        "client": false,
+        "labs": false
+      }
+    },
     "events.webhooks": {
       "state": "ENABLED",
       "variants": { "on": true, "off": false },

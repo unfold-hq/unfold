@@ -496,6 +496,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
       tenantOf: (user, id) => { const source = tenants.source(user, id); return source ? ownership(source).tenant : undefined; },
     },
     events: { enabled: user => flags.getBooleanValue('mcp.events', false, flagContext(user)), handler: user => mcpEvents.handler(user) },
+    skills: { enabled: user => flags.getBooleanValue('mcp.skills', false, flagContext(user)) },
   }) : undefined;
   function visible(id: string, user: User): Session {
     const session = store.getSession(id);
