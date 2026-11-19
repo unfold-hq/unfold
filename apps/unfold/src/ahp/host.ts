@@ -14,7 +14,7 @@ import type { PloegAttribution } from '../ploeg-attribution.ts';
 import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfig, composerModel, resolveSessionConfig, sessionConfigCompletions, sessionConfigSchema, sessionConfigState, startedConfigChange } from './session-config.ts';
 import { TrackerAutomations, automationsChannel, autonomousAutomationsMeta, isAutomationsChannel } from './automations.ts';
 import { WebSocketConnection, connectionToken, isWebSocketUpgrade, rejectUpgrade, upgradeToWebSocket } from './websocket.ts';
-import { IdleSessions, RememberedClients, ServerSequence, restoreActiveClients, saveActiveClients } from './continuity.ts';
+import { IdleSessions, RememberedClients, ServerSequence, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
 import { AnnouncedCustomizations, customizationRefusal, gatewayToolCall, rootConfigRefusal, sessionCustomizations, type GatewaySubject } from './customizations.ts';
 import { outcomeMarkdown, sessionProgress, stopReason } from '../../public/core/progress.js';
 import { money } from '../../public/core/format.js';
@@ -130,7 +130,7 @@ type Origin = { clientId: string; clientSeq: number };
 type ChannelKind = 'session' | 'chat' | 'changeset';
 type TokenRecord = { userId: string; name: string; role: User['role']; label: string; createdAt: string; expiresAt?: string; signIn?: string };
 type Projection = { finalStop?: number; turns: Json[]; activeTurn?: Json; parts: Map<string, string>; toolCalls: Map<string, { turnId: string; toolCallId: string }>; openTools: Map<string, string>; cursor: number; turnCounter: number; permissionTurn?: string; origins: Map<string, Origin>; answers: Map<string, Json>; choices: Map<string, Json>; holding?: string; startedRuns: Set<string>; finishedRuns: Set<string>; workingRun?: string; queuedInstructions: number; terminals: CommandLog; runs: RunTranscripts };
-type PendingSession = { id: string; uri: string; config: Json; user: User; createdAt: string; starting?: boolean; refusedTurns?: Json[] };
+type PendingSession = { id: string; uri: string; config: Json; user: User; createdAt: string; usedAt: number; starting?: boolean; refusedTurns?: Json[] };
 type CandidateView = { files: CandidateFile[]; counts: Map<string, { added: number; removed: number }> };
 
 /** A session's channel in a client's spelling. VS Code 1.141 names it by the provider; VS Code 1.142 by `ahp-session`. */
@@ -298,6 +298,8 @@ export class AgentHost {
   private readonly departing = new Map<string, ReturnType<typeof setTimeout>>();
   /** How long an active client whose last connection closed keeps its place, waiting for its reconnect: 30 seconds, as in VS Code's own host. */
   activeClientGraceMs = 30_000;
+  /** The host's clock for provisional-session expiry; a test replaces it. */
+  clock: () => number = () => Date.now();
   private readonly candidates = new Map<string, CandidateView>();
   private readonly answering = new Set<string>();
   private readonly spend = new SpendNotices();
@@ -394,10 +396,37 @@ export class AgentHost {
   usePersonProof(proof: PersonProof | undefined, attribution?: PloegAttribution): void { for (const client of this.ploegClients) client.usePersonProof(proof, attribution); }
 
   /** Evicts the projection and summary of every ended session nobody has subscribed to for the idle period; a later subscribe rebuilds them from the durable events. Returns the evicted session ids. */
-  evictIdleSessions(now = Date.now()): string[] {
+  evictIdleSessions(now = this.clock()): string[] {
     const due = this.idleSessions.sweep(this.cachedSessions(), id => this.evictable(id), now);
     for (const id of due) this.evict(id);
+    this.expireProvisionalSessions(now);
     return due;
+  }
+
+  /** Removes every provisional session nobody sent a message in that no connected client subscribes to and nobody used for `provisionalSessionMs`. Returns their ids. */
+  expireProvisionalSessions(now = this.clock()): string[] {
+    const due = [...this.pending.values()].filter(pending => this.removablePending(pending) && now - pending.usedAt >= provisionalSessionMs);
+    for (const pending of due) this.removePending(pending);
+    return due.map(pending => pending.id);
+  }
+
+  private removablePending(pending: PendingSession): boolean {
+    if (pending.starting || pending.refusedTurns?.length) return false;
+    return ![...this.clients].some(client => [...client.subscriptions].some(channel => subscribedSessionId(channel) === pending.id));
+  }
+
+  private removePending(pending: PendingSession): void {
+    this.pending.delete(pending.id);
+    this.store.deleteAgentHostViews(pending.id);
+    if (this.activeClients.delete(pending.id)) this.persistActiveClients();
+    this.notify(rootChannel, 'root/sessionRemoved', viewer => ({ channel: rootChannel, session: sessionChannel(pending.id, viewer.scheme) }), pending.user.id);
+  }
+
+  private makeRoomForProvisionalSession(user: User): void {
+    const unused = [...this.pending.values()].filter(pending => pending.user.id === user.id && !pending.starting && !pending.refusedTurns?.length);
+    if (unused.length < maxProvisionalSessions) return;
+    const oldest = unused.filter(pending => this.removablePending(pending)).sort((a, b) => a.usedAt - b.usedAt)[0];
+    if (oldest) this.removePending(oldest);
   }
 
   /** The sessions whose projection or summary the host holds in memory. */
@@ -1481,6 +1510,8 @@ export class AgentHost {
     if (loading) await this.loadCandidate(loading);
     const snapshot = this.snapshot(client, channel);
     client.subscriptions.add(channel);
+    const subscribedPending = parsed && this.pending.get(parsed.id);
+    if (subscribedPending) subscribedPending.usedAt = this.clock();
     const publicId = sessionIdFrom(channel);
     const id = publicId ? this.engineId(publicId) : undefined;
     if (id && !this.summaries.has(id)) { const session = this.store.getSession(id); if (session) this.summaries.set(id, this.fingerprint(session)); }
@@ -1577,7 +1608,8 @@ export class AgentHost {
     const config = this.acceptedConfig(params.config, picked);
     const activeClient = params.activeClient as Json | undefined;
     if (activeClient !== undefined && (!activeClient || typeof activeClient !== 'object' || activeClient.clientId !== client.clientId)) throw new RpcError(codes.invalidParams, 'activeClient.clientId must be the clientId this client initialized with');
-    const pending: PendingSession = { id: parsed.id, uri: channel, config, user: client.user, createdAt: new Date().toISOString() };
+    this.makeRoomForProvisionalSession(client.user);
+    const pending: PendingSession = { id: parsed.id, uri: channel, config, user: client.user, createdAt: new Date().toISOString(), usedAt: this.clock() };
     this.pending.set(parsed.id, pending);
     if (activeClient) { this.activeClients.set(parsed.id, new Map([[client.clientId!, activeClient]])); this.persistActiveClients(); }
     client.subscriptions.add(channel);
@@ -1645,10 +1677,7 @@ export class AgentHost {
     const pending = this.pendingFor(channel);
     if (pending) {
       if (!this.mayView(client.user, pending.user.id)) throw new RpcError(codes.sessionNotFound, 'Unfold has no such session, or it is not yours. Reopen it from the Unfold view.');
-      this.pending.delete(pending.id);
-      this.store.deleteAgentHostViews(pending.id);
-      if (this.activeClients.delete(pending.id)) this.persistActiveClients();
-      this.notify(rootChannel, 'root/sessionRemoved', viewer => ({ channel: rootChannel, session: sessionChannel(pending.id, viewer.scheme) }), pending.user.id);
+      this.removePending(pending);
       return {};
     }
     const session = this.sessionFor(client.user, channel);
@@ -2126,6 +2155,7 @@ export class AgentHost {
     if (pending.starting) return 'The session is already starting';
     try { pending.config = changePendingConfig(this.config, pending.config, action.config, action.replace === true); }
     catch (error) { if (error instanceof SessionConfigError) return error.message; throw error; }
+    pending.usedAt = this.clock();
     this.echo(client, channel, { type: 'session/configChanged', config: pending.config, replace: true }, origin);
     this.announceCustomizations(pending.id);
     return undefined;
