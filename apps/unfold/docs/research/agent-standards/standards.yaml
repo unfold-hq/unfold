@@ -6015,10 +6015,10 @@ standards:
   governance: single-vendor
   status: stabilising
   latest:
-    version: Microsoft mcp-gateway v1.0.0 (2026-10-16); Docker mcp-gateway v0.44.3 (2026-10-26); Kong AI MCP OAuth2 plugin
+    version: Microsoft mcp-gateway v1.0.1 (2026-11-16); Docker mcp-gateway v0.44.3 (2026-10-26); Kong AI MCP OAuth2 plugin
       requires Gateway 3.12+, claim mapping 3.14.0.0 (2026-04-07)
-    date: '2026-10-26'
-    url: https://github.com/docker/mcp-gateway/releases/tag/v0.44.3
+    date: '2026-11-16'
+    url: https://github.com/microsoft/mcp-gateway/releases/tag/v1.0.1
   watch:
   - {kind: github-tags, ref: microsoft/mcp-gateway, current: "v1.0.1"}
   - {kind: github-tags, ref: docker/mcp-gateway, current: "v0.44.3"}
@@ -6076,7 +6076,7 @@ standards:
   watchlist:
   - T31
   - T34
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-19'
 - id: leaderworkerset
   name: LeaderWorkerSet (LWS)
   disambiguation: kubernetes-sigs multi-pod group workload API (leader + workers), DisaggregatedSet for P/D roles
