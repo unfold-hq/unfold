@@ -8,7 +8,7 @@ import { PloegClient, cancelShiftChanged, detail as parseDetail, noteFailures, n
 import { listReason, waitingGroup } from '../public/core/reasons.js';
 import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
-import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, roundDiagram, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
+import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, roundDiagram, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemRunChatState, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
 import { messageLimits, unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
@@ -1633,6 +1633,19 @@ test('a finished Round shows the summed tokens its Runs reported, cache reads an
   assert.equal(several.turns[1].usage.model, undefined, 'a Run that reports more than one model names none');
   const partial = roundTurns(usageDetail({ '311': reported(1200, 300), '312': { costUsd: 0.1 } }));
   assert.equal(partial.turns[1].usage, undefined, 'a Run without token counts leaves the Round without usage');
+});
+
+test('a Ploeg Run\'s own chat names the harness Ploeg reported for it, and no harness when Ploeg reported none', () => {
+  const raw = workItem('220', { state: 'awaiting_review', pullRequest: 44, runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1 }, { id: '313', role: 'reviewer', round: 2 }] });
+  const run = (id: string) => raw.runs.find((entry: Json) => entry.id === id);
+  run('311').harness = 'claude-code';
+  run('312').harness = 'Not A Harness!';
+  delete run('313').harness;
+  const parsed = parseDetail({ schemaVersion: '1.0', ...raw });
+  const heading = (runId: string) => workItemRunChatState(parsed, `ploeg-run-${runId}`, usageSpelling)!.turns[0].message.text;
+  assert.equal(heading('311'), 'Implementer · Round 1 · harness claude-code');
+  assert.equal(heading('312'), 'Reviewer · Round 1', 'a harness value Unfold cannot read names none');
+  assert.equal(heading('313'), 'Reviewer · Round 2', 'a Ploeg that reports no harness gets no harness line');
 });
 
 test('a Round still running and a deterministic demo Work Item show no usage', () => {

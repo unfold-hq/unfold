@@ -381,11 +381,14 @@ function reportParts(run: PloegRun, turnId: string): Json[] {
   return shown.length ? [{ kind: 'markdown', id: `${turnId}-report`, content: shown.map(([title, value, failure]) => `**${title}**\n\n${failure ? failureMarkdown(value) : value.trim()}`).join('\n\n') }] : [];
 }
 
+/** A Ploeg Run's own chat names its Role, its Round and, only when Ploeg reported one, the harness that ran it. */
+const runHeading = (run: PloegRun) => [roleName(run.role), `Round ${run.round}`, ...(run.harness ? [`harness ${run.harness}`] : [])].join(' · ');
+
 function runTurn(run: PloegRun, since: string): Json {
   const turnId = `${runToolCallId(run)}-turn`;
   const startedAt = run.startedAt ?? run.finishedAt ?? since;
   const notice = run.state === 'finished' ? noRunMessages : runNotFinished(roleName(run.role), run.state === 'pending');
-  const turn = { id: turnId, startedAt, message: { text: `${roleName(run.role)} · Round ${run.round}`, origin: { kind: 'systemNotification' } }, responseParts: [{ kind: 'systemNotification', content: notice }, ...reportParts(run, turnId)] };
+  const turn = { id: turnId, startedAt, message: { text: runHeading(run), origin: { kind: 'systemNotification' } }, responseParts: [{ kind: 'systemNotification', content: notice }, ...reportParts(run, turnId)] };
   return run.state === 'finished' ? { ...turn, duration: duration(startedAt, run.finishedAt ?? startedAt), state: failed(run) ? 'error' : 'complete' } : turn;
 }
 
