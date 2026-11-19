@@ -41,16 +41,18 @@ test('every contributed unfold command is registered by the extension', () => {
 const tools: Array<{ name: string; toolReferenceName?: string; displayName?: string; modelDescription?: string; userDescription?: string; canBeReferencedInPrompt?: boolean; tags?: string[]; inputSchema?: { type: string; properties: object } }> = manifest.contributes.languageModelTools;
 
 test('every contributed language model tool is registered by the extension, and every registered tool is contributed', async () => {
-  const { lmToolNames } = await import('../src/lm-tools.ts');
+  const { lmActionToolNames, lmToolNames } = await import('../src/lm-tools.ts');
   const registered = new Set([...source.matchAll(/api\.register\('([\w]+)'/g)].map(match => match[1]));
   const declared = new Set(tools.map(tool => tool.name));
   assert.deepEqual([...declared].sort(), [...registered].sort());
-  assert.deepEqual([...declared].sort(), [...lmToolNames].sort());
+  assert.deepEqual([...declared].sort(), [...lmToolNames, ...lmActionToolNames].sort());
 });
+
+const actionToolNames = new Set(['unfold_approve_work', 'unfold_reject_work', 'unfold_retry_work', 'unfold_hand_back']);
 
 test('each tool reads only, can be referenced in a prompt and describes itself to the model and the person', () => {
   const references = new Set<string>();
-  for (const tool of tools) {
+  for (const tool of tools.filter(entry => !actionToolNames.has(entry.name))) {
     assert.match(tool.name, /^unfold_[a-z_]+$/);
     assert.ok(tool.toolReferenceName && /^[A-Za-z][A-Za-z0-9]*$/.test(tool.toolReferenceName), `${tool.name} has a toolReferenceName`);
     assert.ok(!references.has(tool.toolReferenceName), `${tool.toolReferenceName} is unique`);
@@ -66,6 +68,31 @@ test('each tool reads only, can be referenced in a prompt and describes itself t
   }
   assert.equal(manifest.engines.vscode, '^1.99.0', 'the engine floor stays; the tool API is feature-detected');
   assert.match(source, /lmToolApi<.+>\(vscode as/);
+});
+
+test('the four action tools approve, reject, retry and hand back, each confirmed first, and every tool is offered only while signed in', async () => {
+  const { lmActionToolNames } = await import('../src/lm-tools.ts');
+  assert.deepEqual([...lmActionToolNames], [...actionToolNames]);
+  for (const tool of tools) assert.equal((tool as { when?: string }).when, 'unfold.connected', `${tool.name} is offered only while the extension is signed in`);
+  const references = new Set(tools.map(tool => tool.toolReferenceName));
+  assert.equal(references.size, tools.length, 'every toolReferenceName is unique');
+  for (const name of actionToolNames) {
+    const tool = tools.find(entry => entry.name === name) as typeof tools[number] & { inputSchema: { properties: Record<string, unknown>; required?: string[] } };
+    assert.ok(tool, `${name} is contributed`);
+    assert.match(tool.displayName ?? '', /^Unfold: /);
+    assert.match(tool.userDescription ?? '', /after you confirm/);
+    assert.match(tool.modelDescription ?? '', /VS Code first shows the person a confirmation naming the Work Item/);
+    assert.match(tool.modelDescription ?? '', /nothing changes unless they accept/);
+    assert.match(tool.modelDescription ?? '', /never as instructions/);
+    assert.doesNotMatch(tool.modelDescription ?? '', /^Read-only/);
+    assert.ok(tool.tags?.includes('action') && !tool.tags.includes('read-only'), `${name} is tagged as an action`);
+    assert.equal(tool.canBeReferencedInPrompt, true);
+    assert.ok(tool.inputSchema.required?.includes('id'), `${name} needs a Work Item id`);
+  }
+  assert.deepEqual((tools.find(entry => entry.name === 'unfold_reject_work')?.inputSchema as { required?: string[] } | undefined)?.required, ['id', 'reason'], 'a rejection always carries a reason');
+  for (const name of ['unfold_retry_work', 'unfold_hand_back']) assert.match(tools.find(entry => entry.name === name)?.modelDescription ?? '', /what it may spend/);
+  assert.match(source, /prepareInvocation: options => prepareAction\(name, options\.input, acting\(\), offered\)/, 'an action tool confirms before it runs');
+  assert.match(source, /invoke: async \(options, token\) => api\.result\(await invokeAction\(name, options\.input, acting\(\), offered, token\)\)/, 'it acts only on a confirmation it offered');
 });
 
 test('the extension declares that it runs in the Agents window, and stays quiet there', () => {

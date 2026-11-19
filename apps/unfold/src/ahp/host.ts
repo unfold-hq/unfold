@@ -841,7 +841,9 @@ export class AgentHost {
   chatState(session: Session, view: View): Json {
     const projection = this.projection(session);
     const changesets = this.changesets(session);
-    return { ...this.chatSummary(session, view), turns: projection.turns.slice(-maxTurnsInSnapshot), ...(projection.activeTurn ? { activeTurn: projection.activeTurn } : {}), changesets };
+    const turns = projection.turns.slice(-maxTurnsInSnapshot);
+    const cut = projection.turns.length > turns.length;
+    return { ...this.chatSummary(session, view), turns, ...(cut ? { turnsNextCursor: String(turns[0].id) } : {}), ...(projection.activeTurn ? { activeTurn: projection.activeTurn } : {}), changesets };
   }
 
   private candidateKey(session: Session): string | undefined {
@@ -885,12 +887,33 @@ export class AgentHost {
     });
   }
 
-  changesetState(session: Session): Json {
+  changesetState(session: Session, user?: User): Json {
     const key = this.candidateKey(session);
     const view = key ? this.candidates.get(key) : undefined;
     if (key && !view) return { status: 'error', error: { errorType: 'candidate_unreadable', message: 'The captured candidate could not be read from the workbench\'s storage.' }, files: [] };
     const operations = this.operations(session);
-    return { status: session.status === 'exporting' ? 'computing' : 'ready', files: view ? this.candidateFiles(session, view) : this.artifactFiles(session), ...(operations.length ? { operations } : {}) };
+    const files = view ? this.candidateFiles(session, view) : this.artifactFiles(session);
+    const reviewed = user ? this.store.reviewedFiles(user.id, session.id, this.fileDigests(session, view)) : new Set<string>();
+    return { status: session.status === 'exporting' ? 'computing' : 'ready', files: files.map(file => reviewed.has(file.id) ? { ...file, reviewed: true } : file), ...(operations.length ? { operations } : {}) };
+  }
+
+  private fileDigests(session: Session, view = this.candidates.get(this.candidateKey(session) ?? '')): Map<string, string> {
+    if (view) return new Map(view.files.map(file => [file.path, `${file.baseBlob ?? ''}:${file.blob ?? ''}`]));
+    const digests = new Map<string, string>();
+    session.artifacts.filter(artifact => artifact.kind === 'diff').forEach((artifact, artifactIndex) => diffEntries(artifact.content).forEach((entry, index) => {
+      if (typeof entry.before === 'string' || typeof entry.after === 'string') digests.set(`${artifactIndex}-${index}`, createHash('sha256').update(JSON.stringify([entry.file, entry.before ?? null, entry.after ?? null])).digest('hex'));
+    }));
+    return digests;
+  }
+
+  private markReviewed(client: Client, channel: string, session: Session, action: Json, origin: Origin): undefined {
+    if (Array.isArray(action.files) && typeof action.reviewed === 'boolean') {
+      const digests = this.fileDigests(session);
+      const marked = new Map(action.files.filter((id: unknown): id is string => typeof id === 'string' && digests.has(id)).map((id: string) => [id, digests.get(id)!]));
+      this.store.setReviewedFiles(client.user.id, session.id, marked, action.reviewed, new Date().toISOString());
+    }
+    this.echo(client, channel, action, origin, other => other.user.id === client.user.id);
+    return undefined;
   }
 
   /** Whether a delivery policy hands this session's review to the forge, where Ploeg's pull request is reviewed and merged. */
@@ -1361,7 +1384,7 @@ export class AgentHost {
         const closedChoice = fingerprintChoice(previous);
         if (closedChoice && closedChoice !== choice?.choiceId) this.broadcast(channel, { type: 'session/inputNeededRemoved', id: closedChoice });
         this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.summary(session, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, changes: summary.changes, ...catalogOf(summary) } }; }, session.ownerId);
-        if (changesets.length) { await this.loadCandidate(session); if (this.closed) return; const changeset = this.changesetState(session); this.broadcast(this.changesetUri(session), { type: 'changeset/contentChanged', files: changeset.files, operations: changeset.operations ?? [] }); }
+        if (changesets.length) { await this.loadCandidate(session); if (this.closed) return; this.broadcast(this.changesetUri(session), viewer => { const changeset = this.changesetState(session, viewer.user); return { type: 'changeset/contentChanged', files: changeset.files, operations: changeset.operations ?? [] }; }); }
       }
       this.announceActiveSessions();
     } finally { this.polling = false; }
@@ -1455,7 +1478,7 @@ export class AgentHost {
         : this.openElsewhere(client.user, { kind: 'session', id: session.id }, this.sessionPage(session), 'session', `${session.id}-open-elsewhere`);
       return { resource: channel, state: withLeadingPart(this.chatState(session, client), lead), fromSeq: this.serverSeq };
     }
-    return { resource: channel, state: this.changesetState(session), fromSeq: this.serverSeq };
+    return { resource: channel, state: this.changesetState(session, client.user), fromSeq: this.serverSeq };
   }
 
   private terminalState(client: Client, terminal: { sessionId: string; commandId: string }): Json {
@@ -2602,7 +2625,8 @@ export class AgentHost {
       case 'session/titleChanged': return kind === 'changeset' ? 'session/titleChanged is dispatched on the session or chat channel' : this.renameSession(client, channel, session, action, origin);
       case 'session/activeClientSet': case 'session/activeClientRemoved': return kind === 'session' ? this.setActiveClient(client, channel, this.publicId(session.id), action, origin) : `${action.type} is dispatched on the session channel`;
       case 'session/configChanged': return kind === 'session' ? this.changeStartedConfig(client, channel, session, action, origin) : 'session/configChanged is dispatched on the session channel';
-      case 'chat/draftChanged': case 'chat/inputAnswerChanged': case 'changeset/filesReviewChanged': this.echo(client, channel, action, origin); return undefined;
+      case 'chat/draftChanged': case 'chat/inputAnswerChanged': this.echo(client, channel, action, origin); return undefined;
+      case 'changeset/filesReviewChanged': await this.loadCandidate(session); return this.markReviewed(client, channel, session, action, origin);
       default: return customizationRefusal(action.type) ?? `Unsupported action ${String(action.type)}`;
     }
   }

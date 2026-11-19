@@ -347,7 +347,7 @@ WHERE state = 'awaiting_review' AND NOT operator_owned AND team IN ($team);
 
 ## Grafana dashboard spec
 
-This is a spec only. The dashboard is provisioned in the owner's cluster repository, not in this repository.
+This is a spec only. The dashboard is provisioned in the operator's cluster repository, not in this repository.
 
 **Dashboard:** "Unfold KPIs". Default range: last 28 days. No auto-refresh; 5 minutes if one is wanted.
 

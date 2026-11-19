@@ -152,6 +152,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS report_files (report_id TEXT NOT NULL REFERENCES reports(id), name TEXT NOT NULL, type TEXT NOT NULL, content BLOB NOT NULL, PRIMARY KEY (report_id, name));
       CREATE TABLE IF NOT EXISTS report_follow (report_id TEXT PRIMARY KEY REFERENCES reports(id), state TEXT, checked_at TEXT NOT NULL, seen_at TEXT);
       CREATE TABLE IF NOT EXISTS agent_host_views (user_id TEXT NOT NULL, session_id TEXT NOT NULL, session_flags INTEGER NOT NULL, chat_flags INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (user_id, session_id));
+      CREATE TABLE IF NOT EXISTS changeset_reviews (user_id TEXT NOT NULL, session_id TEXT NOT NULL, file_id TEXT NOT NULL, digest TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (user_id, session_id, file_id));
       CREATE TABLE IF NOT EXISTS flag_choices (user_id TEXT NOT NULL, flag_key TEXT NOT NULL, enabled INTEGER NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (user_id, flag_key));
       CREATE TABLE IF NOT EXISTS now_snoozes (user_id TEXT NOT NULL, key TEXT NOT NULL, fingerprint TEXT NOT NULL, kind TEXT NOT NULL, until_at TEXT, created_at TEXT NOT NULL, PRIMARY KEY (user_id, key));
       CREATE TABLE IF NOT EXISTS flag_overrides (flag_key TEXT PRIMARY KEY, variant TEXT NOT NULL, reason TEXT NOT NULL, set_by TEXT NOT NULL, set_at TEXT NOT NULL);
@@ -453,6 +454,23 @@ export class Store {
   }
 
   deleteAgentHostViews(sessionId: string): void { this.db.prepare('DELETE FROM agent_host_views WHERE session_id=?').run(sessionId); }
+
+  /** The files one person marked as reviewed in a session's changeset whose content still has the digest it had when marked; a mark on changed content is dropped. */
+  reviewedFiles(userId: string, sessionId: string, current: ReadonlyMap<string, string>): Set<string> {
+    const rows = this.db.prepare('SELECT file_id, digest FROM changeset_reviews WHERE user_id=? AND session_id=?').all(userId, sessionId) as { file_id: string; digest: string }[];
+    const stale = rows.filter(row => current.get(row.file_id) !== row.digest);
+    for (const row of stale) this.db.prepare('DELETE FROM changeset_reviews WHERE user_id=? AND session_id=? AND file_id=?').run(userId, sessionId, row.file_id);
+    return new Set(rows.filter(row => current.get(row.file_id) === row.digest).map(row => row.file_id));
+  }
+
+  setReviewedFiles(userId: string, sessionId: string, files: ReadonlyMap<string, string>, reviewed: boolean, at: string): void {
+    this.transaction(() => {
+      for (const [fileId, digest] of files) {
+        if (reviewed) this.db.prepare('INSERT INTO changeset_reviews(user_id,session_id,file_id,digest,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(user_id, session_id, file_id) DO UPDATE SET digest=excluded.digest, updated_at=excluded.updated_at').run(userId, sessionId, fileId, digest, at);
+        else this.db.prepare('DELETE FROM changeset_reviews WHERE user_id=? AND session_id=? AND file_id=?').run(userId, sessionId, fileId);
+      }
+    });
+  }
 
   savePermission(request: PermissionRequest): void {
     this.db.prepare('INSERT INTO permissions(id,session_id,body) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(request.id, request.sessionId, JSON.stringify(request));
