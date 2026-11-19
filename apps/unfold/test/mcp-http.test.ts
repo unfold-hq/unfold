@@ -723,3 +723,208 @@ test('over HTTP, the Tasks extension follows the person\'s mcp.tasks flag, and a
   assert.equal(undeclared.json.error.code, -32021);
   assert.deepEqual(undeclared.json.error.data, { requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } } });
 });
+
+async function streamedCall(url: string, message: Record<string, any>, access: string, agent: string) {
+  const controller = new AbortController();
+  const response = await fetch(`${url}/mcp`, { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${access}`, 'mcp-protocol-version': '2025-11-25', 'user-agent': agent }, body: JSON.stringify(message) });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffered = '';
+  const next = async (): Promise<any> => {
+    for (;;) {
+      const at = buffered.indexOf('\n\n');
+      if (at >= 0) {
+        const event = buffered.slice(0, at);
+        buffered = buffered.slice(at + 2);
+        const data = event.split('\n').filter(line => line.startsWith('data: ')).map(line => line.slice(6)).join('\n');
+        if (data) return JSON.parse(data);
+        continue;
+      }
+      const { value, done } = await reader.read();
+      if (done) return undefined;
+      buffered += decoder.decode(value, { stream: true });
+    }
+  };
+  return { status: response.status, contentType: response.headers.get('content-type'), next, abort: () => controller.abort() };
+}
+
+test('a 2025-11-25 client that declared elicitation confirms an action on a stream of its tools/call, and acts once only after it accepts', async t => {
+  const rsa = rsaSigner();
+  const idp = await identityProvider([{ publicKey: rsa.publicKey, kid: 'rsa-1' }]);
+  t.after(() => idp.close());
+  const env = `UNFOLD_MCP_PLOEG_${randomBytes(6).toString('hex').toUpperCase()}`;
+  process.env[env] = randomBytes(24).toString('hex');
+  t.after(() => { delete process.env[env]; });
+  const decided: { confirmation: unknown; actor: unknown }[] = [];
+  const ploeg = createServer((req, res) => {
+    const url = new URL(req.url!, 'http://fixture.invalid');
+    const send = (status: number, payload: object) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...payload }));
+    if (url.pathname.endsWith('/teams')) return send(200, { teams: ploegDemo.teams });
+    if (req.method === 'POST' && url.pathname.endsWith('/work-items/106/approve')) {
+      decided.push({ confirmation: req.headers['x-ploeg-confirmation'], actor: req.headers['x-ploeg-actor'] });
+      return send(200, { decision: { workItemId: '106', team: 'delivery', state: 'queued' } });
+    }
+    const detail = ploegDemo.details[url.pathname.split('/').at(-1)!];
+    return detail ? send(200, detail) : send(404, { error: { code: 'not_found', message: 'no' } });
+  });
+  ploeg.listen(0, '127.0.0.1');
+  await once(ploeg, 'listening');
+  t.after(() => new Promise<void>(done => { ploeg.closeAllConnections(); ploeg.close(() => done()); }));
+  const personId = subjectUserId(browserIssuer, 'person-sub');
+  const otherId = subjectUserId(browserIssuer, 'other-sub');
+  const unfold = await application('live', config => {
+    config.baseUrl = undefined;
+    (config.auth as any).oidc = { issuer: browserIssuer, clientId: 'unfold', scopes: ['openid'], displayName: 'Authentik', roleClaim: 'unfold_role', groupsClaim: 'groups', roles: { admin: ['unfold-admins'], operator: ['unfold-operators'], viewer: ['unfold-viewers'] } };
+    config.mcp = settingsFor(idp.issuer);
+    config.ploeg = { url: `http://127.0.0.1:${(ploeg.address() as { port: number }).port}`, tokenEnv: env, userTeams: { [personId]: ['delivery'], [otherId]: ['delivery'] } };
+  });
+  t.after(() => unfold.close());
+  const addPeople = () => {
+    if (!unfold.app.store.getUser(personId)) unfold.app.store.addUser({ id: personId, name: 'person@example.com', role: 'operator', passwordHash: '' });
+    if (!unfold.app.store.getUser(otherId)) unfold.app.store.addUser({ id: otherId, name: 'other@example.com', role: 'operator', passwordHash: '' });
+  };
+  addPeople();
+  const access = (claims: Record<string, unknown> = {}) => jwt(rsa.signer, claimsFor(idp.issuer, claims));
+  const other = () => access({ sub: 'other-sub', email: 'other@example.com' });
+  const agent = 'Code/1.147.0 (vscode)';
+  const initialize = (capabilities: Record<string, unknown>) => post(unfold.url, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: access(), version: null, headers: { 'user-agent': agent } });
+  const approve = (id: number, token = access()) => streamedCall(unfold.url, { jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'unfold_approve_work', arguments: { id: '106' } } }, token, agent);
+  const reply = (id: unknown, result: Record<string, unknown>, token = access()) => post(unfold.url, { jsonrpc: '2.0', id, result }, { token, version: '2025-11-25', headers: { 'user-agent': agent } });
+  const records = () => unfold.app.store.actionRecords({ userId: personId, limit: 50 });
+
+  const undeclared = await post(unfold.url, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'unfold_approve_work', arguments: { id: '106' } } }, { token: access(), version: '2025-11-25', headers: { 'user-agent': agent } });
+  assert.match(undeclared.json.result.content[0].text, /^This client cannot ask you to confirm, so nothing was changed\. Do it in Unfold instead: http.*#work\/106$/, 'nothing is assumed before initialize');
+  await initialize({ elicitation: { form: {}, url: {} } });
+  const listed = await post(unfold.url, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, { token: access(), version: '2025-11-25', headers: { 'user-agent': agent } });
+  assert.match(listed.headers.get('content-type') ?? '', /^application\/json/, 'every other method stays plain JSON');
+  const reading = await post(unfold.url, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'unfold_sessions', arguments: {} } }, { token: access(), version: '2025-11-25', headers: { 'user-agent': agent } });
+  assert.match(reading.headers.get('content-type') ?? '', /^application\/json/, 'a tool that confirms nothing stays plain JSON');
+  const jsonOnly = await post(unfold.url, { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'unfold_approve_work', arguments: { id: '106' } } }, { token: access(), version: '2025-11-25', headers: { 'user-agent': agent, accept: 'application/json' } });
+  assert.match(jsonOnly.json.result.content[0].text, /cannot ask you to confirm/, 'a request that does not accept a stream is refused as before');
+
+  const declining = await approve(5);
+  assert.equal(declining.status, 200);
+  assert.match(declining.contentType ?? '', /^text\/event-stream/);
+  const asked = await declining.next();
+  assert.equal(asked.method, 'elicitation/create');
+  assert.match(asked.id, /^unfold-[A-Za-z0-9_-]{24}$/);
+  assert.match(asked.params.message, /^Approve Work Item 106 ".*"\? Ploeg queues it for Team delivery/);
+  assert.deepEqual(asked.params.requestedSchema.required, ['confirm']);
+  assert.equal((await reply(asked.id, { action: 'accept', content: { confirm: true } }, other())).status, 400, 'another person cannot answer it');
+  assert.equal((await reply(asked.id, { action: 'decline' })).status, 202);
+  const declined = await declining.next();
+  assert.equal(declined.id, 5);
+  assert.equal(declined.result.structuredContent.done, false);
+  assert.equal(await declining.next(), undefined, 'the stream closes with the result');
+  assert.equal((await reply(asked.id, { action: 'accept', content: { confirm: true } })).status, 400, 'an answer is used at most once');
+
+  const dismissing = await approve(6);
+  const dismissed = await dismissing.next();
+  assert.equal((await reply(dismissed.id, { action: 'cancel' })).status, 202);
+  assert.match((await dismissing.next()).result.structuredContent.summary, /^Not done: the confirmation was closed without an answer, so nothing was changed\. If your client never showed it to you, do it in Unfold: http.*#work\/106$/);
+  assert.equal(decided.length, 0, 'a declined or dismissed confirmation changes nothing');
+  assert.equal(records().length, 0);
+
+  const accepting = await approve(7);
+  const confirming = await accepting.next();
+  assert.equal(decided.length, 0, 'asking changes nothing');
+  assert.equal((await reply(confirming.id, { action: 'accept', content: { confirm: true } })).status, 202);
+  const done = await accepting.next();
+  assert.equal(done.id, 7);
+  assert.equal(done.result.structuredContent.done, true, JSON.stringify(done));
+  assert.equal(decided.length, 1);
+  const [record] = records();
+  assert.equal(record.action, 'POST /api/ploeg/work-items/:id/approve');
+  assert.ok(record.confirmation?.endsWith(`:${createHash('sha256').update(confirming.params.message).digest('hex')}`), String(record.confirmation));
+  assert.deepEqual(decided, [{ confirmation: record.confirmation, actor: personId }]);
+  assert.equal((await reply(confirming.id, { action: 'accept', content: { confirm: true } })).status, 400, 'a repeated answer is refused and applies nothing');
+  assert.equal(decided.length, 1);
+
+  const closing = await approve(8);
+  const abandoned = await closing.next();
+  closing.abort();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal((await reply(abandoned.id, { action: 'accept', content: { confirm: true } })).status, 400, 'once the stream is gone, its answer is refused');
+
+  const restarting = await approve(9);
+  const beforeRestart = await restarting.next();
+  await unfold.restart();
+  addPeople();
+  const shutDown = await restarting.next();
+  assert.equal(shutDown.id, 9);
+  assert.match(shutDown.result.content[0].text, /^The confirmation did not come back, so nothing was changed\. Do it in Unfold instead: /, 'shutting down ends the waiting call without acting');
+  assert.equal((await reply(beforeRestart.id, { action: 'accept', content: { confirm: true } })).status, 400, 'a restarted process refuses an answer to a question it did not ask');
+  await initialize({ elicitation: {} });
+  const expiring = await approve(10, access({ exp: Math.floor(Date.now() / 1000) + 7 }));
+  const unanswered = await expiring.next();
+  assert.equal(unanswered.method, 'elicitation/create', 'after a restart the person is asked again');
+  const timedOut = await expiring.next();
+  assert.equal(timedOut.id, 10);
+  assert.equal(timedOut.result.isError, true);
+  assert.match(timedOut.result.content[0].text, /^The confirmation did not come back, so nothing was changed\. Do it in Unfold instead: http.*#work\/106$/, 'the wait never outlives the access token, and the refusal names the Unfold page');
+  assert.equal((await reply(unanswered.id, { action: 'accept', content: { confirm: true } })).status, 400);
+  assert.equal(decided.length, 1, 'nothing timed out, closed or restarted was ever applied');
+});
+
+test('unfold_ask over a 2025-11-25 stream shows what it may spend before any model is called', async t => {
+  const rsa = rsaSigner();
+  const idp = await identityProvider([{ publicKey: rsa.publicKey, kid: 'rsa-1' }]);
+  t.after(() => idp.close());
+  const env = `UNFOLD_MCP_PLOEG_${randomBytes(6).toString('hex').toUpperCase()}`;
+  process.env[env] = randomBytes(24).toString('hex');
+  t.after(() => { delete process.env[env]; });
+  const allowance = { purpose: 'ask', scopeKind: 'team', scopeId: 'delivery', periodStart: '2026-10-01T00:00:00Z', resetAt: '2026-11-01T00:00:00Z', limitUsd: 2, settledUsd: 0, heldUsd: 0, remainingUsd: 1.97, askCount: 0, askBudgetUsd: 0.02, asksEnabled: true };
+  const admitted: unknown[] = [];
+  const completions: unknown[] = [];
+  const listen = async (handler: Parameters<typeof createServer>[1]) => { const server = createServer(handler); server.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(() => new Promise<void>(done => { server.closeAllConnections(); server.close(() => done()); })); return `http://127.0.0.1:${(server.address() as { port: number }).port}`; };
+  const ploegUrl = await listen(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const data = chunks.length ? JSON.parse(Buffer.concat(chunks).toString()) : undefined;
+    const url = new URL(req.url!, 'http://fixture.invalid');
+    const send = (status: number, payload: object) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...payload }));
+    const ask = (askId: string) => ({ askId, runId: '900', workItemId: '101', team: 'delivery', actor: 'x', askedBy: 'x', state: 'finished', budgetUsd: 0.02, questionSha256: 'a'.repeat(64), createdAt: '2026-10-16T10:00:00Z', expiresAt: '2026-10-16T10:02:00Z', finishedAt: null, spend: { costStatus: 'settled', usd: 0.0012, keyState: 'reconciled' } });
+    if (url.pathname.endsWith('/teams')) return send(200, { teams: ploegDemo.teams });
+    if (url.pathname.endsWith('/operator/allowances')) return send(200, { allowance });
+    if (/\/work-items\/101\/asks$/.test(url.pathname) && req.method === 'POST') {
+      admitted.push(req.headers['x-ploeg-confirmation']);
+      return send(201, { created: true, ask: { ...ask(data.askId), state: 'open' }, credential: { key: 'sk-ask-capped', alias: 'ask-1', models: ['glm-5.3-flash'], budgetUsd: 0.02, expiresAt: '2026-10-16T10:02:00Z' }, allowance });
+    }
+    const one = /\/work-items\/101\/asks\/([^/]+)(\/finish)?$/.exec(url.pathname);
+    if (one) return send(200, { ask: ask(decodeURIComponent(one[1])) });
+    const detail = ploegDemo.details[url.pathname.split('/').at(-1)!];
+    return detail ? send(200, detail) : send(404, { error: { code: 'not_found', message: 'no' } });
+  });
+  const gatewayUrl = await listen((_req, res) => { completions.push(1); res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ choices: [{ message: { content: 'Firefox is not affected.' } }] })); });
+  const personId = subjectUserId(browserIssuer, 'person-sub');
+  const unfold = await application('live', config => {
+    config.baseUrl = undefined;
+    (config.auth as any).oidc = { issuer: browserIssuer, clientId: 'unfold', scopes: ['openid'], displayName: 'Authentik', roleClaim: 'unfold_role', groupsClaim: 'groups', roles: { admin: ['unfold-admins'], operator: ['unfold-operators'], viewer: ['unfold-viewers'] } };
+    config.mcp = settingsFor(idp.issuer);
+    config.ploeg = { url: ploegUrl, tokenEnv: env, userTeams: { [personId]: ['delivery'] } };
+    config.litellm = { baseUrl: gatewayUrl, adminUrl: gatewayUrl, masterKey: 'sk-master-never-used', models: ['coding'], ttl: '1h' };
+  });
+  t.after(() => unfold.close());
+  unfold.app.store.addUser({ id: personId, name: 'person@example.com', role: 'operator', passwordHash: '' });
+  const access = jwt(rsa.signer, claimsFor(idp.issuer));
+  const agent = 'Code/1.147.0 (vscode)';
+  await post(unfold.url, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: { elicitation: { form: {} } }, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: access, version: null, headers: { 'user-agent': agent } });
+  const ask = (id: number) => streamedCall(unfold.url, { jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'unfold_ask', arguments: { id: '101', question: 'Is Firefox affected?', use_model: true } } }, access, agent);
+  const reply = (id: unknown, result: Record<string, unknown>) => post(unfold.url, { jsonrpc: '2.0', id, result }, { token: access, version: '2025-11-25', headers: { 'user-agent': agent } });
+
+  const declining = await ask(1);
+  const shown = await declining.next();
+  assert.match(shown.params.message, /^Ask a model about Work Item 101\? One answer spends up to \$0\.02 from the Team's Ask Allowance \(\$1\.97 left until 2026-11-01\)\. Question: Is Firefox affected\?$/);
+  assert.deepEqual([admitted.length, completions.length], [0, 0], 'the spend is shown before any model is called');
+  await reply(shown.id, { action: 'decline' });
+  assert.equal((await declining.next()).result.structuredContent.asked, false);
+  assert.deepEqual([admitted.length, completions.length], [0, 0], 'a decline spends nothing');
+
+  const accepting = await ask(2);
+  const confirming = await accepting.next();
+  await reply(confirming.id, { action: 'accept', content: { confirm: true } });
+  const answered = await accepting.next();
+  assert.equal(answered.result.structuredContent.asked, true, JSON.stringify(answered));
+  assert.equal(admitted.length, 1);
+  assert.ok(String(admitted[0]).endsWith(`:${createHash('sha256').update(confirming.params.message).digest('hex')}`));
+});

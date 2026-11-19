@@ -114,7 +114,7 @@ test('no workflow, action or image build pulls from Docker Hub, so CI needs neit
 });
 
 test('the workflows use only the repository secrets the move names, and the Cloudflare deploy token only in the site and documentation deploy jobs', () => {
-  const allowed = ['AGENT_STANDARDS_MODEL_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_DNS_READ_TOKEN', 'MARKETPLACE_AZURE_CLIENT_ID', 'MARKETPLACE_AZURE_TENANT_ID', 'VSCE_PAT'];
+  const allowed = ['AGENT_STANDARDS_MODEL_KEY', 'CLOUDFLARE_ACCOUNT_ID', 'CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_DNS_READ_TOKEN'];
   const used = new Set();
   for (const { file, name, job } of allJobs()) {
     const secrets = [...JSON.stringify(job).matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]);
@@ -299,7 +299,7 @@ test('publication signs keyless only in on_release_published.yml at a release ta
   assert.match(signing, /for arch in amd64 arm64; do[\s\S]+cosign attest --yes --type cyclonedx --predicate "\$\{RUNNER_TEMP\}\/sbom-\$arch\.cdx\.json" "\$IMAGE@\$platform"/, 'each platform image carries its own signed SBOM');
 });
 
-test('the chart follows every image, the extension verifies before Open VSX publishes it keylessly, and the distributor publishes the release last', () => {
+test('the chart follows every image, the extension verifies before Open VSX and the Marketplace publish it keylessly, and the distributor publishes the release last', () => {
   const chart = publisher.jobs['unfold-release-publish-chart'];
   assert.deepEqual(chart.needs, ['parse-release-tag', 'unfold-release-images']);
   const publish = chart.steps.at(-1);
@@ -311,12 +311,16 @@ test('the chart follows every image, the extension verifies before Open VSX publ
   const extension = publisher.jobs['unfold-release-publish-extension'];
   const at = predicate => extension.steps.findIndex(predicate);
   const stamp = at(step => step.run === 'node apps/unfold/scripts/stamp-version.mjs "$VERSION"');
+  const name = at(step => /python3 scripts\/marketplace_version\.py "\$VERSION"/.test(step.run ?? ''));
   const pack = at(step => /npm run package -- --out/.test(step.run ?? ''));
   const verify = at(step => /cosign verify-blob --bundle/.test(step.run ?? ''));
   const attach = at(step => /gh release upload/.test(step.run ?? ''));
   const openVsx = at(step => /ovsx publish/.test(step.run ?? ''));
   const marketplace = at(step => /vsce publish/.test(step.run ?? ''));
-  assert.ok(stamp >= 0 && stamp < pack && pack < verify && verify < attach && attach < openVsx && openVsx < marketplace);
+  assert.ok(stamp >= 0 && stamp < name && name < pack && pack < verify && verify < attach && attach < openVsx && openVsx < marketplace);
+  assert.match(extension.steps[marketplace].run, /npx --no-install vsce publish --packagePath "\$vsix" --skip-duplicate --oidc/);
+  assert.match(extension.steps[pack].run, /package_or_reuse "unfold-marketplace-\$\{MARKETPLACE_VERSION\}\.vsix" "\$MARKETPLACE_VERSION"/);
+  assert.doesNotMatch(JSON.stringify(extension), /VSCE_PAT|AZURE_|azure-credential/, 'the Marketplace publishes with Trusted Publishing, never a stored credential');
   assert.match(extension.steps[openVsx].run, /npx --no-install ovsx publish --packagePath "unfold-\$\{VERSION\}\.vsix" --skip-duplicate --trusted-publishing/);
   assert.equal(extension.permissions['id-token'], 'write', 'Trusted Publishing trades the job\'s OIDC identity for a publish token');
   assert.equal(JSON.parse(text('apps/unfold/extensions/vscode/package.json')).publisher, 'unfold-hq');

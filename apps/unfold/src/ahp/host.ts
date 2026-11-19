@@ -18,7 +18,7 @@ import { IdleSessions, RememberedClients, ServerSequence, maxProvisionalSessions
 import { AnnouncedCustomizations, customizationRefusal, gatewayToolCall, rootConfigRefusal, sessionCustomizations, type GatewaySubject } from './customizations.ts';
 import { outcomeMarkdown, sessionProgress, stopReason } from '../../public/core/progress.js';
 import { money } from '../../public/core/format.js';
-import { CandidateReview, parseAnnotationsChannel, reviewOperationIds, reviewOperations } from './review.ts';
+import { CandidateReview, changesetOperations, parseAnnotationsChannel, reviewOperationIds, reviewOperations } from './review.ts';
 import { Declines, declineEvents, declinedAnswers, stoppingRefusal, yesNoOptions } from './questions.ts';
 import { SpendNotices, observeSpend, runEndSpend } from './spend.ts';
 import { resumable, resumeRefusal, runAgainReply, turnResumedEvent } from './try-again.ts';
@@ -27,7 +27,7 @@ import { CommandLog, clientTerminalState, clientTerminalUri, maxClientTerminals,
 import { catalogOf, isActionKnownToVersion, negotiateProtocolVersion, oldestBaseline, sessionChatCatalog, speaksCatalog, supportedVersions } from './versions.ts';
 import { ChatAsks, askMarkdown, commandCompletions, messageIntent, type ChatAskEntry, type ChatAskService } from './asks.ts';
 import { candidateEdits, carryRuns, parseRunChannel, runChatChannel, runChatState, runChats, runFinished, runMessage, runRoute, runStarted, runTool, runTranscripts, stopRuns, toolActions, type RunTranscripts, type Spelling } from './runs.ts';
-import { WorkItemSessions, isWorkItemSession, workItemChatState, workItemIdOf, workItemMessageRefusal, workItemQuestions, workItemRefusal, workItemRefusals, workItemRunChatState, workItemSessionState, workItemStatus, workItemSummary, type RoutedAction, type WorkItemRecord } from './work-items.ts';
+import { WorkItemSessions, isPullRequestBannerPrompt, isWorkItemSession, workItemBannerReply, workItemChatState, workItemIdOf, workItemMessageRefusal, workItemQuestions, workItemRefusal, workItemRefusals, workItemRunChatState, workItemSessionState, workItemStatus, workItemSummary, type RoutedAction, type WorkItemRecord } from './work-items.ts';
 import { RunLive, type LiveAction } from './run-live.ts';
 import { WorkItemCommands, openShiftOf, promptClosedActions, promptInputNeeded, promptOpenActions, restartable, takesNotes, withPrompts, workItemCommandText, type WorkItemPrompt } from './work-item-commands.ts';
 import { PloegClient, PloegError, type PloegDetail } from '../ploeg.ts';
@@ -290,6 +290,8 @@ export class AgentHost {
   private readonly projections = new Map<string, Projection>();
   private readonly pending = new Map<string, PendingSession>();
   private readonly summaries = new Map<string, string>();
+  private readonly publishing = new Set<string>();
+  private readonly publishFailures = new Map<string, Json>();
   private readonly announcedCustomizations = new AnnouncedCustomizations();
   private readonly activeClients: Map<string, Map<string, Json>>;
   private readonly knownClients: RememberedClients<SessionScheme>;
@@ -885,7 +887,38 @@ export class AgentHost {
 
   private reviewOperations(session: Session): Json[] { const gated = this.gated(session); return reviewOperations(session, gated, gated ? this.delivery?.readiness(session) : undefined); }
 
-  private operations(session: Session): Json[] { return this.reviewOperations(session); }
+  private operations(session: Session): Json[] {
+    const gated = this.gated(session);
+    const readiness = gated ? this.delivery?.readiness(session) : undefined;
+    const repository = this.config.repositories.find(repo => repo.id === session.repositoryId);
+    const target = repository ? { repository: repository.name, baseBranch: repository.baseBranch, ...(readiness?.publication?.branch ? { branch: readiness.publication.branch } : {}) } : undefined;
+    return changesetOperations(session, gated, readiness, target).map(item => item.id !== reviewOperationIds.publish || item.status === 'disabled' ? item
+      : this.publishing.has(session.id) ? { ...item, status: 'running' }
+        : this.publishFailures.has(session.id) ? { ...item, status: 'error', error: this.publishFailures.get(session.id) } : item);
+  }
+
+  private async publishCandidate(client: Client, session: Session, operation: Json): Promise<Json> {
+    if (client.user.role === 'viewer' || !this.mayView(client.user, session.ownerId)) throw new RpcError(codes.permissionDenied, 'Viewers cannot review a candidate');
+    if (operation.status === 'disabled') throw new RpcError(codes.conflict, `${operation.label} is not available: ${operation.description}`);
+    if (operation.status === 'running') throw new RpcError(codes.conflict, `${operation.label} is already running for this candidate. Wait for it to finish.`);
+    const changeset = this.changesetUri(session);
+    this.publishing.add(session.id);
+    this.publishFailures.delete(session.id);
+    this.broadcast(changeset, { type: 'changeset/operationStatusChanged', operationId: operation.id, status: 'running' });
+    let message: string;
+    try { message = await this.review.publish(client.user, session); } catch (error) {
+      const failure = asRpcError(error);
+      const info = { errorType: 'publish_failed', message: failure.message };
+      this.publishing.delete(session.id);
+      this.publishFailures.set(session.id, info);
+      this.broadcast(changeset, { type: 'changeset/operationStatusChanged', operationId: operation.id, status: 'error', error: info });
+      throw failure;
+    }
+    this.publishing.delete(session.id);
+    this.broadcast(changeset, { type: 'changeset/operationStatusChanged', operationId: operation.id, status: 'idle' });
+    this.broadcast(changeset, { type: 'changeset/operationsChanged', operations: this.operations(session) });
+    return { message };
+  }
 
   private async invokeOperation(client: Client, params: Json): Promise<Json> {
     const channel = String(params.channel ?? '');
@@ -895,13 +928,7 @@ export class AgentHost {
     const operation = this.operations(session).find(item => item.id === params.operationId);
     if (!operation) throw new RpcError(codes.invalidParams, `This changeset offers no operation ${JSON.stringify(params.operationId)}`);
     if (params.target !== undefined) throw new RpcError(codes.invalidParams, `${operation.label} applies to the whole candidate, not to a file or range`);
-    if (operation.id === reviewOperationIds.publish) {
-      if (client.user.role === 'viewer' || !this.mayView(client.user, session.ownerId)) throw new RpcError(codes.permissionDenied, 'Viewers cannot review a candidate');
-      let message: string;
-      try { message = await this.review.publish(client.user, session); } catch (error) { throw asRpcError(error); }
-      this.broadcast(this.changesetUri(session), { type: 'changeset/operationsChanged', operations: this.operations(session) });
-      return { message };
-    }
+    if (operation.id === reviewOperationIds.publish) return this.publishCandidate(client, session, operation);
     if (operation.id !== reviewOperationIds.accept) { if (client.user.role === 'viewer' || !this.mayView(client.user, session.ownerId)) throw new RpcError(codes.permissionDenied, 'Viewers cannot review a candidate'); return this.review.ask(client.user, session, operation.id); }
     let reviewed: Session;
     try { reviewed = this.engine.review(session.id, { decision: 'accepted' }, client.user); } catch (error) { throw asRpcError(error); }
@@ -1818,7 +1845,7 @@ export class AgentHost {
     for (const entry of change.added) this.notify(rootChannel, 'root/sessionAdded', viewer => ({ channel: rootChannel, summary: this.workItemSummary(entry, viewer) }), undefined, own);
     for (const entry of change.changed) {
       if (workItemStatus(entry) === statusBits.inputNeeded && !entry.stale) this.store.clearAgentHostFlags(entry.publicId, statusBits.isRead, at);
-      this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.workItemSummary(entry, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, ...(summary.project ? { project: summary.project } : {}), ...catalogOf(summary) } }; }, undefined, own);
+      this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.workItemSummary(entry, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, ...(summary.project ? { project: summary.project } : {}), ...catalogOf(summary), _meta: summary._meta } }; }, undefined, own);
       this.broadcast(sessionChannel(entry.publicId), viewer => { const summary = this.workItemSummary(entry, viewer); return { type: 'session/chatUpdated', chat: chatChannel(entry.publicId, viewer.scheme), changes: { title: summary.title, status: summary.chats?.[0]?.status ?? summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt } }; }, undefined, own);
     }
     for (const publicId of change.removed) this.notify(rootChannel, 'root/sessionRemoved', viewer => ({ channel: rootChannel, session: sessionChannel(publicId, viewer.scheme) }), undefined, own);
@@ -1989,12 +2016,14 @@ export class AgentHost {
    * A message on a running or queued Work Item becomes a Ploeg note for its next Round (ADR 0023: steering reaches the next
    * Round, not the running Run), and its turn says so. A message on a Work Item that needs a person or went stale becomes
    * the note of a restart the person confirms first, in the message's own turn. A message on a withdrawn Work Item says how
-   * Ploeg restarts it; on other work, or against a Ploeg that takes no notes, it is refused.
+   * Ploeg restarts it; on other work, or against a Ploeg that takes no notes, it is refused. The prompt of VS Code's Fix
+   * Checks or Address Comments banner is refused in every state with the steer or Try Again that would act and its spend.
    */
   private async messageWorkItem(client: Client, channel: string, publicId: string, action: Json, origin: Origin): Promise<string | undefined> {
     const projected = this.workItems.remembered(client.user, publicId);
     const read = await this.readWorkItem(client, publicId);
     if ('refused' in read) return read.refused;
+    if (isPullRequestBannerPrompt(action.message?.text)) return workItemBannerReply(read.entry.item);
     if (takesNotes(read.entry.item.state)) return this.noteWorkItem(client, channel, read.entry, projected ?? read.entry, action, origin);
     const found = this.restartRefusal(client.user, read.entry, workItemMessageRefusal(read.entry.item));
     if ('refused' in found) return found.refused;

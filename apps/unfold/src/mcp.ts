@@ -36,11 +36,12 @@ export function confirmationLedger(): Confirmations { return { key: randomBytes(
  * `apiUrl` is where the API is called when it differs from the URL links point at, `principal` is who a
  * confirmation is bound to, and `role` is that person's Unfold role when the caller already knows it; without it the
  * action tools read it from Unfold. `mcpApps` says that a 2025 client declared MCP Apps in an `initialize` this server
- * instance did not see, as stateless HTTP remembers it between requests. With `tasks`, a 2026-07-28 client that
+ * instance did not see, as stateless HTTP remembers it between requests, and `elicitation` says the same of form
+ * elicitation, which the action tools and `unfold_ask` confirm with through `connect`. With `tasks`, a 2026-07-28 client that
  * declares the Tasks extension follows a confirmed `unfold_hand_off` as a task. `events` serves MCP Events to a
  * 2026-07-28 client when the person may use them. `icons` go on `serverInfo` and on every tool.
  */
-export type McpOptions = { url: string; apiUrl?: string; token?: string; version?: string; timeoutMs?: number; fetch?: typeof fetch; stateFile?: string; now?: () => Date; principal?: string; role?: string; confirmations?: Confirmations; mcpApps?: boolean; tasks?: McpTasks; events?: McpEventsHandler; icons?: McpIcon[] };
+export type McpOptions = { url: string; apiUrl?: string; token?: string; version?: string; timeoutMs?: number; fetch?: typeof fetch; stateFile?: string; now?: () => Date; principal?: string; role?: string; confirmations?: Confirmations; mcpApps?: boolean; elicitation?: boolean; tasks?: McpTasks; events?: McpEventsHandler; icons?: McpIcon[] };
 
 type Reason = { code: string; chip: string; sentence: string; fix: string; requeue: string; action: string; headline?: string | null; variant?: string | null; run?: { id: string; role: string; round: number; text: string } | null };
 type Reasons = { listReason(item: unknown, options?: { demo?: boolean }): Reason | null; detailReason(detail: unknown): Reason | null; routingWarning(item: unknown): { chip: string; sentence: string; fix: string } | null; waitingGroup(item: unknown): 'review' | 'needs' | 'proposed' };
@@ -102,7 +103,7 @@ export function createMcpServer(options: McpOptions) {
   const timeoutMs = options.timeoutMs ?? 20_000;
   const link = (id: string) => `${base}/#work/${encodeURIComponent(id)}`;
 
-  let clientCapabilities: Json = {};
+  let clientCapabilities: Json = options.elicitation ? { elicitation: { form: {} } } : {};
   let initializedClient: string | undefined;
   const calling = new AsyncLocalStorage<Call>();
   let outbound: McpOutbound | undefined;
@@ -409,7 +410,7 @@ export function createMcpServer(options: McpOptions) {
         if (call.modern) return new InputRequired({ confirm_spend: { method: 'elicitation/create', params: { mode: 'form', message, requestedSchema } } }, sealConfirmation(confirmations, principal, subject, message, clock()));
         let decision: Json;
         try { decision = await outbound!('elicitation/create', { message, requestedSchema }); }
-        catch { throw new UnfoldAnswer(409, 'mcp_confirmation_missing', 'The confirmation did not come back, so no model was asked and nothing was spent.'); }
+        catch { throw new UnfoldAnswer(409, 'mcp_confirmation_missing', `The confirmation did not come back, so no model was asked and nothing was spent. Ask in Unfold instead: ${page}`); }
         if (decision?.action !== 'accept' || decision?.content?.confirm !== true) return refusedBy(decision);
         return answered(await get(`/api/ploeg/work-items/${id}/asks`, { question, askModel: true }, `${randomBytes(12).toString('base64url')}:${createHash('sha256').update(message).digest('hex')}`));
       },
@@ -693,7 +694,7 @@ export function createMcpServer(options: McpOptions) {
     if (call.modern) return new InputRequired({ confirm_action: { method: 'elicitation/create', params: { mode: 'form', message: planned.message, requestedSchema: actionSchema } } }, sealConfirmation(confirmations, principal, subject, planned.message, clock()));
     let decision: Json;
     try { decision = await outbound!('elicitation/create', { message: planned.message, requestedSchema: actionSchema }); }
-    catch { throw new UnfoldAnswer(409, 'mcp_confirmation_missing', 'The confirmation did not come back, so nothing was changed.'); }
+    catch { throw new UnfoldAnswer(409, 'mcp_confirmation_missing', `The confirmation did not come back, so nothing was changed. Do it in Unfold instead: ${page}`); }
     if (decision?.action !== 'accept' || decision?.content?.confirm !== true) return refusedBy(decision);
     const nonce = randomBytes(12).toString('base64url');
     return planned.perform(`${nonce}:${createHash('sha256').update(planned.message).digest('hex')}`, nonce);
@@ -891,6 +892,8 @@ export function createMcpServer(options: McpOptions) {
     confirmsFirst(name: string): boolean { return tools.find(tool => tool.name === name)?.confirms === true; },
     /** Whether the client's `initialize` declared MCP Apps; false before any `initialize`. */
     declaredMcpApps(): boolean { return supportsMcpApps(clientCapabilities); },
+    /** Whether the client's `initialize` declared form elicitation; false before any `initialize`. */
+    declaredFormElicitation(): boolean { return formElicitation(clientCapabilities); },
   };
 }
 

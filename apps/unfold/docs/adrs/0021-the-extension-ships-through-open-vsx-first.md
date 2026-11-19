@@ -109,3 +109,11 @@ Azure DevOps postponed the retirement of global personal access tokens from 2026
 updated 2026-10-23). The Marketplace step now treats `VSCE_PAT` as retired from 2027-01-27: until
 then it publishes with a warning, from that day it fails. The decision is unchanged; the Entra
 credential remains the route that does not expire.
+
+## Update, 2026-11-19: superseded for the Marketplace
+
+[ADR 0075](0075-the-extension-reaches-the-marketplace-through-trusted-publishing-with-release-candidates-as-pre-releases.md)
+supersedes the Marketplace half of this decision. The Marketplace now offers Trusted Publishing for
+GitHub Actions, so neither a personal access token nor an Entra identity is needed, and every
+release candidate goes there as a pre-release under a derived `major.minor.patch`. The Open VSX
+half and the VSIX on every GitHub release stand.
