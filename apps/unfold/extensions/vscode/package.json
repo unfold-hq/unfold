@@ -445,6 +445,24 @@
         }
       }
     },
+    "chatSkills": [
+      {
+        "path": "./media/agent/skills/operate-agent-session/SKILL.md",
+        "when": "unfold.connected"
+      }
+    ],
+    "chatInstructions": [
+      {
+        "path": "./media/unfold.instructions.md",
+        "when": "unfold.connected"
+      }
+    ],
+    "chatPlugins": [
+      {
+        "path": "./media/agent/plugin",
+        "when": "unfold.connected"
+      }
+    ],
     "mcpServerDefinitionProviders": [
       {
         "id": "unfold.ploeg",
