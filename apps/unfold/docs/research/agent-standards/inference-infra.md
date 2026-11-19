@@ -600,7 +600,7 @@ Not to be confused with: NVIDIA operator managing driver, container toolkit, dev
 | --- | --- |
 | Steward | NVIDIA (single-vendor) |
 | Status | stable |
-| Latest | [v26.7.2 2026-10-14](https://github.com/NVIDIA/gpu-operator/releases/tag/v26.7.2) |
+| Latest | [v26.7.3 2026-11-17](https://github.com/NVIDIA/gpu-operator/releases/tag/v26.7.3) |
 | Radar | **hold**: Fit decided it: stable, but Unfold has no GPUs and Talos replaces most of the operator. |
 | Moves when | A GPU node joins an Unfold cluster on a distribution other than Talos. |
 | Competes with | — |
@@ -609,7 +609,7 @@ Not to be confused with: NVIDIA operator managing driver, container toolkit, dev
 | Superseded by | — |
 | Decisions | [adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire](../../../../../docs/adr/adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-19 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -623,7 +623,7 @@ Not to be confused with: NVIDIA operator managing driver, container toolkit, dev
 
 **Open problems:** On Talos, driver/toolkit must be disabled (immutable OS extensions own them): https://docs.siderolabs.com/kubernetes-guides/advanced-guides/dynamic-resource-allocation; CDI default-on since 25.10.0 per release notes; Talos toolkit-extension CDI behaviour not verified
 
-**Watched:** github-releases `NVIDIA/gpu-operator` at v26.7.2
+**Watched:** github-releases `NVIDIA/gpu-operator` at v26.7.3
 
 ## Open Inference Protocol (KServe V2 inference protocol) { #kserve-open-inference-protocol }
 
