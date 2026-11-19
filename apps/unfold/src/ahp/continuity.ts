@@ -6,6 +6,10 @@ type Json = Record<string, any>;
 export const sequenceReservation = 1000;
 /** How long an ended session nobody subscribes to keeps its projection and summary in memory: ten minutes. */
 export const idleSessionMs = 600_000;
+/** How long a provisional session nobody sent a message in and no connected client subscribes to stays after its last use: 24 hours. */
+export const provisionalSessionMs = 86_400_000;
+/** How many provisional sessions one person keeps; the next one removes their oldest unused one nobody subscribes to. */
+export const maxProvisionalSessions = 20;
 
 const sequenceKey = 'ahp-server-seq';
 const clientsKey = 'ahp-known-clients';
