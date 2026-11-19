@@ -319,6 +319,7 @@ test('the chart follows every image, the extension verifies before Open VSX and 
   const marketplace = at(step => /vsce publish/.test(step.run ?? ''));
   assert.ok(stamp >= 0 && stamp < name && name < pack && pack < verify && verify < attach && attach < openVsx && openVsx < marketplace);
   assert.match(extension.steps[marketplace].run, /npx --no-install vsce publish --packagePath "\$vsix" --skip-duplicate --oidc/);
+  assert.ok(extension.steps[marketplace].run.indexOf('python3 scripts/marketplace_version.py --paused') < extension.steps[marketplace].run.indexOf('vsce publish'), 'a paused Marketplace is skipped before vsce runs');
   assert.match(extension.steps[pack].run, /package_or_reuse "unfold-marketplace-\$\{MARKETPLACE_VERSION\}\.vsix" "\$MARKETPLACE_VERSION"/);
   assert.doesNotMatch(JSON.stringify(extension), /VSCE_PAT|AZURE_|azure-credential/, 'the Marketplace publishes with Trusted Publishing, never a stored credential');
   assert.match(extension.steps[openVsx].run, /npx --no-install ovsx publish --packagePath "unfold-\$\{VERSION\}\.vsix" --skip-duplicate --trusted-publishing/);

@@ -13,7 +13,7 @@ The [product designs](https://github.com/unfold-hq/unfold/blob/development/apps/
 
 Download the VSIX and its matching `.sha256` file from a completed [GitHub release](https://github.com/unfold-hq/unfold/releases). In the download directory, run `shasum -a 256 -c` with that checksum filename and confirm the VSIX reports **OK**. Then choose **Extensions → … → Install from VSIX** and select that file. Use the filenames attached to your chosen release; a release page without the assets is not ready for this installation path.
 
-In VS Code, install `unfold-hq.unfold` from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=unfold-hq.unfold); in VSCodium, Cursor and other forks, from [Open VSX](https://open-vsx.org/extension/unfold-hq/unfold). Release candidates reach the Marketplace as pre-releases: choose **Switch to Pre-Release Version** on the extension's page to receive them, and VS Code shows them under a derived version such as `0.4.10152` for `0.4.0-rc.152`. The [release guide](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/operations/release.md#extension-distribution) explains the version rule.
+Install `unfold-hq.unfold` from [Open VSX](https://open-vsx.org/extension/unfold-hq/unfold) in VSCodium, Cursor and other forks that use it. The extension is not on the Visual Studio Marketplace yet; in VS Code, install the VSIX as described above. The [release guide](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/operations/release.md#extension-distribution) explains the state of each registry.
 
 A sideloaded VSIX does not receive registry updates automatically. An editor window needs VS Code 1.99 or later, and the extension runs in the Agents window from VS Code 1.143. The extension runs in the editor's Node extension host and does not require provider keys, a harness or Kubernetes tools on the client machine. A local workbench has its own runtime requirements.
 
@@ -197,6 +197,12 @@ Select a task to open its task view. The description is rendered from the tracke
 **Hand to Ploeg** is offered on boards that Ploeg owns. Choose a team and confirm: the workbench assigns that team's tracker user and comments that you handed it over, which is how Ploeg receives work. Ploeg queues it, works on a branch and opens a pull request for review. **Take back** removes the assignment while the item is still queued; work that has started is cancelled from the browser's Work Item page. Viewers can read the task view but cannot hand work over. Older workbench servers show the task without Ploeg status.
 
 **Start a supervised session** prepares operator-led work instead: choose the team and authorization, then confirm the workbench and task revision. A stale revision requires a fresh preview. Repeating the same import reopens its existing session; it does not create another paid attempt. Import prepares queued work; Start begins execution. Standalone import requires an interactive source and repository. In shared mode, registered Vikunja and ClickUp targets can bind to the existing Ploeg Work Item, which is claimed on Start. Import itself does not mutate the tracker. Source text cannot select another repository or change execution authority.
+
+## See which Work Item changed a file
+
+On VS Code 1.145 or later, open the Timeline of a file in a Git repository and keep the **Unfold** source on. It lists the Work Items whose merged pull request changed the file, with the title, merge date and pull request number. Choose one to open the Work Item; the pull request icon beside it opens the pull request.
+
+For each file the extension runs one `git log --first-parent -- <file>` in its repository and matches those commits to the merge and head SHAs of the pull requests on your done Work Items for the same repository. That list is read once per repository through your own sign-in, from the newest closed Work Items of up to six of your Teams, and kept for ten minutes; **Refresh** in the Timeline reads it again. A pull request merged by rebase shows only on the file its last commit changed, and older Work Items beyond those pages are not listed. Signed out, in an untrusted workspace or in the demo, the source lists nothing. Older editors get no Unfold source.
 
 ## Bring back evidence
 

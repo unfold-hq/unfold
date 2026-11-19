@@ -14,7 +14,7 @@ if (!/^https?:\/\/[^\s/?#@]+(?:\/[^\s?#]*)?$/.test(url)) {
 }
 
 if (process.argv[2] === 'login') await login();
-else if (process.argv[2] === undefined) await serveStdio(createMcpServer({ url, token, version, prompts: true, stateFile: join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'unfold-mcp', 'digest.json') }), process.stdin, process.stdout);
+else if (process.argv[2] === undefined) await serveStdio(createMcpServer({ url, token, version, prompts: true, contextResources: true, stateFile: join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'unfold-mcp', 'digest.json') }), process.stdin, process.stdout);
 else {
   process.stderr.write('usage: unfold-mcp [login]\n');
   process.exit(2);
