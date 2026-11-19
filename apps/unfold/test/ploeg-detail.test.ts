@@ -80,3 +80,16 @@ test('a Run reads the limits Ploeg reports defensively: an offset start time pas
   delete running.limits;
   assert.equal('limits' in read(), false);
 });
+
+test('a Run reads the cache-read tokens and models Ploeg reports in its usage, and leaves out what it does not report', () => {
+  const sample = structuredClone((ploegDemo.details as any)['104']) as any;
+  const costed = sample.runs[0];
+  costed.costStatus = 'observed';
+  const read = () => detail({ schemaVersion: '1.0', ...sample }).runs.find(run => run.id === costed.id)!.usage;
+  costed.usage = { inputTokens: 10, outputTokens: 5, costUsd: 0.1, cacheReadInputTokens: 40, cacheCreationInputTokens: 3, modelUsage: { 'claude-sonnet-4-5': { inputTokens: 10 } } };
+  assert.deepEqual(read(), { inputTokens: 10, outputTokens: 5, costUsd: 0.1, cacheReadInputTokens: 40, models: ['claude-sonnet-4-5'] });
+  costed.usage = { inputTokens: 10, outputTokens: 5, costUsd: 0.1 };
+  assert.deepEqual(read(), { inputTokens: 10, outputTokens: 5, costUsd: 0.1 }, 'nothing is added that Ploeg did not send');
+  costed.usage = { inputTokens: 10, outputTokens: 5, costUsd: 0.1, cacheReadInputTokens: -1, modelUsage: [] };
+  assert.deepEqual(read(), { inputTokens: 10, outputTokens: 5, costUsd: 0.1 }, 'an unusable cache count or model map is dropped, not read as zero');
+});

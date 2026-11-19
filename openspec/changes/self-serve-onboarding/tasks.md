@@ -47,6 +47,8 @@ output pasted in the pull request.
 - [x] 4.4 "Second forge" state until the pinned Ploeg bundle is the release with ADR-0192, or Ploeg reports active forges (ask 5)
 - [x] 4.5 Redaction test: no code, key or token in any response, log, record, event or row. Built against Ploeg ADR-0195 and ADR-0193 with a fake Ploeg; Ploeg owns the connection ([ADR-0060](../../../docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)), so the Integration Account is keyed with the Ploeg connection id and the installation id is not stored
 - [ ] 4.6 Move the Ploeg pin to the release with the connection contract and ADR-0193 (`ploeg`-scoped commit)
+- [x] 4.7 Connect GitLab next to Connect GitHub: a pasted service-account token relayed to Ploeg's `token` flow once, `method_not_allowed` shown per method, the shared project picker and registration with `capability_missing` shown with what it waits for, and the same redaction test
+- [ ] 4.8 Turn on the temporary-Owner-token path (`gitlab_service_account`) by recording its release on the `connect-gitlab-service-account` step once a Ploeg release serves it, and `gitlab.mint` once Ploeg mints a Run's GitLab credential
 
 ## 5. S5 Connect ClickUp and bind Lists
 

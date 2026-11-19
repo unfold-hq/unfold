@@ -6,6 +6,7 @@ import { trackerDisplay } from './tracker-display.ts';
 import { Onboarding, pinnedRelease, ploegSteps } from './onboarding.ts';
 import { GithubConnections, invalidStatePage, manifestPage } from './forge-connections.ts';
 import { ClickUpOnboarding } from './clickup-onboarding.ts';
+import { GitlabConnections } from './gitlab-connections.ts';
 import { ClaudeRoutines } from './claude-routines.ts';
 import { clickUpRoute, isClickUpRoute } from './clickup-onboarding-http.ts';
 import { HttpPloegConnectionApi } from './ploeg-connection-api.ts';
@@ -377,8 +378,13 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
     baseUrl: config.baseUrl, pinned: pinnedRelease(), plan: ploegSteps,
   });
+  const gitlab = new GitlabConnections({
+    db: store.db, store, ploeg, steps: onboarding, repositories: trackerConnections.repositories, stored: storedRepositories,
+    audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
+    gitlabUrl: config.links?.gitlab?.baseUrl ?? 'https://gitlab.com', pinned: pinnedRelease(), plan: ploegSteps,
+  });
   const claudeRoutines = new ClaudeRoutines({ ploeg, steps: onboarding, store });
-  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...github.lines(manage, context), 'connect-claude': claudeRoutines.line(context.user) }));
+  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...gitlab.lines(github.lines(manage, context), manage), 'connect-claude': claudeRoutines.line(context.user) }));
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
@@ -817,6 +823,30 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         if (path === '/api/onboarding/github/targets') {
           if (method !== 'POST') fault(405, 'method', 'Check or register a repository with POST.');
           const outcome = await github.register(user, await body(req));
+          if (outcome.repository) { await storedRepositories(); trackerConnections.sync(); }
+          return json(res, outcome.repository ? 201 : 200, sanitize(outcome));
+        }
+        if (path === '/api/onboarding/gitlab') {
+          if (method === 'GET') return json(res, 200, sanitize(await gitlab.overview(user)));
+          fault(405, 'method', 'Read the Connect GitLab state with GET.');
+        }
+        if (path === '/api/onboarding/gitlab/connections') {
+          if (method === 'POST') return json(res, 201, sanitize(await gitlab.connect(user, await body(req))));
+          fault(405, 'method', 'Connect GitLab with POST.');
+        }
+        const gitlabConnection = path.match(/^\/api\/onboarding\/gitlab\/connections\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/);
+        if (gitlabConnection) {
+          if (method === 'DELETE') return json(res, 200, sanitize(await gitlab.remove(user, gitlabConnection[1])));
+          fault(405, 'method', 'Remove a GitLab connection with DELETE.');
+        }
+        const gitlabGranted = path.match(/^\/api\/onboarding\/gitlab\/connections\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\/repositories$/);
+        if (gitlabGranted) {
+          if (method === 'GET') return json(res, 200, sanitize(await gitlab.granted(user, gitlabGranted[1])));
+          fault(405, 'method', 'List the projects a GitLab connection reaches with GET.');
+        }
+        if (path === '/api/onboarding/gitlab/targets') {
+          if (method !== 'POST') fault(405, 'method', 'Check or register a GitLab project with POST.');
+          const outcome = await gitlab.register(user, await body(req));
           if (outcome.repository) { await storedRepositories(); trackerConnections.sync(); }
           return json(res, outcome.repository ? 201 : 200, sanitize(outcome));
         }
@@ -1510,7 +1540,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         }
         return fault(404, 'not_found', 'The API has no such address. The API reference at /api/openapi.yaml lists the addresses it has.');
       }
-      const assets: Record<string, string> = { '/': 'index.html', '/app.js': 'app.js', '/shell.js': 'shell.js', '/now.js': 'now.js', '/handoff.js': 'handoff.js', '/start.js': 'start.js', '/ploeg.js': 'ploeg.js', '/ploeg-activity.js': 'ploeg-activity.js', '/run-transcript.js': 'run-transcript.js', '/run-log-view.js': 'run-log-view.js', '/console-view.js': 'console-view.js', '/blackboard-view.js': 'blackboard-view.js', '/delivery.js': 'delivery.js', '/agents-window.js': 'agents-window.js', '/connections.js': 'connections.js', '/teams.js': 'teams.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/favicon-16x16.png': 'favicon-16x16.png', '/favicon-32x32.png': 'favicon-32x32.png', '/apple-touch-icon.png': 'apple-touch-icon.png', '/android-chrome-192x192.png': 'android-chrome-192x192.png', '/android-chrome-512x512.png': 'android-chrome-512x512.png', '/site.webmanifest': 'site.webmanifest', '/og-image.png': 'og-image.png', '/fonts/archivo-latin-wght-wdth110.woff2': 'fonts/archivo-latin-wght-wdth110.woff2', '/fonts/archivo-latin-ext-wght-wdth110.woff2': 'fonts/archivo-latin-ext-wght-wdth110.woff2', '/fonts/OFL.txt': 'fonts/OFL.txt', '/action-log.js': 'action-log.js', '/sw.js': 'sw.js' };
+      const assets: Record<string, string> = { '/': 'index.html', '/app.js': 'app.js', '/shell.js': 'shell.js', '/now.js': 'now.js', '/handoff.js': 'handoff.js', '/start.js': 'start.js', '/ploeg.js': 'ploeg.js', '/ploeg-activity.js': 'ploeg-activity.js', '/run-transcript.js': 'run-transcript.js', '/run-log-view.js': 'run-log-view.js', '/console-view.js': 'console-view.js', '/blackboard-view.js': 'blackboard-view.js', '/delivery.js': 'delivery.js', '/agents-window.js': 'agents-window.js', '/connections.js': 'connections.js', '/teams.js': 'teams.js', '/styles.css': 'styles.css', '/favicon.svg': 'favicon.svg', '/favicon.ico': 'favicon.ico', '/favicon-16x16.png': 'favicon-16x16.png', '/favicon-32x32.png': 'favicon-32x32.png', '/favicon-dark-32x32.png': 'favicon-dark-32x32.png','/apple-touch-icon.png': 'apple-touch-icon.png', '/android-chrome-192x192.png': 'android-chrome-192x192.png', '/android-chrome-512x512.png': 'android-chrome-512x512.png', '/site.webmanifest': 'site.webmanifest', '/og-image.png': 'og-image.png', '/fonts/archivo-latin-wght-wdth110.woff2': 'fonts/archivo-latin-wght-wdth110.woff2', '/fonts/archivo-latin-ext-wght-wdth110.woff2': 'fonts/archivo-latin-ext-wght-wdth110.woff2', '/fonts/OFL.txt': 'fonts/OFL.txt', '/action-log.js': 'action-log.js', '/sw.js': 'sw.js' };
       const file = assets[path] ?? (browserModule.test(path) ? path.slice(1) : undefined);
       if (method !== 'GET' || !file) return fault(404, 'not_found', 'Unfold has no page at this address. Open Unfold from its start page.');
       await staticFiles.serve(req, res, file, Boolean(assets[path]));

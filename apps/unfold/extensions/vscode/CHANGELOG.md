@@ -81,6 +81,7 @@
 - A single failed refresh no longer empties every view: the last state stays visible with a reconnecting notice, and the views go offline only after three consecutive failures or an expired sign-in. Reads retry once after an unreachable workbench or a gateway 502/503/504, and a gateway error page is reported as such instead of blaming the server URL.
 - The session panel re-renders when a fresh snapshot arrives after a disconnect, so its controls re-enable even when the session itself did not change.
 - Markdown task lists render as checkboxes, and HTTPS links in rendered Markdown open through the extension host.
+- From VS Code 1.144 the extension brings the `operate-agent-session` skill, chat instructions for Unfold and the Unfold Agent Plugin through `chatSkills`, `chatInstructions` and `chatPlugins`, active only while `unfold.connected` holds. The build copies the skill and the plugin into `media/agent/`, and `extension:verify` fails when the VSIX lacks them. With the plugin also installed from a marketplace, VS Code 1.147 lists and enables both copies; the README says how to keep one.
 
 ## 0.3.0
 

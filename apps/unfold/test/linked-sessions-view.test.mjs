@@ -40,6 +40,9 @@ test('a session page calls the cost an API-price estimate, offers resume only to
   assert.match(dropped, /Recorded estimate[\s\S]*7,25[\s\S]*read 2026-10-17/);
   assert.equal(attributionLine({ commits: [] }), 'No commits yet');
   assert.doesNotMatch(linkedSessionPage({ ...session, harness: 'acp', resume: '', mine: true }, { now }), /Resume it on your machine/, 'a session without a resume command offers none');
+  const copilotPage = linkedSessionPage({ ...session, harness: 'vscode-copilot', resume: '', mine: true }, { now });
+  assert.match(copilotPage, /VS Code Copilot/);
+  assert.doesNotMatch(copilotPage, /vscode-copilot|Resume it on your machine/);
   assert.match(linkedStatusLine({ ...session, state: 'stale' }, now), /^Not heard from · last heard/);
 });
 
