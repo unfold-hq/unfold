@@ -3,6 +3,7 @@ import sys
 
 
 CANDIDATE_SLOTS = 10000
+PAUSED = 'the extension name unfold is taken on the Visual Studio Marketplace by another publisher, and Marketplace names are unique across publishers (ADR 0075)'
 RELEASE = re.compile(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)')
 CANDIDATE = re.compile(RELEASE.pattern + r'-rc\.([1-9][0-9]*)')
 
@@ -20,4 +21,4 @@ def marketplace_version(version):
 
 
 if __name__ == '__main__':
-    print(marketplace_version(sys.argv[1]))
+    print(PAUSED if sys.argv[1] == '--paused' else marketplace_version(sys.argv[1]))
