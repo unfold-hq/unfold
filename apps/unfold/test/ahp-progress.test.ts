@@ -6,7 +6,7 @@ import { application, request } from './api-support.ts';
 import { action, connect, defaultChatOf, reduceChat, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
 import { activity, choiceEvents, closedToMessages } from '../src/ahp/host.ts';
-import { PreparationProgress, preparationSteps } from '../src/ahp/preparation-progress.ts';
+import { PreparationProgress, preparationTitle } from '../src/ahp/preparation-progress.ts';
 import type { Event, Session } from '../src/types.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/session-059675b9.json', import.meta.url), 'utf8'));
@@ -291,7 +291,7 @@ async function preparing(t: { after: (fn: () => unknown) => void }, progressToke
   return { server, creator, sibling, admin, channel, chat, send };
 }
 
-test('a new session created with a progress token shows native progress from its first message, names each step and ends when a Run starts; the chat notices stay and no other window gets a frame', { timeout: testTimeout(60_000) }, async t => {
+test('a new session created with a progress token shows native progress under one title from its first message, sends no second message on workspace.ready and ends when a Run starts; the chat notices stay and no other window gets a frame', { timeout: testTimeout(60_000) }, async t => {
   const progressToken = randomUUID();
   const { creator, sibling, admin, chat, send } = await preparing(t, progressToken);
   assert.deepEqual(progressFrames(creator), [], 'nothing before the first message');
@@ -299,8 +299,7 @@ test('a new session created with a progress token shows native progress from its
   await creator.until(message => message.method === 'root/progress' && message.params.total !== undefined);
   await creator.until(workspaceReady(chat));
   assert.deepEqual(progressFrames(creator), [
-    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationSteps.workspace },
-    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationSteps.team },
+    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationTitle },
     { channel: 'ahp-root://', progressToken, progress: 0, total: 0 },
   ]);
   await sibling.until(workspaceReady(chat));
@@ -326,7 +325,7 @@ test('a preparation that fails ends the progress and reports the failure in the 
   const failed = await creator.until(message => action(message, channel, 'session/creationFailed'));
   assert.deepEqual(failed.params.action.error, { errorType: 'workspace_unavailable', message: 'No workspace backend is available.' });
   assert.deepEqual(progressFrames(creator), [
-    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationSteps.workspace },
+    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationTitle },
     { channel: 'ahp-root://', progressToken, progress: 0, total: 0 },
   ]);
 });
@@ -343,10 +342,11 @@ test('preparation progress ends once on a failed session, drops a removed provis
   progress.observe('session-x', 'run.started');
   assert.deepEqual(sent, [], 'a forgotten token, a token that is not a string and an unknown session send nothing');
   progress.begin('public-a', 'session-a');
+  progress.observe('session-a', 'workspace.ready');
   progress.observe('session-a', 'session.failed');
   progress.observe('session-a', 'run.started');
   assert.deepEqual(sent, [
-    { client: 'window-a', channel: 'ahp-root://', progressToken: 'token-a', progress: 0, message: preparationSteps.workspace },
+    { client: 'window-a', channel: 'ahp-root://', progressToken: 'token-a', progress: 0, message: preparationTitle },
     { client: 'window-a', channel: 'ahp-root://', progressToken: 'token-a', progress: 0, total: 0 },
   ], 'nothing references the token after its last frame');
   assert.equal(progress.watching, false);

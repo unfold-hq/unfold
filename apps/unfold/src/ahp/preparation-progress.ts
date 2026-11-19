@@ -1,7 +1,7 @@
 type Json = Record<string, any>;
 
-/** The steps Unfold knows while a new session is prepared. It knows no duration, so every frame before the last stays at zero and carries no total. */
-export const preparationSteps = { workspace: 'Preparing the workspace', team: 'Waiting for a Team' } as const;
+/** The one title for the whole preparation: VS Code 1.147 titles its progress from the first frame and shows no later message. Unfold knows no duration, so the first frame stays at zero and carries no total. */
+export const preparationTitle = 'Starting the session';
 
 const endingEvents = new Set(['run.started', 'session.completed', 'session.failed', 'session.cancelled', 'session.paused', 'session.interrupted', 'execution.authority_lost', 'execution.reconciliation_required', 'execution.reconciliation_pending']);
 
@@ -31,14 +31,13 @@ export class PreparationProgress<C> {
     if (!watch) return;
     this.provisional.delete(publicId);
     this.preparing.set(sessionId, watch);
-    this.frame(watch, { progress: 0, message: preparationSteps.workspace });
+    this.frame(watch, { progress: 0, message: preparationTitle });
   }
 
   observe(sessionId: string, eventType: string): void {
     const watch = this.preparing.get(sessionId);
     if (!watch) return;
-    if (eventType === 'workspace.ready') this.frame(watch, { progress: 0, message: preparationSteps.team });
-    else if (endingEvents.has(eventType)) this.end(sessionId);
+    if (endingEvents.has(eventType)) this.end(sessionId);
   }
 
   end(sessionId: string): void {
