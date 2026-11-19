@@ -352,6 +352,7 @@ export class AgentHost {
       claimTurn: (session, turnId, origin) => { const projection = this.projection(session); const claimed = turnId === undefined ? undefined : this.acceptableTurnId(projection, turnId) ?? randomUUID(); if (claimed) projection.origins.set(`turn:${claimed}`, origin); return claimed; },
       claimAnswer: (session, key, origin) => { const projection = this.projection(session); projection.origins.set(key, origin); return () => projection.origins.delete(key); },
       announceSession: session => this.announceSession(session),
+      annotationsCounted: session => this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.summary(session, viewer); return { channel: rootChannel, session: summary.resource, changes: { annotations: summary.annotations } }; }, session.ownerId),
       sessionPage: session => this.sessionPage(session),
     });
     this.ploegClients = [new PloegClient(config, contract), new PloegClient(config, contract)];
@@ -707,6 +708,7 @@ export class AgentHost {
       ...this.project(repository, session.repositoryId),
       ...(session.candidate?.status === 'ready' ? { changes: { files: session.candidate.fileCount } } : {}),
       ...sessionChatCatalog(view.protocolVersion, this.chatSummary(session, view), session.candidate?.status === 'ready' ? { files: session.candidate.fileCount } : undefined),
+      ...this.review.annotationsSummary(session, this.sessionUri(session, view)),
       _meta: { ...this.review.gitMeta(session), ...unfoldMeta({ status: session.status, placement: session.placement, budgetUsd: session.budgetUsd, spentUsd: session.spentUsd, costStatus: session.costStatus, candidate: session.candidate?.status }) },
     };
   }
@@ -767,7 +769,6 @@ export class AgentHost {
       config: this.review.withConfigValues(session, sessionConfigState(this.config, session)),
       customizations: this.customizationsOf(session, this.publicId(session.id)),
       changesets,
-      ...this.review.annotationsSummary(session, this.sessionUri(session, view)),
       inputNeeded: this.inputNeeded(session, view),
     };
   }

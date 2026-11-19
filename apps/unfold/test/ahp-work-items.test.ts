@@ -320,6 +320,18 @@ test('a viewer lists the open and recently finished Work Items of their teams, o
   await assert.rejects(op.rpc('subscribe', { channel: 'unfold:/wi-210' }), (error: Json) => error.code === -32001, 'an operator-owned Work Item is its Unfold session');
 });
 
+test('a Work Item\'s session takes no review comments, so it names no annotations channel', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const op = await f.attach('op-1');
+  const items = await f.listed(op);
+  const work = workItemsOf(items);
+  assert.ok(work.length > 0);
+  assert.ok(work.every(item => item.annotations === undefined), 'no Work Item names a channel');
+  const listedUnfoldSession = items.find(item => item.title === 'An Unfold session')!;
+  assert.equal(listedUnfoldSession.annotations.annotationCount, 0, 'an Unfold session beside them does');
+  assert.equal((await op.rpc('subscribe', { channel: 'unfold:/wi-205' })).snapshot.state.annotations, undefined, 'nor in its state');
+});
+
 test('a Work Item\'s chat is one turn per Round with each Run a ploeg_run subagent, and no message Ploeg did not record', { timeout: testTimeout(20_000) }, async t => {
   const f = await fixture(t);
   const op = await f.attach('op-1');
