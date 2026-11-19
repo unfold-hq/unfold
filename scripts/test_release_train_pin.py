@@ -79,6 +79,7 @@ class GitHubClient(unittest.TestCase):
     def setUp(self):
         self.requests = []
         self.graphql_answer = (200, {'data': {'enablePullRequestAutoMerge': {'clientMutationId': None}}})
+        self.graphql_answers = []
         state = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -90,7 +91,7 @@ class GitHubClient(unittest.TestCase):
                 body = json.loads(self.rfile.read(length)) if length else None
                 state.requests.append((method, self.path, self.headers.get('Authorization'), body))
                 if self.path == '/graphql':
-                    status, payload = state.graphql_answer
+                    status, payload = state.graphql_answers.pop(0) if state.graphql_answers else state.graphql_answer
                 elif method == 'GET':
                     page = int(self.path.rsplit('page=', 1)[1])
                     payload = [pull(n, f'ploeg/0.2.0-rc.{n}') for n in range(1, 51)] if page == 1 else []
@@ -137,11 +138,18 @@ class GitHubClient(unittest.TestCase):
         self.assertEqual((method, path, body['variables']), ('POST', '/graphql', {'id': 'PR_node9', 'head': 'abc'}))
         self.assertIn('mergeMethod: MERGE', body['query'])
 
-    def test_a_pin_that_is_already_green_merges_at_its_head_instead(self):
-        self.graphql_answer = (200, {'errors': [{'message': 'Pull request Pull request is in clean status'}]})
-        self.assertEqual(self.forge.auto_merge(self.pin), 'merged')
-        self.assertEqual(self.requests[-1][::3], ('PUT', {'merge_method': 'merge', 'sha': 'abc'}))
-        self.assertEqual(self.requests[-1][1], f'/repos/{REPOSITORY}/pulls/9/merge')
+    def test_a_pin_that_is_already_green_joins_the_merge_queue_at_its_head_instead(self):
+        self.graphql_answers = [(200, {'errors': [{'message': 'Pull request Pull request is in clean status'}]}), (200, {'data': {'enqueuePullRequest': {'mergeQueueEntry': {'id': 'MQE_1'}}}})]
+        self.assertEqual(self.forge.auto_merge(self.pin), 'queued')
+        method, path, _, body = self.requests[-1]
+        self.assertEqual((method, path, body['variables']), ('POST', '/graphql', {'id': 'PR_node9', 'head': 'abc'}))
+        self.assertIn('enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head})', body['query'])
+        self.assertNotIn('PUT', [method for method, _, _, _ in self.requests])
+
+    def test_a_refused_enqueue_fails(self):
+        self.graphql_answers = [(200, {'errors': [{'message': 'Pull request Pull request is in clean status'}]}), (200, {'errors': [{'message': 'Merge queue is not enabled'}]})]
+        with self.assertRaisesRegex(release_train_pin.PinMergeError, 'merge queue answered'):
+            self.forge.auto_merge(self.pin)
 
     def test_any_other_refusal_fails(self):
         self.graphql_answer = (200, {'errors': [{'message': 'Auto merge is not allowed for this repository'}]})
