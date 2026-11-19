@@ -74,4 +74,4 @@ Use MADR 4.0 for new system decisions. Application decisions remain in their exi
 | [ADR-0058](adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md) | People sign in through one Zitadel broker on the production cluster, with an organisation per Tenant | accepted | 2026-11-17 |
 | [ADR-0059](adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md) | An organisation connects its forge and tracker from Unfold, and Ploeg learns its repositories and boards at runtime | proposed | 2026-11-18 |
 | [ADR-0060](adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) | Ploeg owns every tracker and forge connection, and Unfold holds none | accepted | 2026-11-18 |
-| [ADR-0061](adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md) | `development` merges through a merge queue, with no bypass | proposed | 2026-11-19 |
+| [ADR-0061](adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md) | `development` merges through a merge queue, with no bypass | accepted | 2026-11-19 |
