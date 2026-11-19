@@ -136,7 +136,7 @@ export class TrackerAutomations {
       title: `${source.name} → ${team.id}`,
       message: { text: `Tasks on ${source.name} assigned to ${assignee} become Work Items for Ploeg team ${team.id}. Ploeg authorizes, budgets and runs each one, and nothing here starts work. ${handoff ? `Hand a task over from Unfold's Tasks page, or assign it to ${assignee} in the tracker.` : `Assign a task to ${assignee} in the tracker.`}`, origin: { kind: 'automation' } },
       session: { provider: 'unfold', ...(folder ? { workingDirectories: [folder] } : {}) },
-      enabled: team.paused !== true,
+      enabled: true,
       triggers: [{ id: 'tracker-assignment', kind: 'event', type: trackerAssignmentTrigger, title: 'Tracker assignment', description: 'Ploeg queues a Work Item when its tracker user is assigned to a task on this board.', events: [{ id: assignmentEvent(source)!, title: `Assigned to ${assignee}` }], config: { source: source.id, team: team.id, assignee } }],
       _meta: unfoldMeta({ kind: 'trackerRoute', source: source.id, team: team.id, assignee, pinned, handoff }),
     };
