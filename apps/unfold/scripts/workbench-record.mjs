@@ -5,9 +5,10 @@ import { chromium } from 'playwright';
 import { replayKey } from '../public/replay/routes.js';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-const usage = 'Usage: UNFOLD_COOKIE="<name>=<value>" npm run workbench:record -- <recording-name> <work-item-id>...';
+const usage = 'Usage: UNFOLD_URL=<unfold-address> UNFOLD_COOKIE="<name>=<value>" npm run workbench:record -- <recording-name> <work-item-id>...';
 const [name, ...ids] = process.argv.slice(2);
-const base = (process.env.UNFOLD_URL ?? 'https://unfold.webgrip.dev').replace(/\/+$/, '');
+const base = (process.env.UNFOLD_URL ?? '').trim().replace(/\/+$/, '');
+if (!base) throw new Error(`UNFOLD_URL is missing. Set it to the address of the Unfold to record, such as http://127.0.0.1:4080 for a local run.\n${usage}`);
 const cookie = process.env.UNFOLD_COOKIE ?? '';
 if (!name || !/^[a-z0-9][a-z0-9-]{0,63}$/.test(name) || name === 'demo' || !ids.length || ids.some(id => !/^[\w-]{1,64}$/.test(id))) throw new Error(usage);
 if (!cookie.includes('=')) throw new Error(`UNFOLD_COOKIE is missing. Copy your Unfold session cookie from the browser's developer tools.\n${usage}`);

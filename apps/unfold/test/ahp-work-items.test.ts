@@ -8,7 +8,7 @@ import { PloegClient, cancelShiftChanged, detail as parseDetail, noteFailures, n
 import { listReason, waitingGroup } from '../public/core/reasons.js';
 import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
-import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemRunChatState, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
+import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, roundDiagram, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemRunChatState, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
 import { messageLimits, unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
@@ -16,7 +16,7 @@ import { runChatChannel } from '../src/ahp/runs.ts';
 import { condenseTraceback } from '../src/ahp/tracebacks.ts';
 import { readOnlyTerminal } from '../src/ahp/terminals.ts';
 import { application, login, request } from './api-support.ts';
-import { action, chatAsSeen, connect, defaultChatOf, vscodeChangesetCatalogue, vscodeChangesets, type Json } from './ahp-support.ts';
+import { action, chatAsSeen, closed, connect, defaultChatOf, vscode1147ChatModel, vscode1147Truncation, vscodeChangesetCatalogue, vscodeChangesets, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
 
 const password = 'work-items-password-161803';
@@ -380,7 +380,9 @@ test('a Work Item\'s chat is one turn per Round with each Run a ploeg_run subage
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'toolCall').map((part: Json) => [part.toolCall.toolName, part.toolCall.displayName, part.toolCall.status, part.toolCall._meta.toolKind]), [[ploegRunToolName, 'Implementer', 'completed', 'subagent'], [ploegRunToolName, 'Reviewer', 'completed', 'subagent']]);
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'markdown').map((part: Json) => part.content), [
     '**Implementer opened the [pull request #42](https://forge.invalid/pulls/42).** Rounded half up in the order totals. Open Implementer above for the full report.',
+    '```mermaid\nflowchart LR\n  r1["Implementer#58; finished #40;pr opened#41;"]\n```',
     '**Reviewer approved.** The change is correct. Open Reviewer above for the full report.',
+    '```mermaid\nflowchart LR\n  r1["Reviewer#58; approved"]\n```',
   ], 'each finished Run gets one line of what Ploeg recorded for it, and no agent message is invented');
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'systemNotification').map((part: Json) => part.content), [noAgentMessages]);
   const reviewer = parts.find((part: Json) => part.kind === 'toolCall' && part.toolCall.displayName === 'Reviewer').toolCall;
@@ -390,6 +392,60 @@ test('a Work Item\'s chat is one turn per Round with each Run a ploeg_run subage
   assert.equal(runChat.interactivity, 'read-only');
   assert.equal(runChat.turns[0].responseParts[0].content, noRunMessages);
   assert.match(runChat.turns[0].responseParts[1].content, /The change is correct\./);
+});
+
+const chatOf = (detail: Json) => {
+  const item = detail.item as PloegItem;
+  const entry = { workItemId: item.id, publicId: workItemSessionId(item.id), item, activity: workItemActivity(item, detail.runs), stale: false };
+  return workItemChatState(entry, detail as never, { session: `unfold:/wi-${item.id}`, chat: `unfold:/wi-${item.id}/chat` }, { session: 0, chat: 0 });
+};
+const mermaidBlocks = (parts: Json[]) => parts.filter((part: Json) => part.kind === 'markdown' && part.content.startsWith('```mermaid'));
+const labelsOf = (diagram: string) => [...diagram.matchAll(/^ {2}\w+\["([^"\n]*)"\]$/gm)].map(match => match[1].replace(/#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))));
+
+test('a finished Round\'s turn ends with one diagram of its Runs in order, after their Run reports and verdict lines', () => {
+  const detail = workItem('220', { state: 'needs_human', closeReason: 'run stuck: reviewer round 1', runs: [{ id: '401', role: 'implementer', round: 1, summary: 'Changed it.' }, { id: '402', role: 'reviewer', round: 1, summary: 'Looks right.' }, { id: '403', role: 'tester', round: 1, outcome: 'stuck' }] });
+  const [, turn] = chatOf(detail).turns;
+  const diagrams = mermaidBlocks(turn.responseParts);
+  assert.equal(diagrams.length, 1, 'one diagram per finished Round');
+  assert.equal(turn.responseParts.at(-1), diagrams[0], 'the diagram ends the turn');
+  assert.equal(diagrams[0].id, 'wi-220-round-1-1-diagram');
+  assert.deepEqual(turn.responseParts.slice(0, -1).map((part: Json) => part.kind), ['systemNotification', 'toolCall', 'markdown', 'toolCall', 'markdown', 'toolCall', 'markdown'], 'every Run report and verdict line stays before it');
+  assert.match(diagrams[0].content, /^```mermaid\nflowchart LR\n[\s\S]*\n {2}r1 --> r2 --> r3\n```$/);
+  assert.deepEqual(labelsOf(diagrams[0].content), ['Implementer: finished (pr opened)', 'Reviewer: approved', 'Tester: stopped (stuck)']);
+});
+
+test('a Round still running shows no diagram, and the Round that ends gets its diagram before it completes', () => {
+  const running = workItem('221', { state: 'leased', runs: [{ id: '411', role: 'implementer', round: 1, summary: 'Changed it.' }, { id: '412', role: 'reviewer', round: 1, state: 'running' }] });
+  const chat = chatOf(running);
+  assert.ok(chat.activeTurn, 'the Round is open');
+  assert.deepEqual(mermaidBlocks(chat.activeTurn.responseParts), [], 'a running Round shows no diagram');
+  const finished = workItem('221', { state: 'awaiting_review', pullRequest: 9, runs: [{ id: '411', role: 'implementer', round: 1, summary: 'Changed it.' }, { id: '412', role: 'reviewer', round: 1, summary: 'Fine.' }] });
+  const actions = workItemTranscriptActions(running as never, finished as never, { session: 'unfold:/wi-221', chat: 'unfold:/wi-221/chat' }).filter(({ to }) => to === 'chat').map(({ action }) => action);
+  const diagram = actions.findIndex(action => action.type === 'chat/responsePart' && action.part.id === 'wi-221-round-1-1-diagram');
+  assert.ok(diagram >= 0, 'the Round that ends gets its diagram');
+  assert.ok(diagram > actions.findIndex(action => action.type === 'chat/toolCallComplete'), 'after the Run that finished it');
+  assert.equal(actions[diagram + 1].type, 'chat/turnComplete', 'right before the turn completes');
+});
+
+test('a Role name or outcome with Mermaid syntax in it shows as text and cannot break out of the diagram', () => {
+  const hostile = ['re"viewer] x["owned"]', 'a[b]{c}(d)<e>`f`|g|;h', 'x\n  click r1 "https://evil.invalid" blank\n%%{init: {"securityLevel": "loose"}}%%\n```'];
+  const detail = workItem('222', { state: 'needs_human', closeReason: 'run stuck', runs: hostile.map((role, index) => ({ id: String(421 + index), role, round: 1, outcome: index === 2 ? 'stuck"] --> y["x' : undefined })) });
+  const [diagram] = mermaidBlocks(chatOf(detail).turns[1].responseParts);
+  const lines = diagram.content.split('\n');
+  assert.deepEqual([...lines.slice(0, 2), ...lines.slice(-2)], ['```mermaid', 'flowchart LR', '  r1 --> r2 --> r3', '```'], 'the diagram keeps its own frame and edges');
+  assert.equal(lines.length, 7, 'one line per node, whatever the labels hold');
+  assert.ok(lines.slice(2, 5).every((line: string) => /^ {2}r\d\["[\p{L}\p{N} #;]*"\]$/u.test(line)), 'each label is one quoted string of letters, digits, spaces and entity codes');
+  assert.doesNotMatch(diagram.content, /^\s*click\b|%%|https:|-->\s*y\[|"\]\s*-->/m, 'no directive, link, init block or extra edge reaches the diagram source');
+  assert.equal(diagram.content.match(/```/g)?.length, 2, 'the code fence cannot be closed from a label');
+  assert.deepEqual(labelsOf(diagram.content), ['Re"viewer] x["owned"]: finished (pr opened)', 'A[b]{c}(d)<e>`f`|g|;h: finished (pr opened)', `X\n  click r1 "https://evil.invalid" blank\n%%{init: {"securityLevel": "loose"}}%%\n\`\`\`: finished (stuck"] --> y["x)`], 'each label still reads as the text Ploeg sent');
+});
+
+test('a Round of more than twelve Runs draws the first twelve and a node that counts the rest', () => {
+  const runs = Array.from({ length: 15 }, (_, index) => ({ ...structuredClone(runTemplate), id: String(500 + index), role: `role${index + 1}`, state: 'finished', verdict: '', outcome: 'done', failureReason: null })) as never[];
+  const diagram = roundDiagram(runs);
+  assert.deepEqual(labelsOf(diagram), [...Array.from({ length: 12 }, (_, index) => `Role${index + 1}: finished (done)`), '3 more Runs']);
+  assert.match(diagram, /\n {2}r1 --> r2 --> r3 --> r4 --> r5 --> r6 --> r7 --> r8 --> r9 --> r10 --> r11 --> r12 --> more\n```$/);
+  assert.equal(labelsOf(roundDiagram(runs.slice(0, 12))).length, 12, 'twelve Runs need no "more" node');
 });
 
 test('the fleet poller follows Ploeg\'s events in order from its cursor and tells only the viewers of the Work Item\'s team', { timeout: testTimeout(20_000) }, async t => {
@@ -506,6 +562,58 @@ test('a question to a person keeps its input request id across a reconnect, and 
   assert.equal(summary?.modifiedAt, moved, 'a new waiting question takes Ploeg\'s update time');
 });
 
+test('a message from VS Code 1.147 after its connection slept through a Round is sent, and the chat keeps every Round', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const watching = await f.attach('op-1');
+  await f.listed(watching);
+  const operator = { id: 'op-1', name: 'op-1', role: 'operator' as const };
+  const url = `${f.server.url.replace(/^http/, 'ws')}/?tkn=${f.host.issueToken(operator)}`;
+  const session = 'unfold:/wi-202';
+  const chat = defaultChatOf(session);
+  const clientId = `vscode-1-147-${randomBytes(3).toString('hex')}`;
+  const asleep = connect(url);
+  t.after(() => asleep.close());
+  await asleep.open;
+  await asleep.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['1.2.0'], clientId, clientInfo: { name: 'vscode-agents-window' }, initialSubscriptions: ['ahp-root://'] });
+  await f.listed(asleep);
+  await asleep.rpc('subscribe', { channel: session });
+  const opened = (await asleep.rpc('subscribe', { channel: chat })).snapshot.state;
+  assert.equal(opened.activeTurn?.id, 'wi-202-round-1-1', 'Round 1 runs while the window is open');
+  const known = [...opened.turns.map((turn: Json) => turn.id), opened.activeTurn.id];
+  asleep.close();
+  await closed(asleep.socket);
+
+  const finished = workItem('202', { state: 'needs_human', closeReason: 'run stuck: implementer round 2', spent: 1.5, updated: minutesAgo(0), runs: [{ id: '301', role: 'implementer', round: 1 }, { id: '307', role: 'implementer', round: 2, outcome: 'stuck' }] });
+  f.state.details.set('202', finished);
+  f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'team:delivery', action: 'run.finished', workItemId: '202', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  await settled(watching);
+
+  const awake = connect(url);
+  t.after(() => awake.close());
+  await awake.open;
+  const reconnected = await awake.rpc('reconnect', { channel: 'ahp-root://', clientId, lastSeenServerSeq: 0, subscriptions: ['ahp-root://', session, chat] });
+  const snapshot = reconnected.snapshots.find((entry: Json) => entry.resource === chat).state;
+  const rounds = snapshot.turns.map((turn: Json) => turn.id);
+  assert.equal(snapshot.activeTurn, undefined);
+  assert.equal(rounds.length, known.length + 1, 'the snapshot holds the Round the window slept through');
+  await settled(awake);
+  const seen = vscode1147ChatModel(snapshot, awake.inbox, chat, 0, known);
+  let seq = 0;
+  const send = (body: Json) => { const clientSeq = ++seq; awake.notify('dispatchAction', { channel: chat, clientSeq, action: body }); return awake.until(message => message.method === 'action' && message.params.origin?.clientId === clientId && message.params.origin?.clientSeq === clientSeq); };
+  const truncation = vscode1147Truncation(seen.state, seen.known);
+  if (truncation) { const confirmed = await send(truncation); assert.equal(confirmed.params.rejectionReason, undefined, `Chat history could not be restored: ${confirmed.params.rejectionReason}`); }
+  const sent = await send({ type: 'chat/turnStarted', turnId: 'note-1', message: { text: 'Use the decimal rounding helper in totals.ts.', origin: { kind: 'user' } } });
+  assert.equal(sent.params.rejectionReason, undefined, 'the message is sent');
+  await awake.until(message => action(message, chat, 'chat/inputRequested'));
+  assert.equal(f.state.writes.length, 0, 'it restarts nothing without a confirmation');
+  const kept = (await awake.rpc('subscribe', { channel: chat })).snapshot.state;
+  assert.deepEqual([...kept.turns.map((turn: Json) => turn.id), ...(kept.activeTurn ? [kept.activeTurn.id] : [])].filter((id: string) => id !== 'note-1'), rounds, 'every Round is kept');
+
+  const edited = await send({ type: 'chat/truncated', turnId: rounds[1] });
+  assert.equal(edited.params.rejectionReason, workItemRefusals.history, 'an edit of an earlier message is refused and says the history is kept');
+});
+
 test('Ploeg events page oldest first from an after cursor, scoped to the caller\'s teams',{ timeout: testTimeout(20_000) }, async t => {
   const f = await fixture(t);
   f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'team:research', action: 'run.started', workItemId: '209', team: 'research', detail: {} });
@@ -568,7 +676,7 @@ test('every change to a Work Item session is refused with what to do instead, an
   assert.equal((await answer(3)).params.rejectionReason, workItemCommandText.confirmStop('202'), 'Stop only asks');
   assert.equal((await answer(4)).params.rejectionReason, workItemRefusals.tryAgain);
   assert.equal((await answer(5)).params.rejectionReason, workItemRefusals.readOnly);
-  assert.equal((await answer(6)).params.rejectionReason, workItemRefusals.readOnly);
+  assert.equal((await answer(6)).params.rejectionReason, workItemRefusals.history);
   await assert.rejects(op.rpc('disposeSession', { channel: session }), (error: Json) => error.code === -32009 && error.message === workItemRefusals.dispose);
   await assert.rejects(op.rpc('createSession', { channel: 'unfold:/wi-999', provider: 'unfold' }), (error: Json) => error.code === -32003, 'no Unfold session takes a Work Item id');
 
@@ -1269,7 +1377,7 @@ test('a Work Item\'s chat opens its panel in the VS Code editor window the perso
 
   assert.equal((await register({ protocol: 'vscode', windowId: '3' })).status, 200);
   assert.equal((await register({ protocol: 'vscode', windowId: '7' })).status, 200, 'the window focused last replaces the one before');
-  assert.deepEqual(await lead(), { kind: 'markdown', id: 'wi-205-open-elsewhere', content: `[Open the Work Item in VS Code](vscode://unfold-hq.unfold/work-item?id=205&windowId=7) · ${pullRequest}\n\n` });
+  assert.deepEqual(await lead(), { kind: 'markdown', id: 'wi-205-open-elsewhere', content: `[Open the Work Item in VS Code](vscode://unfold-hq.unfold-workbench/work-item?id=205&windowId=7) · ${pullRequest}\n\n` });
 
   for (const body of [{ protocol: 'javascript', windowId: '7' }, { protocol: 'vscode', windowId: '7&id=1' }, { protocol: 'vscode' }]) {
     const refused = await register(body);
@@ -1280,7 +1388,7 @@ test('a Work Item\'s chat opens its panel in the VS Code editor window the perso
   assert.equal((await register({ protocol: 'vscode', windowId: '9' }, viewer.cookie)).status, 403, 'a viewer has no Agents window to link from');
   const peer = await f.attach('viewer-2');
   const seen = (await peer.rpc('subscribe', { channel: defaultChatOf('unfold:/wi-205') })).snapshot.state;
-  assert.ok(!JSON.stringify(seen).includes('unfold-hq.unfold'), 'another person never gets the owner\'s window');
+  assert.ok(!JSON.stringify(seen).includes('unfold-hq.unfold-workbench'), 'another person never gets the owner\'s window');
 
   const forgotten = await request(f.server.url, '/api/agent-host/editor-window', { method: 'DELETE', cookie: op.cookie });
   assert.deepEqual(forgotten.body, { forgotten: true });

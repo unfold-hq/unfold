@@ -156,6 +156,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0066](../../apps/unfold/docs/adrs/0066-unfold-identifies-its-published-schemas-by-their-address-on-docs-unfoldhq-dev.md) | Unfold identifies its published schemas by their address on docs.unfoldhq.dev | 2026-11-16 | — |
 | Unfold | [0067](../../apps/unfold/docs/adrs/0067-unfold-names-identifiers-that-do-not-resolve-with-tag-uris-on-unfoldhq-dev.md) | Unfold names identifiers that do not resolve with tag URIs on unfoldhq.dev | 2026-11-16 | — |
 | Unfold | [0075](../../apps/unfold/docs/adrs/0075-the-extension-reaches-the-marketplace-through-trusted-publishing-with-release-candidates-as-pre-releases.md) | The extension reaches the Visual Studio Marketplace through Trusted Publishing, with release candidates as pre-releases | 2026-11-19 | — |
+| Unfold | [0076](../../apps/unfold/docs/adrs/0076-the-extension-is-unfold-hq-unfold-workbench-on-every-registry.md) | The extension is `unfold-hq.unfold-workbench` on every registry | 2026-11-19 | — |
 
 ## Proposed
 

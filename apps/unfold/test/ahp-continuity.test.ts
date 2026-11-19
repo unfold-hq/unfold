@@ -153,6 +153,30 @@ test('an ended session nobody subscribes to is evicted after the idle period and
   assert.ok(['systemNotification', 'toolCall', 'markdown'].every(kind => kinds.includes(kind)), 'the worst-case history is rebuilt in full');
 });
 
+test('a chat snapshot longer than 200 turns tells the client there are older turns, one of 200 does not, and asking for them answers an empty page', { timeout: testTimeout(60_000) }, async t => {
+  const server = await application();
+  t.after(() => server.close());
+  const operator = { id: 'demo-operator', name: 'Demo operator', role: 'operator' as const };
+  const withTurns = (count: number) => {
+    const created = server.app.engine.create({ title: `${count} turns`, objective, repositoryId: 'order-service', teamId: 'delivery', runtime: 'demo', budgetUsd: 1 }, operator);
+    server.app.store.saveSession({ ...created, status: 'cancelled', placement: undefined, approval: undefined });
+    for (let index = 1; index < count; index++) server.app.store.appendEvent(created.id, 'message', 'demo-operator', { role: 'operator', text: `Message ${index}`, turnId: `turn-${index}` });
+    return defaultChatOf(`ahp-session:/${created.id}`);
+  };
+  const token = (await request(server.url, '/api/agent-host/tokens', { method: 'POST', body: { label: 'history' } })).body.token;
+  const client = await attach(server, t, token);
+  await client.rpc('initialize', initialize('history'));
+
+  const cut = (await client.rpc('subscribe', { channel: withTurns(201) })).snapshot.state;
+  assert.equal(cut.turns.length, 200);
+  assert.equal(cut.turns[0].id, 'turn-1', 'the first turn, the objective, is the one left out');
+  assert.equal(cut.turnsNextCursor, 'turn-1', 'the client learns there are turns before the first one it holds');
+  const whole = (await client.rpc('subscribe', { channel: withTurns(200) })).snapshot.state;
+  assert.equal(whole.turns.length, 200);
+  assert.equal('turnsNextCursor' in whole, false, 'a whole history names no older turns');
+  assert.deepEqual(await client.rpc('fetchTurns', { channel: withTurns(201), cursor: cut.turnsNextCursor }), {});
+});
+
 test('a peer that stops answering is silent within 90 seconds of its last answer, an answering one is pinged at most every 30 seconds for an hour', () => {
   const beats = new Heartbeats<string>();
   const sent = new Map<string, number[]>([['alive', []], ['dead', []]]);

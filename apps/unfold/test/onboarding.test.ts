@@ -11,7 +11,7 @@ import type { AppConfig, User } from '../src/types.ts';
 import { Store } from '../src/store.ts';
 import { InsightService } from '../src/insight.ts';
 import { PloegClient, PloegError, type PloegConnections, type PloegTeam } from '../src/ploeg.ts';
-import { Onboarding, compareReleases, pinnedRelease, ploegSteps, type ChecklistLine, type StoredEntries } from '../src/onboarding.ts';
+import { Onboarding, compareReleases, pinnedRelease, ploegSteps, secondForgeOpen, type ChecklistLine, type StoredEntries } from '../src/onboarding.ts';
 import { application, configuration, request } from './api-support.ts';
 
 const admin: User = { id: 'admin-1', name: 'Admin', role: 'admin' };
@@ -38,10 +38,10 @@ function fakePloeg(options: { teams?: PloegTeam[]; connections?: PloegConnection
   };
 }
 
-function setup(t: TestContext, store: Store, ploeg: ReturnType<typeof fakePloeg>, config: Partial<AppConfig> = {}, stored?: StoredEntries, steps?: typeof ploegSteps) {
+function setup(t: TestContext, store: Store, ploeg: ReturnType<typeof fakePloeg>, config: Partial<AppConfig> = {}, stored?: StoredEntries, steps?: typeof ploegSteps, pinned?: string) {
   const insight = new InsightService(store, { mode: 'live' } as AppConfig, '9.9.9', clock, { schedule: false });
   t.after(() => insight.stop());
-  return new Onboarding({ store, ploeg, insight, now: clock, config: { repositories: [], taskSources: [], ...config }, ...(stored ? { stored } : {}), ...(steps ? { steps } : {}) });
+  return new Onboarding({ store, ploeg, insight, now: clock, config: { repositories: [], taskSources: [], ...config }, ...(stored ? { stored } : {}), ...(steps ? { steps } : {}), ...(pinned ? { pinned } : {}) });
 }
 
 const events = (store: Store) => store.db.prepare('SELECT * FROM product_event ORDER BY id').all() as Record<string, string>[];
@@ -142,7 +142,9 @@ test('Teams, spend caps and webhooks come from Ploeg’s Teams and connections r
   assert.equal(line(checklist.stages, 'bind-lists').configured, true, 'a configured board shows as configured by the installation');
   assert.match(line(checklist.stages, 'bind-lists').text, /^Configured by the installation/);
   assert.equal(line(checklist.stages, 'budget').status, 'pending', 'the cap is shown, not confirmed for the Admin');
-  assert.match(line(checklist.stages, 'connect-github').text, /pushes to forgejo\. Adding GitHub needs Ploeg with Ploeg ADR-0192, not released yet/, 'an installation on another forge sees the second-forge state');
+  assert.doesNotMatch(line(checklist.stages, 'connect-github').text, /pushes to forgejo/, 'the pinned Ploeg serves several forges, so another forge does not hold GitHub back');
+  const older = await setup(t, await withStore(t), fakePloeg({ teams: [team('bronze', dayCap)], connections }), {}, undefined, undefined, '0.2.0-rc.108').checklist(admin);
+  assert.match(line(older.stages, 'connect-github').text, /pushes to forgejo\. Adding GitHub needs Ploeg 0\.2\.0-rc\.109\./, 'below the release with Ploeg ADR-0192, an installation on another forge sees the second-forge state');
 
   const uncapped = await setup(t, await withStore(t), fakePloeg({ teams: [team('bronze', null)] })).checklist(admin);
   assert.equal(line(uncapped.stages, 'install-spend-cap').status, 'problem');
@@ -230,7 +232,11 @@ test('the pinned Ploeg bundle comes from ploeg-release.json, and the step record
   assert.equal(pinnedRelease(), /:([^@]+)@/.exec(pinned)![1]);
   assert.equal(pinnedRelease(new URL('./no-such-file.json', import.meta.url)), 'unknown');
   assert.equal(ploegSteps.secondForge.record, 'Ploeg ADR-0192');
-  assert('release' in ploegSteps.secondForge);
+  assert.equal(ploegSteps.secondForge.release, '0.2.0-rc.109');
+  assert(secondForgeOpen(ploegSteps, pinnedRelease()), 'the pinned Ploeg serves several forges');
+  assert(!secondForgeOpen(ploegSteps, '0.2.0-rc.108'));
+  assert(secondForgeOpen(ploegSteps, '0.2.0-rc.109'));
+  assert(!secondForgeOpen(ploegSteps, 'unknown'));
   for (const step of ploegSteps.steps) assert(step.read === null || /^[a-z][a-z-]+$/.test(step.read), `${step.id} names an operator read route`);
 });
 

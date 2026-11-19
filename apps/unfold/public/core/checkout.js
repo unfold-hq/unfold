@@ -1,5 +1,5 @@
 /** The VS Code extension that handles `checkoutLink` URIs: publisher `unfold-hq`, name `unfold`. */
-export const extensionId = 'unfold-hq.unfold';
+export const extensionId = 'unfold-hq.unfold-workbench';
 
 const amount = value => typeof value === 'number' && Number.isFinite(value);
 const text = value => typeof value === 'string' ? value.trim() : '';

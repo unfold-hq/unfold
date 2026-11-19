@@ -9,7 +9,7 @@ Unfold v0.4.0-rc.52 and v0.4.0-rc.53 copied Ploeg's card state once, from Ploeg'
 * **Upgrading Ploeg to v0.2.0-rc.12 requires the import to have finished** on Unfold v0.4.0-rc.53 or earlier. Migration 0044 drops Ploeg's card tables, so cracks, frozen rarities, card comment records and play shapes that were never imported are lost.
 * **An installation that has not imported yet** runs steps 1 to 7 below with Unfold v0.4.0-rc.53, then upgrades Unfold, and only then Ploeg.
 * **An installation whose Ploeg never recorded card state** can skip the import and steps 3 and 7.
-* The owner's staging cluster has imported (marker `done`).
+* The staging cluster has imported (marker `done`).
 
 ## Before you start
 

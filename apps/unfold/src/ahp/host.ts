@@ -15,6 +15,7 @@ import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfi
 import { TrackerAutomations, automationsChannel, autonomousAutomationsMeta, isAutomationsChannel } from './automations.ts';
 import { WebSocketConnection, connectionToken, isWebSocketUpgrade, rejectUpgrade, upgradeToWebSocket } from './websocket.ts';
 import { Heartbeats, IdleSessions, RememberedClients, ServerSequence, heartbeatCheckMs, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
+import { PreparationProgress } from './preparation-progress.ts';
 import { AnnouncedCustomizations, customizationRefusal, gatewayToolCall, rootConfigRefusal, sessionCustomizations, type GatewaySubject } from './customizations.ts';
 import { outcomeMarkdown, sessionProgress, stopReason } from '../../public/core/progress.js';
 import { money } from '../../public/core/format.js';
@@ -298,6 +299,7 @@ export class AgentHost {
   private readonly idleSessions = new IdleSessions();
   private readonly sweeper: ReturnType<typeof setInterval>;
   private readonly heartbeats = new Heartbeats<Client>();
+  private readonly preparation = new PreparationProgress<Client>((client, params) => { if (this.clients.has(client) && client.initialized) this.send(client, { jsonrpc: '2.0', method: 'root/progress', params }); });
   private readonly heartbeat: ReturnType<typeof setInterval>;
   private readonly departing = new Map<string, ReturnType<typeof setTimeout>>();
   /** How long an active client whose last connection closed keeps its place, waiting for its reconnect: 30 seconds, as in VS Code's own host. */
@@ -423,6 +425,7 @@ export class AgentHost {
 
   private removePending(pending: PendingSession): void {
     this.pending.delete(pending.id);
+    this.preparation.forget(pending.id);
     this.store.deleteAgentHostViews(pending.id);
     if (this.activeClients.delete(pending.id)) this.persistActiveClients();
     this.notify(rootChannel, 'root/sessionRemoved', viewer => ({ channel: rootChannel, session: sessionChannel(pending.id, viewer.scheme) }), pending.user.id);
@@ -841,7 +844,9 @@ export class AgentHost {
   chatState(session: Session, view: View): Json {
     const projection = this.projection(session);
     const changesets = this.changesets(session);
-    return { ...this.chatSummary(session, view), turns: projection.turns.slice(-maxTurnsInSnapshot), ...(projection.activeTurn ? { activeTurn: projection.activeTurn } : {}), changesets };
+    const turns = projection.turns.slice(-maxTurnsInSnapshot);
+    const cut = projection.turns.length > turns.length;
+    return { ...this.chatSummary(session, view), turns, ...(cut ? { turnsNextCursor: String(turns[0].id) } : {}), ...(projection.activeTurn ? { activeTurn: projection.activeTurn } : {}), changesets };
   }
 
   private candidateKey(session: Session): string | undefined {
@@ -885,12 +890,33 @@ export class AgentHost {
     });
   }
 
-  changesetState(session: Session): Json {
+  changesetState(session: Session, user?: User): Json {
     const key = this.candidateKey(session);
     const view = key ? this.candidates.get(key) : undefined;
     if (key && !view) return { status: 'error', error: { errorType: 'candidate_unreadable', message: 'The captured candidate could not be read from the workbench\'s storage.' }, files: [] };
     const operations = this.operations(session);
-    return { status: session.status === 'exporting' ? 'computing' : 'ready', files: view ? this.candidateFiles(session, view) : this.artifactFiles(session), ...(operations.length ? { operations } : {}) };
+    const files = view ? this.candidateFiles(session, view) : this.artifactFiles(session);
+    const reviewed = user ? this.store.reviewedFiles(user.id, session.id, this.fileDigests(session, view)) : new Set<string>();
+    return { status: session.status === 'exporting' ? 'computing' : 'ready', files: files.map(file => reviewed.has(file.id) ? { ...file, reviewed: true } : file), ...(operations.length ? { operations } : {}) };
+  }
+
+  private fileDigests(session: Session, view = this.candidates.get(this.candidateKey(session) ?? '')): Map<string, string> {
+    if (view) return new Map(view.files.map(file => [file.path, `${file.baseBlob ?? ''}:${file.blob ?? ''}`]));
+    const digests = new Map<string, string>();
+    session.artifacts.filter(artifact => artifact.kind === 'diff').forEach((artifact, artifactIndex) => diffEntries(artifact.content).forEach((entry, index) => {
+      if (typeof entry.before === 'string' || typeof entry.after === 'string') digests.set(`${artifactIndex}-${index}`, createHash('sha256').update(JSON.stringify([entry.file, entry.before ?? null, entry.after ?? null])).digest('hex'));
+    }));
+    return digests;
+  }
+
+  private markReviewed(client: Client, channel: string, session: Session, action: Json, origin: Origin): undefined {
+    if (Array.isArray(action.files) && typeof action.reviewed === 'boolean') {
+      const digests = this.fileDigests(session);
+      const marked = new Map(action.files.filter((id: unknown): id is string => typeof id === 'string' && digests.has(id)).map((id: string) => [id, digests.get(id)!]));
+      this.store.setReviewedFiles(client.user.id, session.id, marked, action.reviewed, new Date().toISOString());
+    }
+    this.echo(client, channel, action, origin, other => other.user.id === client.user.id);
+    return undefined;
   }
 
   /** Whether a delivery policy hands this session's review to the forge, where Ploeg's pull request is reviewed and merged. */
@@ -1111,6 +1137,7 @@ export class AgentHost {
     const actions: Json[] = [...terminal.actions];
     const ensureTurn = () => { if (!projection.activeTurn) actions.push(...this.openTurn(projection, session, session.objective, event.at)); return projection.activeTurn!; };
     actions.push(...stopRuns(projection.runs, event, projection.activeTurn, projection.turns));
+    if (this.preparation.watching) this.preparation.observe(session.id, event.type);
     switch (event.type) {
       case 'session.started': { ensureTurn(); actions.push(...this.addPart(projection, { kind: 'systemNotification', content: data.resumed ? 'Session resumed by the operator.' : 'Session started.' })); break; }
       case 'workspace.ready': { ensureTurn(); actions.push(...this.addPart(projection, { kind: 'systemNotification', content: `Workspace ready (${data.backend}, ${data.isolation}).` })); break; }
@@ -1361,7 +1388,7 @@ export class AgentHost {
         const closedChoice = fingerprintChoice(previous);
         if (closedChoice && closedChoice !== choice?.choiceId) this.broadcast(channel, { type: 'session/inputNeededRemoved', id: closedChoice });
         this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.summary(session, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, changes: summary.changes, ...catalogOf(summary) } }; }, session.ownerId);
-        if (changesets.length) { await this.loadCandidate(session); if (this.closed) return; const changeset = this.changesetState(session); this.broadcast(this.changesetUri(session), { type: 'changeset/contentChanged', files: changeset.files, operations: changeset.operations ?? [] }); }
+        if (changesets.length) { await this.loadCandidate(session); if (this.closed) return; this.broadcast(this.changesetUri(session), viewer => { const changeset = this.changesetState(session, viewer.user); return { type: 'changeset/contentChanged', files: changeset.files, operations: changeset.operations ?? [] }; }); }
       }
       this.announceActiveSessions();
     } finally { this.polling = false; }
@@ -1407,10 +1434,24 @@ export class AgentHost {
     try {
       const result = await this.request(client, message.method, params);
       this.send(client, { jsonrpc: '2.0', id: message.id, result });
+      if (message.method === 'reconnect') this.reloadChatHistories(client, result?.snapshots);
     } catch (error) {
       const rpc = error instanceof RpcError ? error : new RpcError(codes.internal, error instanceof Error && 'status' in error ? publicError(error, true).message : catalogueMessage('internal_error'));
       this.send(client, { jsonrpc: '2.0', id: message.id, error: { code: rpc.code, message: rpc.message, ...(rpc.data !== undefined ? { data: rpc.data } : {}) } });
       if (rpc.code === codes.unsupportedVersion) { this.clients.delete(client); client.connection.close(1000, 'Unsupported protocol version'); }
+    }
+  }
+
+  /**
+   * A reconnect snapshot replaces a chat's turns without the client watching the turns it missed start, and VS Code 1.147
+   * then truncates its history to the last turn it watched before the next message. An empty `chat/turnsLoaded` adds no
+   * turn and is the action on which the client rebuilds its history from the turns it holds.
+   */
+  private reloadChatHistories(client: Client, snapshots: unknown): void {
+    for (const snapshot of Array.isArray(snapshots) ? snapshots as Json[] : []) {
+      if (!Array.isArray(snapshot?.state?.turns)) continue;
+      const action = { type: 'chat/turnsLoaded', turns: [], ...(typeof snapshot.state.turnsNextCursor === 'string' ? { turnsNextCursor: snapshot.state.turnsNextCursor } : {}) };
+      this.send(client, { jsonrpc: '2.0', method: 'action', params: { channel: snapshot.resource, action, serverSeq: ++this.serverSeq } });
     }
   }
 
@@ -1455,7 +1496,7 @@ export class AgentHost {
         : this.openElsewhere(client.user, { kind: 'session', id: session.id }, this.sessionPage(session), 'session', `${session.id}-open-elsewhere`);
       return { resource: channel, state: withLeadingPart(this.chatState(session, client), lead), fromSeq: this.serverSeq };
     }
-    return { resource: channel, state: this.changesetState(session), fromSeq: this.serverSeq };
+    return { resource: channel, state: this.changesetState(session, client.user), fromSeq: this.serverSeq };
   }
 
   private terminalState(client: Client, terminal: { sessionId: string; commandId: string }): Json {
@@ -1655,6 +1696,7 @@ export class AgentHost {
     this.makeRoomForProvisionalSession(client.user);
     const pending: PendingSession = { id: parsed.id, uri: channel, config, user: client.user, createdAt: new Date().toISOString(), usedAt: this.clock() };
     this.pending.set(parsed.id, pending);
+    this.preparation.remember(parsed.id, client, params.progressToken);
     if (activeClient) { this.activeClients.set(parsed.id, new Map([[client.clientId!, activeClient]])); this.persistActiveClients(); }
     client.subscriptions.add(channel);
     queueMicrotask(() => { this.broadcast(channel, { type: 'session/ready' }); if (activeClient) this.broadcast(channel, { type: 'session/activeClientSet', activeClient }); this.notify(rootChannel, 'root/sessionAdded', viewer => ({ channel: rootChannel, summary: this.pendingSummary(pending, viewer) }), client.user.id); });
@@ -1727,6 +1769,7 @@ export class AgentHost {
     const session = this.sessionFor(client.user, channel);
     if (!session) throw new RpcError(codes.sessionNotFound, 'Unfold has no such session, or it is not yours. Reopen it from the Unfold view.');
     if (['running', 'waiting_input', 'queued', 'paused', 'interrupted'].includes(session.status)) void this.engine.cancel(session.id, client.user).catch(() => {});
+    this.preparation.end(session.id);
     const publicId = this.publicId(session.id);
     for (const item of this.clients) for (const subscription of [...item.subscriptions]) if (subscribedSessionId(subscription) === publicId) item.subscriptions.delete(subscription);
     this.evict(session.id);
@@ -1754,6 +1797,7 @@ export class AgentHost {
       if (turnId) this.store.setSecret(`ahp-turn:${session.id}`, turnId);
     });
     this.pending.delete(pending.id);
+    this.preparation.begin(pending.id, session.id);
     this.summaries.set(session.id, this.fingerprint(session));
     this.store.clearAgentHostFlags(pending.id, statusBits.isRead, session.createdAt);
     this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.summary(session, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, ...(summary.project ? { project: summary.project } : {}), ...catalogOf(summary) } }; }, session.ownerId);
@@ -1763,7 +1807,7 @@ export class AgentHost {
     if (turn) this.broadcast(chatChannel(pending.id), { type: 'chat/turnStarted', turnId: turn.id, startedAt: turn.startedAt, message: turn.message }, origin);
     if (unsent.length) this.store.appendEvent(session.id, unsentAttachmentsEvent, pending.user.id, { names: unsent });
     try { await this.engine.start(session.id, pending.user); }
-    catch (error) { this.broadcast(pending.uri, { type: 'session/creationFailed', error: { errorType: (error as Json)?.code ?? 'start_failed', message: (error as Error)?.message ?? 'Could not start the session' } }); }
+    catch (error) { this.preparation.end(session.id); this.broadcast(pending.uri, { type: 'session/creationFailed', error: { errorType: (error as Json)?.code ?? 'start_failed', message: (error as Error)?.message ?? 'Could not start the session' } }); }
     return undefined;
   }
 
@@ -2602,7 +2646,8 @@ export class AgentHost {
       case 'session/titleChanged': return kind === 'changeset' ? 'session/titleChanged is dispatched on the session or chat channel' : this.renameSession(client, channel, session, action, origin);
       case 'session/activeClientSet': case 'session/activeClientRemoved': return kind === 'session' ? this.setActiveClient(client, channel, this.publicId(session.id), action, origin) : `${action.type} is dispatched on the session channel`;
       case 'session/configChanged': return kind === 'session' ? this.changeStartedConfig(client, channel, session, action, origin) : 'session/configChanged is dispatched on the session channel';
-      case 'chat/draftChanged': case 'chat/inputAnswerChanged': case 'changeset/filesReviewChanged': this.echo(client, channel, action, origin); return undefined;
+      case 'chat/draftChanged': case 'chat/inputAnswerChanged': this.echo(client, channel, action, origin); return undefined;
+      case 'changeset/filesReviewChanged': await this.loadCandidate(session); return this.markReviewed(client, channel, session, action, origin);
       default: return customizationRefusal(action.type) ?? `Unsupported action ${String(action.type)}`;
     }
   }

@@ -19,7 +19,7 @@ Unfold releases under `unfold-v0.x.y-rc.N` tags ([ADR-0019](../adr/adr-0019-unfo
 | Unfold application | `ghcr.io/unfold-hq/unfold` | keyless cosign, with a CycloneDX SBOM and the CVE-budget verdict attested to the index, a CycloneDX SBOM attested to each platform image, and BuildKit provenance attached |
 | Unfold workspace image | `ghcr.io/unfold-hq/unfold-agent` | as above |
 | Unfold chart | `oci://ghcr.io/unfold-hq/charts/unfold` | keyless cosign |
-| Editor extension | [Open VSX `unfold-hq.unfold`](https://open-vsx.org/extension/unfold-hq/unfold); [Visual Studio Marketplace `unfold-hq.unfold`](https://marketplace.visualstudio.com/items?itemName=unfold-hq.unfold), a candidate as a pre-release; each VSIX, SHA-256 file and sigstore bundle on the [GitHub release](https://github.com/unfold-hq/unfold/releases) | keyless `cosign sign-blob`, plus a GitHub build-provenance attestation |
+| Editor extension | [Open VSX `unfold-hq.unfold-workbench`](https://open-vsx.org/extension/unfold-hq/unfold-workbench); [Visual Studio Marketplace `unfold-hq.unfold-workbench`](https://marketplace.visualstudio.com/items?itemName=unfold-hq.unfold-workbench), a candidate as a pre-release ([application ADR 0076](../../apps/unfold/docs/adrs/0076-the-extension-is-unfold-hq-unfold-workbench-on-every-registry.md)); each VSIX, SHA-256 file and sigstore bundle on the [GitHub release](https://github.com/unfold-hq/unfold/releases) | keyless `cosign sign-blob`, plus a GitHub build-provenance attestation |
 
 Use the bare application version as the image or chart tag. Prereleases never move `latest`. The chart defaults each image to the digest its job pushed and names `ghcr.io/unfold-hq` as their registry. The separate unattended `agent-runner` image is maintained outside Unfold.
 

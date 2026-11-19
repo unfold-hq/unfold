@@ -5,12 +5,14 @@ import { dirname } from 'node:path';
 import { createInterface } from 'node:readline';
 import { strictBase64url } from './mcp-auth.ts';
 import { appOnlyTool, cardRevision, cardRevisionDefinition, mcpAppResources, mcpAppToolMeta, mcpAppsExtension, readMcpAppResource, supportsMcpApps, withRevision } from './mcp-apps.ts';
+import { mcpSkillsExtension, readSkillResource, skillCatalogue, skillEntry, skillResourceList } from './mcp-skills.ts';
 import { mcpTasksExtension, openTaskId, sealTaskId, supportsTasks, taskCacheMs, taskPollIntervalMs, type HandOffRef, type McpTasks } from './mcp-tasks.ts';
 import { handOffSpend, teamSpendCap } from './hand-off-spend.ts';
 import type { McpEventsHandler } from './mcp-events.ts';
 import type { McpIcon } from './mcp-icons.ts';
 import { catalogueMessage, errorCatalogue } from './error-catalogue.ts';
 import { completion, completionTarget, contextTask, promptList, promptMessages, PromptRefusal, teamChoices, workItemChoices, type McpPromptOptions } from './mcp-prompts.ts';
+import { choiceIds, completesWorkItemId, contextMimeType, contextRead, contextResources, contextTemplates, type ContextRead, type McpResourceOptions } from './mcp-resources.ts';
 import type { Readable, Writable } from 'node:stream';
 
 /** Legacy protocol revisions this server answers `initialize` with; the client's own revision wins when it is listed. */
@@ -39,18 +41,21 @@ export function confirmationLedger(): Confirmations { return { key: randomBytes(
  * action tools read it from Unfold. `mcpApps` says that a 2025 client declared MCP Apps in an `initialize` this server
  * instance did not see, as stateless HTTP remembers it between requests, and `elicitation` says the same of form
  * elicitation, which the action tools and `unfold_ask` confirm with through `connect`. With `tasks`, a 2026-07-28 client that
- * declares the Tasks extension follows a confirmed `unfold_hand_off` as a task. `events` serves MCP Events to a
- * 2026-07-28 client when the person may use them. `icons` go on `serverInfo` and on every tool.
+ * declares the Tasks extension follows a confirmed `unfold_hand_off` as a task, and so does a 2025-11-25 client that
+ * declared core `tasks` in its `initialize` and asks for one; `coreTasks` says that a 2025 client declared core `tasks`
+ * in an `initialize` this server instance did not see. `events` serves MCP Events to a
+ * 2026-07-28 client when the person may use them. `skills` serves the plugin's skills through the MCP Skills extension
+ * (SEP-2640) while the `mcp.skills` flag is on for the person. `icons` go on `serverInfo` and on every tool.
  */
-export type McpOptions = { url: string; apiUrl?: string; token?: string; version?: string; timeoutMs?: number; fetch?: typeof fetch; stateFile?: string; now?: () => Date; principal?: string; role?: string; confirmations?: Confirmations; mcpApps?: boolean; elicitation?: boolean; tasks?: McpTasks; events?: McpEventsHandler; icons?: McpIcon[] };
+export type McpOptions = { url: string; apiUrl?: string; token?: string; version?: string; timeoutMs?: number; fetch?: typeof fetch; stateFile?: string; now?: () => Date; principal?: string; role?: string; confirmations?: Confirmations; mcpApps?: boolean; elicitation?: boolean; tasks?: McpTasks; coreTasks?: boolean; events?: McpEventsHandler; skills?: boolean; icons?: McpIcon[] };
 
 type Reason = { code: string; chip: string; sentence: string; fix: string; requeue: string; action: string; headline?: string | null; variant?: string | null; run?: { id: string; role: string; round: number; text: string } | null };
 type Reasons = { listReason(item: unknown, options?: { demo?: boolean }): Reason | null; detailReason(detail: unknown): Reason | null; routingWarning(item: unknown): { chip: string; sentence: string; fix: string } | null; waitingGroup(item: unknown): 'review' | 'needs' | 'proposed' };
 type Json = Record<string, any>;
-type Call = { modern: boolean; capabilities: Json; client?: string; inputResponses?: Json; requestState?: unknown };
+type Call = { modern: boolean; capabilities: Json; client?: string; inputResponses?: Json; requestState?: unknown; task?: true };
 type Tool = { name: string; title: string; description: string; inputSchema: Json; outputSchema: Json; readOnly?: false; destructive?: true; confirms?: true; run(args: Json, call: Call): Promise<Json | InputRequired | TaskCreated> };
 type WaitingQuestion = { id: string; text: string; typed: boolean; role: string; round: number | null; runId: string };
-type Followed = { task: Json; answers: Map<string, { message: string; perform(text: string, confirmation: string, nonce: string): Promise<Json> }> };
+type Followed = { task: Json; answers: Map<string, { message: string; perform(text: string, confirmation: string, nonce: string): Promise<Json> }>; pickedUp?: { id: string; state: string; demo: boolean } };
 type Planned = { message: string; perform(confirmation: string, nonce: string): Promise<Json> };
 /** Sends one request from the server to the client and resolves with the client's result. */
 export type McpOutbound = (method: string, params: Json) => Promise<Json>;
@@ -92,7 +97,7 @@ const workRow = object({
 }, ['id', 'state', 'team', 'tracker', 'link', 'untrusted']);
 
 /** A stdio MCP server over one Unfold's HTTP API. `handle` answers one JSON-RPC message, and returns undefined for a notification. */
-export function createMcpServer(options: McpOptions & McpPromptOptions) {
+export function createMcpServer(options: McpOptions & McpPromptOptions & McpResourceOptions) {
   const base = options.url.replace(/\/+$/, '');
   const api = (options.apiUrl ?? options.url).replace(/\/+$/, '');
   const fetcher = options.fetch ?? fetch;
@@ -702,7 +707,15 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
   }
 
   async function followsTasks(call: Call): Promise<boolean> {
-    return call.modern && options.tasks !== undefined && supportsTasks(call.capabilities) && await options.tasks.enabled();
+    return call.modern ? supportsTasks(call.capabilities) && await tasksOn() : call.task === true && await coreTasksOn();
+  }
+
+  async function tasksOn(): Promise<boolean> {
+    return options.tasks !== undefined && await options.tasks.enabled();
+  }
+
+  async function coreTasksOn(): Promise<boolean> {
+    return (options.coreTasks === true || declaresCoreTasks(clientCapabilities)) && await tasksOn();
   }
 
   function notPickedUp(ref: HandOffRef): string {
@@ -732,6 +745,7 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
     const item = (detail.item ?? {}) as Json;
     const demo = Boolean(detail.demo || status.demo);
     const state = String(item.state ?? followed.state);
+    const pickedUp = { id, state, demo };
     const updated = item.updatedAt ?? followed.updatedAt;
     const reason = reasons.detailReason(detail);
     const page = link(id);
@@ -747,7 +761,7 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
       const money = demo ? 'This is the illustrative demo: nothing ran and nothing was spent.' : `Spent ${usd(spent)} over ${shifts.length} Shifts.`;
       const summary = `Work Item ${id}, from task ${ref.source}/${ref.task} handed to Team ${ref.team}, ${what} ${money} In Unfold: ${page}`;
       const structured = { summary, done: true, demo, link: page, result: { workItemId: id, state, team: ref.team, pullRequestUrl, spentUsd: demo ? null : spent } };
-      return { task: shape('completed', summary, updated, { result: { content: [{ type: 'text', text: JSON.stringify(structured) }], structuredContent: structured, isError: failed } }), answers };
+      return { task: shape('completed', summary, updated, { result: { content: [{ type: 'text', text: JSON.stringify(structured) }], structuredContent: structured, isError: failed } }), answers, pickedUp };
     }
     const questions = state === 'needs_human' ? board.waitingQuestions(detail).filter(question => /^[A-Za-z0-9_-]{1,64}$/.test(question.id)).slice(0, 16) : [];
     if (questions.length) {
@@ -759,20 +773,55 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
         inputRequests[key] = { method: 'elicitation/create', params: { mode: 'form', message, requestedSchema: answerSchema } };
         answers.set(key, { message, perform: answer.perform });
       }
-      return { task: shape('input_required', `Work Item ${id} waits on ${questions.length === 1 ? 'a question' : `${questions.length} questions`} for you. Answer here, or in Unfold: ${page}`, updated, { inputRequests }), answers };
+      return { task: shape('input_required', `Work Item ${id} waits on ${questions.length === 1 ? 'a question' : `${questions.length} questions`} for you. Answer here, or in Unfold: ${page}`, updated, { inputRequests }), answers, pickedUp };
     }
     const why = reason ? `${reason.sentence} ${reason.action}` : stateWords[state] ?? '';
-    return { task: shape('working', `Work Item ${id} is ${plain(state)}.${why ? ` ${why}` : ''} Follow it in Unfold: ${page}`, updated), answers };
+    return { task: shape('working', `Work Item ${id} is ${plain(state)}.${why ? ` ${why}` : ''} Follow it in Unfold: ${page}`, updated), answers, pickedUp };
+  }
+
+  async function followAsCoreTask(taskId: string, ref: HandOffRef): Promise<{ task: Json; result: Json | null }> {
+    const { task, pickedUp } = await followHandOff(taskId, ref);
+    if (task.status === 'completed') return { task: coreTask(task), result: task.result };
+    if (!pickedUp) return { task: coreTask(task, 'working'), result: null };
+    const page = link(pickedUp.id);
+    const summary = `Ploeg picked task ${ref.source}/${ref.task} up as Work Item ${pickedUp.id} for Team ${ref.team}; it is ${plain(pickedUp.state)}.${pickedUp.demo ? ' This is the illustrative demo: nothing ran and nothing was spent.' : ''} Follow it in Unfold: ${page}`;
+    const structured = { summary, done: true, demo: pickedUp.demo, link: page, result: { workItemId: pickedUp.id, state: pickedUp.state, team: ref.team, pullRequestUrl: '', spentUsd: null } };
+    return { task: coreTask(task, 'completed', summary), result: { content: [{ type: 'text', text: JSON.stringify(structured) }], structuredContent: structured, isError: false } };
+  }
+
+  async function coreTaskMethod(id: unknown, method: string, taskId: string, ref: HandOffRef, call: Call, complete: (value: Json) => Json): Promise<Json> {
+    const tasks = options.tasks!;
+    if (method === 'tasks/cancel') return complete(coreTask({ taskId, createdAt: new Date(ref.handedAt * 1000).toISOString(), lastUpdatedAt: new Date(clock()).toISOString() }, 'cancelled', `Stopped following the hand-off. The hand-off stays: task ${ref.source}/${ref.task} is still with Team ${ref.team}, and Ploeg picks it up as before. Follow it in Unfold: ${base}/#tasks`));
+    const cacheKey = `${principal}\0core\0${taskId}`;
+    const followed = await calling.run(call, async () => {
+      const hit = tasks.cache.get(cacheKey);
+      if (hit && hit.until > clock()) return hit.value as { task: Json; result: Json | null };
+      const value = await followAsCoreTask(taskId, ref);
+      for (const [key, entry] of tasks.cache) if (entry.until <= clock() || tasks.cache.size >= 1000) tasks.cache.delete(key);
+      tasks.cache.set(cacheKey, { until: clock() + taskCacheMs, value });
+      return value;
+    });
+    if (method === 'tasks/get') return complete(followed.task);
+    if (!followed.result) return failure(id, -32602, `Task ${taskId} is still ${followed.task.status}; ask tasks/result once tasks/get says completed.`);
+    return complete({ ...followed.result, _meta: { [relatedTaskKey]: { taskId } } });
   }
 
   async function taskMethod(id: unknown, method: string, params: Json | undefined, call: Call, complete: (value: Json) => Json): Promise<Json> {
     const tasks = options.tasks;
-    if (!call.modern || !tasks || !await tasks.enabled()) return failure(id, -32601, `Method ${method} is not supported.`);
-    if (!supportsTasks(call.capabilities)) return failure(id, -32021, 'Missing required client capability', { requiredCapabilities: { extensions: { [mcpTasksExtension]: {} } } });
+    const answered = call.modern ? ['tasks/get', 'tasks/update', 'tasks/cancel'] : ['tasks/get', 'tasks/result', 'tasks/cancel'];
+    if (!answered.includes(method) || !tasks || !await (call.modern ? tasksOn() : coreTasksOn())) return failure(id, -32601, `Method ${method} is not supported.`);
+    if (call.modern && !supportsTasks(call.capabilities)) return failure(id, -32021, 'Missing required client capability', { requiredCapabilities: { extensions: { [mcpTasksExtension]: {} } } });
     const taskId = String(params?.taskId ?? '');
     const unknown = () => failure(id, -32602, 'Failed to retrieve task: Task not found');
     const ref = openTaskId(tasks.keys(), params?.taskId, principal, source => tasks.tenantOf(source));
     if (!ref) return unknown();
+    if (!call.modern) {
+      try { return await coreTaskMethod(id, method, taskId, ref, call, complete); }
+      catch (error) {
+        if (error instanceof UnfoldAnswer && (error.status === 403 || error.status === 404)) return unknown();
+        return failure(id, -32603, redact((error as Error).message));
+      }
+    }
     if (method === 'tasks/cancel') return complete({});
     const cacheKey = `${principal}\0${taskId}`;
     try {
@@ -816,7 +865,8 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
       initializedClient = clientName(params?.clientInfo);
       const asked = params?.protocolVersion;
       const protocolVersion = (mcpProtocolVersions as readonly string[]).includes(asked) ? asked : mcpProtocolVersions[0];
-      return result(id, { protocolVersion, capabilities: withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), serverInfo, instructions });
+      const coreTasks = await coreTasksOn() ?{ tasks: { cancel: {}, requests: { tools: { call: {} } } } } : {};
+      return result(id, { protocolVersion, capabilities: { ...withSkills(withContext(withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), { listChanged: false }), { listChanged: false }), ...coreTasks }, serverInfo, instructions });
     }
     const meta = params && typeof params === 'object' && params._meta && typeof params._meta === 'object' && !Array.isArray(params._meta) ? params._meta as Json : undefined;
     const declared = meta?.[versionKey];
@@ -833,30 +883,48 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
     const complete = (value: Json) => result(id, call.modern ? { ...value, resultType: 'complete', _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo } } : value);
     const apps = supportsMcpApps(call.capabilities) || (!call.modern && options.mcpApps === true);
     const cacheable = call.modern ? { ttlMs: 3_600_000, cacheScope: 'public' } : {};
+    const personal = call.modern ? { ttlMs: 300_000, cacheScope: 'private' } : {};
     switch (method) {
       case 'server/discover':
         if (!call.modern) return failure(id, -32601, `Method ${method} is not supported.`);
         return (options.tasks ? options.tasks.enabled() : Promise.resolve(false)).then(followable => {
           const extensions = { ...(apps ? { [mcpAppsExtension]: {} } : {}), ...(followable ? { [mcpTasksExtension]: {} } : {}) };
-          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withEvents(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {})), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events ? 'private' : 'public' });
+          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withSkills(withEvents(withContext(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {}), {})), {}), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events || options.skills ? 'private' : 'public' });
         });
       case 'tasks/get':
       case 'tasks/update':
+      case 'tasks/result':
       case 'tasks/cancel':
         return taskMethod(id, method, params, call, complete);
       case 'ping':
         if (call.modern) return failure(id, -32601, 'Method ping is not part of protocol 2026-07-28.');
         return complete({});
-      case 'tools/list': return complete({ tools: tools.filter(tool => apps || !appOnlyTool(tool.name)).map(tool => { const ui = apps ? mcpAppToolMeta(tool.name) : undefined; return { name: tool.name, title: tool.title, ...icons, description: tool.description, inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.readOnly === false ? { title: tool.title, readOnlyHint: false, destructiveHint: tool.destructive === true, idempotentHint: false, openWorldHint: true } : { title: tool.title, readOnlyHint: true, idempotentHint: true, openWorldHint: false }, ...(ui ? { _meta: ui } : {}) }; }), ...cacheable });
+      case 'tools/list': return (call.modern ? Promise.resolve(false) : coreTasksOn()).then(coreTasks => complete({ tools: tools.filter(tool => apps || !appOnlyTool(tool.name)).map(tool => { const ui = apps ? mcpAppToolMeta(tool.name) : undefined; return { name: tool.name, title: tool.title, ...icons, description: tool.description, inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, ...(coreTasks && tool.name === 'unfold_hand_off' ? { execution: { taskSupport: 'optional' } } : {}), annotations: tool.readOnly === false ? { title: tool.title, readOnlyHint: false, destructiveHint: tool.destructive === true, idempotentHint: false, openWorldHint: true } : { title: tool.title, readOnlyHint: true, idempotentHint: true, openWorldHint: false }, ...(ui ? { _meta: ui } : {}) }; }), ...cacheable }));
       case 'tools/call': return apps || !appOnlyTool(params?.name) ? callTool(id, params, call, complete) : failure(id, -32602, `Unknown tool ${String(params?.name)}.`);
       case 'resources/list':
-        if (!apps) return failure(id, -32601, `Method ${method} is not supported.`);
-        return complete({ resources: mcpAppResources(), ...cacheable });
+        if (!apps && !options.contextResources && !options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ resources: [...(options.contextResources ? contextResources() : []), ...(apps ? mcpAppResources() : []), ...(options.skills ? skillResourceList() : [])], ...(options.skills ? personal : cacheable) });
+      case 'resources/templates/list':
+        if (!options.contextResources) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ resourceTemplates: contextTemplates(), ...cacheable });
       case 'resources/read': {
-        if (!apps) return failure(id, -32601, `Method ${method} is not supported.`);
+        const skillFile = options.skills ? readSkillResource(params?.uri) : undefined;
+        if (skillFile) return complete({ contents: skillFile, ...personal });
+        const context = options.contextResources ? contextRead(params?.uri) : undefined;
+        if (context) return readContext(id, params!.uri, context, call, complete);
+        if (!apps) return options.contextResources || options.skills ? resourceNotFound(id, params?.uri, call) : failure(id, -32601, `Method ${method} is not supported.`);
         const contents = readMcpAppResource(params?.uri);
-        if (!contents) return failure(id, call.modern ? -32602 : -32002, 'Resource not found.', { uri: typeof params?.uri === 'string' ? params.uri.slice(0, 200) : null });
+        if (!contents) return resourceNotFound(id, params?.uri, call);
         return complete({ contents, ...cacheable });
+      }
+      case 'skills/list':
+        if (!options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ skills: skillCatalogue.entries, ...personal });
+      case 'skills/get': {
+        if (!options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        const skill = skillEntry(params?.uri);
+        if (!skill) return failure(id, -32602, 'Unfold serves no skill at this URI; skills/list names the skills it serves.', { uri: typeof params?.uri === 'string' ? params.uri.slice(0, 200) : null });
+        return complete({ skill, ...personal });
       }
       case 'prompts/list':
         if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
@@ -866,12 +934,37 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
         try { return complete(promptMessages(params?.name, params?.arguments)); }
         catch (error) { if (error instanceof PromptRefusal) return failure(id, -32602, error.message); throw error; }
       case 'completion/complete':
+        if (options.contextResources && completesWorkItemId(params)) return completeWorkItemId(params, call, complete);
         if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
         return completeArgument(id, params, call, complete);
       default:
         if (call.modern && options.events && method.startsWith('events/')) return options.events.handle(method, params).then(answer => 'error' in answer ? failure(id, answer.error.code, answer.error.message, answer.error.data) : complete(answer.result));
         return failure(id, -32601, `Method ${method} is not supported.`);
     }
+  }
+
+  function withContext(capabilities: Json, listing: Json): Json {
+    return options.contextResources ? { ...capabilities, resources: { ...capabilities.resources, ...listing }, completions: {} } : capabilities;
+  }
+
+  function resourceNotFound(id: unknown, uri: unknown, call: Call): Json {
+    return failure(id, call.modern ? -32602 : -32002, 'Resource not found.', { uri: typeof uri === 'string' ? uri.slice(0, 200) : null });
+  }
+
+  async function readContext(id: unknown, uri: string, context: ContextRead, call: Call, complete: (value: Json) => Json): Promise<Json> {
+    try {
+      const output = await calling.run(call, () => tools.find(tool => tool.name === context.tool)!.run(context.args, call));
+      return complete({ contents: [{ uri, mimeType: contextMimeType, text: JSON.stringify(output) }] });
+    } catch (error) {
+      if (error instanceof UnfoldAnswer && (error.status === 403 || error.status === 404)) return resourceNotFound(id, uri, call);
+      return failure(id, -32603, redact(error instanceof UnfoldAnswer ? error.message : catalogueMessage('internal_error')));
+    }
+  }
+
+  async function completeWorkItemId(params: Json | undefined, call: Call, complete: (value: Json) => Json): Promise<Json> {
+    const typed = typeof params?.argument?.value === 'string' ? params.argument.value.trim().slice(0, 200) : '';
+    try { return complete(completion(choiceIds(await calling.run(call, async () => workItemChoices(await get('/api/ploeg/now'), typed))))); }
+    catch { return complete(completion([])); }
   }
 
   function withPrompts(capabilities: Json, listing: Json): Json {
@@ -896,6 +989,10 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
     }
   }
 
+  function withSkills(capabilities: Json, resources: Json): Json {
+    return options.skills ? { ...capabilities, resources: capabilities.resources ?? resources, extensions: { ...capabilities.extensions, [mcpSkillsExtension]: {} } } : capabilities;
+  }
+
   function withEvents(capabilities: Json): Json {
     return options.events ? { ...capabilities, ...options.events.capabilities, extensions: { ...capabilities.extensions, ...options.events.capabilities.extensions } } : capabilities;
   }
@@ -909,9 +1006,9 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
     if (unknown.length) return complete({ isError: true, content: [{ type: 'text', text: `Unknown argument ${unknown.join(', ')}.` }] });
     if (call.modern && params?.inputResponses !== undefined && (!params.inputResponses || typeof params.inputResponses !== 'object' || Array.isArray(params.inputResponses))) return failure(id, -32602, 'inputResponses must be an object.');
     try {
-      const output = await calling.run(call, () => tool.run(args, call.modern ? { ...call, inputResponses: params?.inputResponses, requestState: params?.requestState } : call));
+      const output = await calling.run(call, () => tool.run(args, call.modern ? { ...call, inputResponses: params?.inputResponses, requestState: params?.requestState } : params?.task && typeof params.task === 'object' && !Array.isArray(params.task) ? { ...call, task: true } : call));
       if (output instanceof InputRequired) return result(id, { resultType: 'input_required', inputRequests: output.inputRequests, requestState: output.requestState, _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo } });
-      if (output instanceof TaskCreated) return result(id, { ...output.task, resultType: 'task', _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo } });
+      if (output instanceof TaskCreated) return result(id, call.modern ? { ...output.task, resultType: 'task', _meta: { 'io.modelcontextprotocol/serverInfo': serverInfo } } : { task: coreTask(output.task) });
       return complete({ structuredContent: output, content: [{ type: 'text', text: JSON.stringify(output) }] });
     } catch (error) {
       const answer = error instanceof UnfoldAnswer ? { code: error.code, message: error.message } : { code: 'internal_error', message: catalogueMessage('internal_error') };
@@ -927,6 +1024,8 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
     declaredMcpApps(): boolean { return supportsMcpApps(clientCapabilities); },
     /** Whether the client's `initialize` declared form elicitation; false before any `initialize`. */
     declaredFormElicitation(): boolean { return formElicitation(clientCapabilities); },
+    /** Whether the client's `initialize` declared core `tasks`; false before any `initialize`. */
+    declaredCoreTasks(): boolean { return declaresCoreTasks(clientCapabilities); },
   };
 }
 
@@ -997,6 +1096,17 @@ const answerSchema = { type: 'object', properties: { answer: { type: 'string', t
 function latest(createdAt: string, updatedAt: unknown): string {
   const time = Date.parse(String(updatedAt ?? ''));
   return Number.isFinite(time) && time > Date.parse(createdAt) ? new Date(time).toISOString() : createdAt;
+}
+
+const relatedTaskKey = 'io.modelcontextprotocol/related-task';
+
+function declaresCoreTasks(capabilities: Json): boolean {
+  const tasks = capabilities?.tasks;
+  return Boolean(tasks) && typeof tasks === 'object' && !Array.isArray(tasks);
+}
+
+function coreTask(task: Json, status: string = task.status, statusMessage: string = task.statusMessage): Json {
+  return { taskId: task.taskId, status, statusMessage, createdAt: task.createdAt, lastUpdatedAt: task.lastUpdatedAt, ttl: null, pollInterval: taskPollIntervalMs };
 }
 
 function result(id: unknown, value: Json): Json { return { jsonrpc: '2.0', id, result: value }; }

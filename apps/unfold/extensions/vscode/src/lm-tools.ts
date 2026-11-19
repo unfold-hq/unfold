@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import type { Core } from './core.js';
 import type { nowGroup, pullRequestNumber } from './now.js';
 import type { PloegDetail, PloegNow, PloegNowItem, PloegOverview, PloegRunRow, RunCard } from './ploeg-types.js';
@@ -415,6 +416,159 @@ export function currentBranch(repositories: { rootUri: { fsPath: string }; state
   const chosen = inside.sort((a, b) => b.rootUri.fsPath.length - a.rootUri.fsPath.length)[0] ?? (repositories.length === 1 ? repositories[0] : undefined);
   return chosen?.state.HEAD?.name || undefined;
 }
+
+/** The tools that change a Work Item, named as `unfold-mcp` names them; each runs only after the person confirms in chat. */
+export const lmActionToolNames = ['unfold_approve_work', 'unfold_reject_work', 'unfold_retry_work', 'unfold_hand_back'] as const;
+export type LmActionToolName = typeof lmActionToolNames[number];
+
+/** The route each action tool posts to, the one the browser posts to. */
+export type WorkItemAction = 'approve' | 'reject' | 'requeue' | 'hand-back';
+
+/** The channel the action tools name in `X-Unfold-Client`, so an Action Record reads `<editor sign-in> (VS Code chat)`. */
+export const actionChannel = 'VS Code chat';
+
+/** The calls an action tool makes, a subset of `UnfoldClient`. */
+export type ToolActor = {
+  readonly origin: string;
+  workItem(id: string, fresh?: boolean): Promise<PloegDetail>;
+  workItemAction(id: string, action: WorkItemAction, body: Record<string, unknown>, via: { client: string; confirmation: string }): Promise<Record<string, unknown>>;
+};
+
+/** What an action tool plans and acts from: the connected workbench (undefined when the server URL setting is invalid), whether this editor is signed in, and a source of one-use ids. */
+export type ActionContext = { core: Core; actor: ToolActor | undefined; configurationError?: Error; signedIn(): Promise<boolean>; nonce?(): string; now?(): number };
+
+/** What the person is asked to agree to, or why there is nothing to agree to. */
+export type ActionPlan = { kind: 'plan'; id: string; title: string; message: string; action: WorkItemAction; body: Record<string, unknown>; done(result: Record<string, unknown>): string } | { kind: 'refusal'; text: string };
+
+const confirmationTtlMs = 600_000;
+
+/**
+ * The confirmations shown in chat and not yet used, one per tool and input. An action runs only when the plan it would
+ * carry out is the one the person was shown, once, within ten minutes; anything else changes nothing.
+ */
+export class OfferedConfirmations {
+  private readonly offered = new Map<string, { message: string; until: number }>();
+  offer(key: string, message: string, at = Date.now()): void {
+    for (const [entry, value] of this.offered) if (value.until <= at) this.offered.delete(entry);
+    this.offered.set(key, { message, until: at + confirmationTtlMs });
+  }
+  take(key: string, message: string, at = Date.now()): 'agreed' | 'changed' | 'missing' {
+    const entry = this.offered.get(key);
+    this.offered.delete(key);
+    if (!entry || entry.until <= at) return 'missing';
+    return entry.message === message ? 'agreed' : 'changed';
+  }
+}
+
+/** The key that ties a confirmation to one tool and one input. */
+export function confirmationKey(name: LmActionToolName, input: unknown): string {
+  const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  return JSON.stringify([name, Object.keys(args).sort().map(key => [key, args[key]])]);
+}
+
+/** What the chat shows while an action tool runs. */
+export function actionInvocationMessage(name: LmActionToolName, input: unknown): string {
+  const id = workItemRef((input && typeof input === 'object' ? input as Record<string, unknown> : {}).id);
+  const what = id ? `Work Item ${id}` : 'a Work Item';
+  if (name === 'unfold_approve_work') return `Approving ${what} in Unfold`;
+  if (name === 'unfold_reject_work') return `Rejecting ${what} in Unfold`;
+  if (name === 'unfold_retry_work') return `Restarting ${what} in Unfold`;
+  return `Handing ${what} back to Ploeg`;
+}
+
+const actionTitles: Record<LmActionToolName, string> = { unfold_approve_work: 'Approve this Work Item?', unfold_reject_work: 'Reject this Work Item?', unfold_retry_work: 'Restart this Work Item?', unfold_hand_back: 'Hand this Work Item back to Ploeg?' };
+const demoAction = 'This is the illustrative demo: nothing real changes and nothing is spent. ';
+const textLimit = 4096;
+
+function boundedText(args: Record<string, unknown>, key: string, label: string, required: boolean): string | { refusal: string } {
+  const value = typeof args[key] === 'string' ? (args[key] as string).trim() : '';
+  if (required && !value) return { refusal: `Pass ${key}: ${label}. Nothing was changed.` };
+  if (value.length > textLimit) return { refusal: `${key} is at most ${textLimit} characters. Nothing was changed.` };
+  return value;
+}
+
+/** Reads the Work Item and says what the action would do, naming the Work Item, the effect and what it may spend, or why it cannot. Never throws, never changes anything. */
+export async function planAction(name: LmActionToolName, input: unknown, context: ActionContext): Promise<ActionPlan> {
+  const refusal = (text: string): ActionPlan => ({ kind: 'refusal', text });
+  const args = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  if (context.configurationError || !context.actor) return refusal(`The Unfold server URL setting is invalid${context.configurationError ? ` (${context.configurationError.message})` : ''}. Run ${connect} to set it, then ask again. Nothing was changed.`);
+  if (!await context.signedIn()) return refusal(`${signedOut} Nothing was changed.`);
+  const id = workItemRef(args.id);
+  if (!id) return refusal('Pass a Work Item id such as 184, or an Unfold link ending #work/184. To find one, use unfold_find_work. Nothing was changed.');
+  const actor = context.actor;
+  let detail: PloegDetail;
+  try { detail = await actor.workItem(id, true); } catch (error) { return refusal(`${failure(error, id, actor.origin)} Nothing was changed.`); }
+  const core = context.core;
+  const item = detail.item;
+  const demo = Boolean(detail.demo);
+  const prefix = demo ? demoAction : '';
+  const named = `Work Item ${id}, ${quote(item.title || `Work Item ${id}`, 120)}`;
+  const state = core.workItemState(item.state).label;
+  const page = workLink(actor.origin, id);
+  const commandId = `vscode-${(context.nonce ?? defaultNonce)()}`;
+  const settled = (verb: string) => (result: Record<string, unknown>) => `${verb}${typeof result.state === 'string' && result.state ? `; it is ${core.workItemState(result.state).label}` : ''}.${result.demo || demo ? ` ${demoLine}` : ''} Unfold ${page}`;
+  if (name === 'unfold_approve_work' || name === 'unfold_reject_work') {
+    if (item.state !== 'proposed') return refusal(`Work Item ${id} is ${state}, not proposed, so there is nothing to ${name === 'unfold_approve_work' ? 'approve' : 'reject'}. Nothing was changed.`);
+    if (name === 'unfold_approve_work') return { kind: 'plan', id, title: actionTitles[name], action: 'approve', body: {}, message: `${prefix}Approve ${named}? Ploeg queues it for Team ${item.team}, and its Runs spend from Team ${item.team}'s budget.`, done: settled(`Approved Work Item ${id}`) };
+    const reason = boundedText(args, 'reason', 'why you reject it; Ploeg records it', true);
+    if (typeof reason !== 'string') return refusal(reason.refusal);
+    return { kind: 'plan', id, title: actionTitles[name], action: 'reject', body: { reason }, message: `${prefix}Reject ${named}? Ploeg withdraws the proposal with your reason; nothing runs and nothing is spent. Reason: ${quote(reason, 300)}`, done: settled(`Rejected Work Item ${id}`) };
+  }
+  const note = boundedText(args, 'note', 'a note for the next Run', false);
+  if (typeof note !== 'string') return refusal(note.refusal);
+  const noted = note ? ` Note: ${quote(note, 300)}` : '';
+  if (name === 'unfold_retry_work') {
+    if (!['needs_human', 'stale'].includes(item.state)) return refusal(`Work Item ${id} is ${state}; Ploeg restarts only one that needs you or went stale. Nothing was changed.`);
+    const budget = item.latestShift?.budgetUsd ?? detail.shifts?.at(-1)?.budgetUsd;
+    const cost = typeof budget === 'number' && !demo ? `, up to ${core.money(budget)} like the last attempt` : '';
+    return { kind: 'plan', id, title: actionTitles[name], action: 'requeue', body: { commandId, expectedState: item.state, ...(note ? { note } : {}) }, message: `${prefix}Restart ${named} from Round 1${note ? ' with your note' : ''}? Ploeg opens a new attempt that spends from Team ${item.team}'s budget${cost}.${noted}`, done: result => settled(`Restarted Work Item ${id} from Round ${typeof result.fromRound === 'number' ? result.fromRound : 1}`)(result) };
+  }
+  const held = (detail as PloegDetail & { takeOver?: { state?: string; branch?: string } | null }).takeOver;
+  if (!held || held.state !== 'taken_over' || item.state !== 'needs_human') return refusal(`Nobody holds Work Item ${id} after a take-over, so there is nothing to hand back. Nothing was changed.`);
+  const offer = core.resumeOffer(detail);
+  const cost = offer && !demo ? `: Round ${offer.fromRound} up to ${core.money(offer.roundCapUsd)}, in total up to ${core.money(offer.poolUsd)}, from Team ${item.team}'s budget` : `, spending from Team ${item.team}'s budget`;
+  return { kind: 'plan', id, title: actionTitles[name], action: 'hand-back', body: { commandId, ...(note ? { note } : {}) }, message: `${prefix}Hand ${named} back to Ploeg? It resumes on ${quote(held.branch || 'the same branch', 200)} from the branch's head on the forge${cost}.${noted}`, done: result => settled(`Handed Work Item ${id} back; Ploeg resumed Round ${typeof result.fromRound === 'number' ? result.fromRound : 1}`)(result) };
+}
+
+/** What `prepareInvocation` returns: the confirmation the person must accept, or none when there is nothing to do, in which case the call only answers why. */
+export async function prepareAction(name: LmActionToolName, input: unknown, context: ActionContext, offered: OfferedConfirmations): Promise<{ invocationMessage: string; confirmationMessages?: { title: string; message: string } }> {
+  const plan = await planAction(name, input, context);
+  const invocationMessage = actionInvocationMessage(name, input);
+  if (plan.kind === 'refusal') return { invocationMessage };
+  offered.offer(confirmationKey(name, input), plan.message, context.now?.());
+  return { invocationMessage, confirmationMessages: { title: plan.title, message: plan.message } };
+}
+
+/**
+ * Carries out an action the person confirmed in chat: it plans again and acts only when the plan is the one they were
+ * shown, sending the agreed text's hash and this channel so the Action Record names both. Answers Unfold's result or
+ * refusal in plain text; never throws.
+ */
+export async function invokeAction(name: LmActionToolName, input: unknown, context: ActionContext, offered: OfferedConfirmations, token?: Cancellation): Promise<string> {
+  const key = confirmationKey(name, input);
+  const plan = await planAction(name, input, context);
+  if (plan.kind === 'refusal') { offered.take(key, '', context.now?.()); return plan.text; }
+  const agreed = offered.take(key, plan.message, context.now?.());
+  if (agreed === 'missing') return `Not done: you were not asked to confirm this in chat, or the confirmation expired, so nothing was changed. Call ${name} again to be asked.`;
+  if (agreed === 'changed') return `Not done: what ${name} would do changed since you confirmed, so nothing was changed. Call it again to see what it would do now.`;
+  if (token?.isCancellationRequested) return `${cancelled} Nothing was changed.`;
+  const nonce = (context.nonce ?? defaultNonce)();
+  const confirmation = `vscode-${nonce}:${createHash('sha256').update(plan.message).digest('hex')}`;
+  try { return plan.done(await context.actor!.workItemAction(plan.id, plan.action, plan.body, { client: actionChannel, confirmation })); }
+  catch (error) { return actionFailure(error, plan.id, context.actor!.origin); }
+}
+
+/** One sentence for an action Unfold did not carry out, in Unfold's own words when it refused. */
+export function actionFailure(error: unknown, id: string, origin: string): string {
+  if (answered(error)) {
+    if (error.status === 401) return `${signedOut} Nothing was changed.`;
+    if (error.code === 'unreachable' || error.code === 'gateway_unavailable') return `Unfold could not confirm whether Work Item ${id} changed: ${clip(error.message, 300)} Read it with unfold_get_work before asking again: ${workLink(origin, id)}`;
+    if (error.status >= 400 && error.status < 500) return `Unfold refused: ${clip(error.message, 400)} Nothing was changed.`;
+  }
+  return `Unfold could not confirm whether Work Item ${id} changed: ${error instanceof Error ? clip(error.message, 300) : 'it did not say why.'} Read it with unfold_get_work before asking again: ${workLink(origin, id)}`;
+}
+
+const defaultNonce = () => randomBytes(12).toString('base64url');
 
 function clip(value: unknown, max: number): string {
   const text = String(value ?? '').trim();
