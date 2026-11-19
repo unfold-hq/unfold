@@ -7098,7 +7098,7 @@ standards:
     date: '2026-10-25'
     url: https://github.com/DependencyTrack/dependency-track/releases/tag/5.2.1
   watch:
-  - {kind: github-releases, ref: DependencyTrack/dependency-track, current: "5.2.1"}
+  - {kind: github-releases, ref: DependencyTrack/dependency-track, current: "5.2.2"}
   adoption:
   - '"CycloneDX 1.7.1 proto (https://github.com/DependencyTrack/dependency-track/pull/6237)"'
   - '"5.0.0 release (https://github.com/DependencyTrack/dependency-track/releases/tag/5.0.0)"'
