@@ -38,11 +38,11 @@ The `unfoldhq.dev` zone's records live in [ops/dns/dnsconfig.js](../ops/dns/dnsc
 
 CI never holds a token that can change DNS. The job reads the zone with the repository secret `CLOUDFLARE_DNS_READ_TOKEN`, a Cloudflare token with Zone Read, DNS Read and Dynamic URL Redirects Read on `unfoldhq.dev` alone.
 
-The `dns-reconciler` CronJob in `webgrip/homelab-cluster` applies the config every hour at minute 37. It clones `development`, previews with the zone's write token, and pushes only when there are corrections. It refuses a push that would create a zone. It also refuses any deletion unless the last commit touching `apps/site/ops/dns/` names the record in a `DNS-Allow-Delete: <name>` line; DNSControl names a record at the apex `unfoldhq.dev`. A refusal fails the Job, and the zone stays as it was.
+The operator's DNS reconciler, a CronJob in the operator's cluster repository, applies the config every hour at minute 37. It clones `development`, previews with the zone's write token, and pushes only when there are corrections. It refuses a push that would create a zone. It also refuses any deletion unless the last commit touching `apps/site/ops/dns/` names the record in a `DNS-Allow-Delete: <name>` line; DNSControl names a record at the apex `unfoldhq.dev`. A refusal fails the Job, and the zone stays as it was.
 
 The config declares `staging`, `docs` and `docs-staging` (the [documentation Workers](../../../docs/operations/docs-publishing.md)), a 301 from `www` to the apex, and the records of Cloudflare Email Routing, which forwards `privacy@unfoldhq.dev` to a mailbox the routing rule names: three MX records and SPF that includes `_spf.mx.cloudflare.net`. The values are the ones the zone's Email Routing page lists; copy them from there when Cloudflare changes them. Email Routing refuses to start while a null MX exists, so these records land before the routing is turned on. The domain sends no mail of its own, so DMARC stays `p=reject`. `_gh-unfold-hq-o` is the TXT record that verifies `unfoldhq.dev` for the GitHub organization `unfold-hq`; removing it unverifies the domain. The apex and `www` carry the same placeholder as `staging`; production's route depends on the apex one, and `www` only needs a proxied record for the redirect. Any other record that Cloudflare holds and the config does not declare appears in the first preview as a deletion. Copy it into the config, or delete it with the trailer.
 
-Two kinds of record belong to someone else, so the config ignores them and neither the reconciler nor the daily check touches them: `staging-app`, the proxied CNAME to the Cloudflare Tunnel that `webgrip/unfold-cluster` creates for Unfold staging, and the `_acme-challenge` TXT records that cert-manager writes and removes for DNS-01 certificates. Add an `IGNORE` for any other record a different repository owns, rather than declaring it twice.
+Two kinds of record belong to someone else, so the config ignores them and neither the reconciler nor the daily check touches them: `staging-app`, the proxied CNAME to the Cloudflare Tunnel that the staging cluster's repository creates for Unfold staging, and the `_acme-challenge` TXT records that cert-manager writes and removes for DNS-01 certificates. Add an `IGNORE` for any other record a different repository owns, rather than declaring it twice.
 
 ## No indexing outside production
 
@@ -75,7 +75,7 @@ The form writes to a D1 database bound as `SIGNUPS` ([ADR-0016](../../../docs/ad
    If wrangler offers to add the binding to `wrangler.toml`, decline: the binding is already there.
 
 2. Copy the `database_id` it prints into `wrangler.toml`, replacing `PASTE-THE-EU-D1-DATABASE-ID-HERE` under `[[d1_databases]]`. This is the only place the id lives. Commit it as `fix(site): set the sign-up database id`.
-3. Give the deploy token Account › D1: Edit. The token lives in the owner's secret store and a roller in the owner's cluster rotates it, so the permission is added there, not in this repository.
+3. Give the deploy token Account › D1: Edit. The token lives in the owner's secret store and a roller in the operator's cluster rotates it, so the permission is added there, not in this repository.
 4. Check the database: Cloudflare's dashboard lists it under Storage & databases › D1 with the EU jurisdiction. The table does not exist until the first sign-up; the Worker creates it.
 
 After the first deploy, sign up on `https://staging.unfoldhq.dev` and read it back:

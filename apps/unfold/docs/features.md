@@ -604,7 +604,7 @@ How Unfold's own source and releases are proven and shipped. Terms that only mea
 - **Sandbox runtimes for agent pods**: RuntimeClasses for Kata and gVisor, admission policies that refuse Kata annotations and require a sandbox runtime on agent pods, smoke jobs, a benchmark, and Talos patches; applied by the cluster, not by either chart. Tooling. Evidence: [`apps/unfold/ops/cluster/sandbox-runtimes/README.md`](../ops/cluster/sandbox-runtimes/README.md).
 - **Local compose stacks**: demo and live Docker Compose setups. Shipped. Evidence: [`apps/unfold/ops/local/compose.yaml`](../ops/local/compose.yaml), [`apps/unfold/ops/local/compose.live.yaml`](../ops/local/compose.live.yaml).
 - **Zero-CVE image budgets and VEX**: CVE budgets of zero critical and zero high for both images, and a place for OpenVEX statements, of which none are in force. Shipped. Evidence: [`apps/unfold/ops/security/cve-budgets.yaml`](../ops/security/cve-budgets.yaml), [`apps/unfold/ops/vex/README.md`](../ops/vex/README.md).
-- **Production on a rented EU Talos cluster**: deployment lives in the owner's cluster repository, not here. Proposed. Evidence: [`docs/adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md`](../../../docs/adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md).
+- **Production on a rented EU Talos cluster**: deployment lives in the operator's cluster repository, not here. Proposed. Evidence: [`docs/adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md`](../../../docs/adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md).
 
 ### Ports
 

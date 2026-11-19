@@ -3,7 +3,7 @@ type: explanation
 audience: [owner, contributor, agent]
 owner: unfold
 last_verified: 2026-11-18
-verified_by: "Source read on 2026-10-19 of ploeg-hq/ploeg origin/development fc604d4 (pkg/config/config.go, pkg/config/resolve.go, pkg/target/resolver.go and readiness.go, pkg/worker/target.go, cmd/ploegd, docs/how-to/route-a-multi-repo-board.md and connect-github-as-a-forge.md), the owner's cluster repository main c6078236 (kubernetes/apps/ploeg/ploeg/app/helmrelease.yaml and tracker-wiring.cronjob.yaml, kubernetes/apps/ploeg/unfold/app/helmrelease.yaml, kubernetes/apps/forgejo/forgejo-actions-secrets/app/glide-forge-webhook.job.yaml) and apps/unfold/src/tasks.ts and task-handoff.ts. Prompted by Vikunja #2025, refused on 2026-10-13 because repo/ploeg names no target. Nothing was run. The owner agreed to the five directions on 2026-10-19; directions 1 and 2 were then built (Ploeg PR ploeg-hq #196, cluster repository PR #826 and the Unfold Connections page), checked with unit tests and the demo. The onboarding checklist section was checked on 2026-11-17 against apps/unfold/src/onboarding.ts and its tests, and the demo. The Who holds what section was written on 2026-11-18 from system ADR-0060 and checked against apps/unfold/src/task-providers, src/link-providers and src/tracker-connections.ts."
+verified_by: "Source read on 2026-10-19 of ploeg-hq/ploeg origin/development fc604d4 (pkg/config/config.go, pkg/config/resolve.go, pkg/target/resolver.go and readiness.go, pkg/worker/target.go, cmd/ploegd, docs/how-to/route-a-multi-repo-board.md and connect-github-as-a-forge.md), the operator's cluster repository main c6078236 (kubernetes/apps/ploeg/ploeg/app/helmrelease.yaml and tracker-wiring.cronjob.yaml, kubernetes/apps/ploeg/unfold/app/helmrelease.yaml, kubernetes/apps/forgejo/forgejo-actions-secrets/app/glide-forge-webhook.job.yaml) and apps/unfold/src/tasks.ts and task-handoff.ts. Prompted by Vikunja #2025, refused on 2026-10-13 because repo/ploeg names no target. Nothing was run. The owner agreed to the five directions on 2026-10-19; directions 1 and 2 were then built (Ploeg PR ploeg-hq #196, cluster repository PR #826 and the Unfold Connections page), checked with unit tests and the demo. The onboarding checklist section was checked on 2026-11-17 against apps/unfold/src/onboarding.ts and its tests, and the demo. The Who holds what section was written on 2026-11-18 from system ADR-0060 and checked against apps/unfold/src/task-providers, src/link-providers and src/tracker-connections.ts."
 ---
 
 # Connect a repository
@@ -24,7 +24,7 @@ How a repository and a tracker board get connected to Ploeg and Unfold, so that 
 | Stage | Where | Today |
 |---|---|---|
 | 1. Make the repository ready | the repository | works: Ploeg checks for `AGENTS.md` on the base branch, not archived, not a mirror (`target_not_ready` otherwise) |
-| 2. Give the bots access | the forge | works on Forgejo inside the owner's Forgejo organisation (org teams include every repository); missing for any other org and for GitHub |
+| 2. Give the bots access | the forge | works on Forgejo inside one Forgejo organisation (org teams include every repository); missing for any other org and for GitHub |
 | 3. Tell Ploeg about the repository and the board | Ploeg's configuration file in the cluster repository | partly: a `targets` entry and a `trackers.vikunja.projects` entry, read once at boot; a typo in a board name stops Ploeg from starting |
 | 4. Tell Unfold about the repository and the board | Unfold's configuration file in the cluster repository | partly: a second `repositories` and `taskSources` entry for the same pair, keyed by board id where Ploeg keys by name; nothing compares the two lists |
 | 5. Let the Team see the board | the tracker | partly: a job shares Team users and registers the tracker webhook every 15 minutes, but only after a person shares the Ploeg bot into the board by hand |
@@ -100,12 +100,12 @@ Proposed, for the owner to decide. They build on the tracker-port RFC in the clu
 
 ## What an installation asks for today
 
-A second installation, Unfold staging on the unfold-cluster, was set up on 2026-10-28 and 2026-10-29. Every credential it needed came from outside the product:
+A second installation, a staging cluster of Unfold, was set up on 2026-10-28 and 2026-10-29. Every credential it needed came from outside the product:
 
 | Credential | How it got there | What a person did |
 |---|---|---|
 | Forgejo tokens for the builder and reviewer bots | a person creates each token in Forgejo's settings and types it into OpenBao with `just secret-set` | two tokens, two commands; ploegd does not start without them, even with its executor off |
-| Vikunja bot token | a copy of the owner's staging cluster bot's token, pushed by a staging job, because Vikunja 2.6 creates bot tokens only in its web UI | none, but the copy can write every board that bot is on |
+| Vikunja bot token | a copy of the staging cluster bot's token, pushed by a staging job, because Vikunja 2.6 creates bot tokens only in its web UI | none, but the copy can write every board that bot is on |
 | Vikunja board share and webhook | a staging CronJob shares the board with the bot and registers the webhook with a secret it generates | none |
 | Model provider keys | a person creates each key on the provider's site and types it into OpenBao | two keys, two commands |
 | Public hostname and login | an OpenTofu apply, from a plan a person reviews | one workflow run and a digest |
@@ -117,11 +117,11 @@ None of these steps happens in Unfold, and none is visible in it until something
 Proposed. It extends direction 5 from configuration to credentials. Under **Settings → Connections** an operator connects each outside system once, the way a hosted product connects to GitHub or Linear:
 
 1. **Connect Forgejo.** Unfold sends the operator to Forgejo's OAuth consent as themselves, lists the repositories they may administer, and for each chosen repository adds the builder and reviewer bots with the least permission and registers the review webhook. The bots' own tokens are minted by Unfold through Forgejo's API with that consent, never pasted.
-2. **Connect a board.** The operator picks a Vikunja board from the boards they can see; Unfold shares it with the Team's bot and registers the tracker webhook with a secret it generates, replacing the owner's staging cluster CronJob.
+2. **Connect a board.** The operator picks a Vikunja board from the boards they can see; Unfold shares it with the Team's bot and registers the tracker webhook with a secret it generates, replacing the staging cluster CronJob.
 3. **Add a model key.** One field per provider; Unfold tests the key with a free call before it saves it, shows the provider's spend cap if the provider reports one, and never shows the key again.
 4. **See every connection.** The checks from direction 1 stay the single view, each line green or red with the button that fixes it.
 
-Superseded: [ADR-0059](../adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md) put connection secrets in Ploeg's own store, and [ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) gives Ploeg every tracker and forge connection; Unfold holds none, not even while it writes one. The proposal as first written follows. Where the credentials live is the decision this direction needs: ADR-0055 in the owner's staging cluster keeps OpenBao as the only original of every secret. The proposal is that Unfold writes each credential to OpenBao under its installation's path through a role that may write there and nowhere else, and ploegd and the workers keep reading them through External Secrets. Unfold holds a credential only while it writes it.
+Superseded: [ADR-0059](../adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md) put connection secrets in Ploeg's own store, and [ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) gives Ploeg every tracker and forge connection; Unfold holds none, not even while it writes one. The proposal as first written follows. Where the credentials live is the decision this direction needs: ADR-0055 in the staging cluster keeps OpenBao as the only original of every secret. The proposal is that Unfold writes each credential to OpenBao under its installation's path through a role that may write there and nowhere else, and ploegd and the workers keep reading them through External Secrets. Unfold holds a credential only while it writes it.
 
 Not in scope: the OpenTofu apply that gives an installation its hostname. That is the operator setting up the installation, done once, and stays in the cluster repository.
 
@@ -130,7 +130,7 @@ Not in scope: the OpenTofu apply that gives an installation its hostname. That i
 Each is the owner's to decide.
 
 1. ~~Which directions to take, and in what order.~~ The owner agreed on 2026-10-19 to take all five in the order 1, 2, 4, 3, 5: visibility first, then the bug, then the blocker for Ploeg's own work, then the bigger reshaping.
-2. Should Ploeg's own repository be worked on by the owner's staging cluster installation at all, or stay with linked sessions?
+2. Should Ploeg's own repository be worked on by the staging cluster installation at all, or stay with linked sessions?
 3. Where the single declaration of direction 3 lives: in the cluster repository next to the Helm values, or in Ploeg's Team manifest (Ploeg ADR-0110, proposed).
 4. Whether a board that Unfold lists but Ploeg does not route should be hidden in Unfold, or shown with "not connected".
 5. ~~Direction 6: whether Unfold writes credentials to OpenBao through a scoped role, or keeps them in its own encrypted store and hands them to ploegd another way.~~ Neither: Ploeg receives and stores every tracker and forge credential itself ([ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md), 2026-11-18).

@@ -3,7 +3,7 @@ type: explanation
 audience: [contributor, agent]
 owner: unfold
 last_verified: 2026-11-19
-verified_by: "Board section read against the owner's Ploeg routing for the board and apps/unfold/docs/operations/working-from-clickup.md. Flow and branch rules updated on 2026-11-16 for the move to GitHub against .github/workflows/on_pull_request.yml and docs/operations/ci.md. Rest read against AGENTS.md, apps/*/AGENTS.md, scripts/verify.mjs, scripts/stage-explicit-paths.py, apps/.releaserc.cjs, the last 50 closed pull requests on Forgejo and Ploeg's writer and reviewer prompts in pkg/taskprompt/prompt.go of the pinned Ploeg release. Step 8 and the branch rules gained the proposed merge queue on 2026-11-19 against .github/workflows/on_pull_request.yml and scripts/release_train_pin.py. The GitHub ruleset itself was not read."
+verified_by: "Board section read against the Ploeg routing for the board and apps/unfold/docs/operations/working-from-clickup.md. Flow and branch rules updated on 2026-11-16 for the move to GitHub against .github/workflows/on_pull_request.yml and docs/operations/ci.md. Rest read against AGENTS.md, apps/*/AGENTS.md, scripts/verify.mjs, scripts/stage-explicit-paths.py, apps/.releaserc.cjs, the last 50 closed pull requests on Forgejo and Ploeg's writer and reviewer prompts in pkg/taskprompt/prompt.go of the pinned Ploeg release. Step 8 and the branch rules gained the proposed merge queue on 2026-11-19 against .github/workflows/on_pull_request.yml and scripts/release_train_pin.py. The GitHub ruleset itself was not read."
 ---
 
 # How work on Unfold is done
