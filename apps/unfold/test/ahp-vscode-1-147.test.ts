@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { application, request } from './api-support.ts';
 import { action, connect, defaultChatOf, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { repositoriesDirectory } from '../src/ahp/host.ts';
+import { forwardedMessage, messageLimits } from '../src/ahp/attachments.ts';
 import { DemoRuntime } from '../src/runtime/demo.ts';
 import { testTimeout } from './timeframes.ts';
 import type { AgentRuntime, ExecutionContext, ExecutionResult, PermissionRequest, RuntimeKind, Workspace } from '../src/types.ts';
@@ -147,7 +148,7 @@ test('an answer to a question that carries VS Code 1.147\'s input response sourc
   assert.deepEqual(runtime.answers, [{ answers: [['Half even']] }], 'the Run receives the chosen label');
 });
 
-test('a message with a skill reference, a URL attachment or a claimed non-user origin is the signed-in person\'s text', { timeout: testTimeout(60_000) }, async t => {
+test('a message with a skill reference, a URL attachment or a claimed non-user origin is the signed-in person\'s text, with the URL passed on as their attachment', { timeout: testTimeout(60_000) }, async t => {
   const { server, client, chat, dispatch } = await waiting(t);
   const sent = [
     { text: 'Use the rounding skill for this.', origin: { kind: 'user' }, attachments: [{ type: 'resource', label: 'rounding', uri: 'file:///workspace/repository/.agents/skills/rounding/SKILL.md', displayKind: 'skill' }] },
@@ -163,8 +164,10 @@ test('a message with a skill reference, a URL attachment or a claimed non-user o
   }
   const shown = (await client.rpc('subscribe', { channel: chat })).snapshot.state;
   const turns = [...shown.turns, ...(shown.activeTurn ? [shown.activeTurn] : [])].filter((turn: Json) => turnIds.includes(turn.id));
-  assert.deepEqual(turns.map((turn: Json) => [turn.message.text, turn.message.origin]), sent.map(message => [message.text, { kind: 'user' }]), 'the chat shows each as the person\'s own message');
+  const received = sent.map(message => forwardedMessage(message, message.text, repositoriesDirectory, messageLimits.session).text);
+  assert.match(received[1], /^Follow the invoice specification\.\n\nThe person attached `https:\/\/example\.test\/invoice-spec`\./);
+  assert.deepEqual(turns.map((turn: Json) => [turn.message.text, turn.message.origin]), received.map(text => [text, { kind: 'user' }]), 'the chat shows each as the person\'s own message');
   const session = server.app.store.listSessions()[0];
   const instructions = server.app.store.events(session.id).filter(event => event.type === 'message' && (event.data as Json).role === 'operator');
-  assert.deepEqual(instructions.map(event => [event.actor, (event.data as Json).text]), sent.map(message => [session.ownerId, message.text]), 'each is the signed-in person\'s instruction, as typed, with nothing added from an attachment');
+  assert.deepEqual(instructions.map(event => [event.actor, (event.data as Json).text]), received.map(text => [session.ownerId, text]), 'each is the signed-in person\'s instruction, as typed, with only the URL added as their attachment');
 });
