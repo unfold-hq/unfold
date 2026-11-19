@@ -175,7 +175,7 @@ Not to be confused with: An evaluation framework and log format from the UK AI S
 | --- | --- |
 | Steward | UK AI Security Institute (UKGovernmentBEIS) (regulator) |
 | Status | stabilising |
-| Latest | [0.3.287 2026-10-31](https://github.com/UKGovernmentBEIS/inspect_ai/releases/tag/0.3.287) |
+| Latest | [0.3.291 2026-11-17](https://github.com/UKGovernmentBEIS/inspect_ai/releases/tag/0.3.291) |
 | Radar | **assess**: Fit decided it: Inspect suits the model-level questions of the decider, the drill and the judge, but Ploeg's own research rejected wrapping the whole loop, and the 0.x log schema has no stability policy. |
 | Moves when | The decider of system ADR-0042 is accepted and needs a scored evaluation before it may act, or Inspect publishes a log-schema stability policy. |
 | Competes with | — |
@@ -184,7 +184,7 @@ Not to be confused with: An evaluation framework and log format from the UK AI S
 | Superseded by | — |
 | Decisions | [adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire](../../../../../docs/adr/adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire.md), [2026-08-08-benchmarking-the-loop](../../../../../apps/ploeg/docs/research/2026-08-08-benchmarking-the-loop.md), [0126-a-recurring-attack-drill-runs-every-harness-against-a-hostile-repository](../../../../../apps/ploeg/docs/adrs/0126-a-recurring-attack-drill-runs-every-harness-against-a-hostile-repository.md), [0135-a-bake-off-runs-one-work-item-on-several-configurations-and-a-shadow-judge-recommends-while-a-person-picks](../../../../../apps/ploeg/docs/adrs/0135-a-bake-off-runs-one-work-item-on-several-configurations-and-a-shadow-judge-recommends-while-a-person-picks.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-19 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -198,7 +198,7 @@ Not to be confused with: An evaluation framework and log format from the UK AI S
 
 **Open problems:** No stated schema stability policy; storage changed in 0.3.206 (https://inspect.aisi.org.uk/eval-logs.html); 0.x versioning with near-daily releases (https://github.com/UKGovernmentBEIS/inspect_ai/releases)
 
-**Watched:** github-releases `UKGovernmentBEIS/inspect_ai` at 0.3.287
+**Watched:** github-releases `UKGovernmentBEIS/inspect_ai` at 0.3.291
 
 ## ISO/IEC 42001:2023 Artificial intelligence - Management system (AIMS) { #iso-iec-42001 }
 

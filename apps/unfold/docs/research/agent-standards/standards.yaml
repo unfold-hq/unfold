@@ -6546,11 +6546,11 @@ standards:
   governance: regulator
   status: stabilising
   latest:
-    version: 0.3.287
-    date: '2026-10-31'
-    url: https://github.com/UKGovernmentBEIS/inspect_ai/releases/tag/0.3.287
+    version: 0.3.291
+    date: '2026-11-17'
+    url: https://github.com/UKGovernmentBEIS/inspect_ai/releases/tag/0.3.291
   watch:
-  - {kind: github-releases, ref: UKGovernmentBEIS/inspect_ai, current: "0.3.287"}
+  - {kind: github-releases, ref: UKGovernmentBEIS/inspect_ai, current: "0.3.291"}
   adoption:
   - inspect_evals benchmark collection (https://github.com/UKGovernmentBEIS/inspect_evals)
   - Repo is MIT-licensed, ~3.2k stars (https://github.com/UKGovernmentBEIS/inspect_ai)
@@ -6603,7 +6603,7 @@ standards:
   - apps/ploeg/docs/adrs/0126-a-recurring-attack-drill-runs-every-harness-against-a-hostile-repository.md
   - apps/ploeg/docs/adrs/0135-a-bake-off-runs-one-work-item-on-several-configurations-and-a-shadow-judge-recommends-while-a-person-picks.md
   watchlist: []
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-19'
 - id: mlcommons-ailuminate
   name: MLCommons AILuminate benchmarks and Assessment Standard
   disambiguation: Safety and jailbreak benchmark suites with published grades. It is not an eval log format.
