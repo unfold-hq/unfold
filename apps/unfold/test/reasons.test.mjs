@@ -1,7 +1,7 @@
 import './trackers-support.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { approvedToMerge, cloneFailure, closeReasonLabel, detailReason, listReason, needsYouBlocks, parseBudgetReason, parseStuckReason, routingWarning, sessionDriven, withdrawnReason } from '../public/core/reasons.js';
+import { approvedToMerge, cloneFailure, closeReasonLabel, detailReason, listReason, needsYouBlocks, parseBudgetReason, parseStuckReason, retryable, retryCaution, routingWarning, sessionDriven, withdrawnReason } from '../public/core/reasons.js';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import { waitingGroup } from '../public/core/reasons.js';
 
@@ -425,4 +425,32 @@ test('a stuck Run whose clone failed says the Work Item is not at fault, names t
   assert.equal(other.fix, 'Read the git output on that Run and fix what stopped the clone, not the ticket.');
   const asked = detailReason(cloneDetail('Should the export include archived rows?', { summary: 'Needs a decision on archived rows.', headline: 'shift stopped: builder reported stuck in round 1 — Needs a decision on archived rows.' }));
   assert.deepEqual([asked.variant, asked.sentence], [null, 'The builder reported that it cannot finish in Round 1 without a person.']);
+});
+
+test('Try again is offered for a reason that names a restart, never for one its own action answers', () => {
+  const stopped = code => listReason({ id: '1', state: 'needs_human', provider: 'vikunja', closeReason: code });
+  for (const code of ['plan_exhausted', 'fix_round_cap_reached', 'budget_exhausted_before_fix_round', 'checks_not_passed', 'writing_run_failed_repeatedly', 'writing_run_killed_repeatedly', 'run stuck: builder in round 1']) assert.equal(retryable(stopped(code)), true, code);
+  assert.equal(retryable(listReason({ id: '1', state: 'stale', attempts: 3 })), true, 'a Work Item Ploeg stopped retrying');
+  for (const code of ['question_for_person', 'taken_over', 'operator_failed', 'operator_interrupted', 'operator_paused']) assert.equal(retryable(stopped(code)), false, code);
+  assert.equal(retryable(listReason({ id: '1', state: 'needs_human', closeReason: 'review_approved', pullRequestState: 'open' })), false, 'approved: merging finishes it');
+  assert.equal(retryable(listReason({ id: '1', state: 'needs_human', closeReason: 'review_approved', pullRequestState: 'merged' })), false, 'merged: closing the task finishes it');
+  assert.equal(retryable(listReason({ id: '1', state: 'needs_human', closeReason: 'plan_exhausted', latestShift: { branch: 'operator/s1', closeReason: 'plan_exhausted', closedAt: '2026-10-01T10:00:00Z' } })), false, 'a session drives it');
+  assert.equal(retryable(listReason({ id: '1', state: 'awaiting_review', ci: { state: 'failure' } })), false, 'a pull request in review is not restarted');
+  assert.equal(retryable(null), false);
+});
+
+test('a Try again after a failed clone warns by cause, and no other reason does', () => {
+  const unreachable = detailReason(cloneDetail(cloneOutput));
+  assert.equal(unreachable.cause, 'unreachable');
+  assert.equal(retryCaution(unreachable), 'The Run fails again if the cluster still cannot reach the repository’s host.');
+  const access = detailReason(cloneDetail('remote: Repository not found.\nfatal: repository \'https://forge.test/acme/unfold.git/\' not found'));
+  assert.equal(access.cause, 'access');
+  assert.equal(retryCaution(access), 'Nothing changed since it failed, so the same result is likely unless the cause was fixed.');
+  const other = detailReason(cloneDetail('fatal: early EOF'));
+  assert.equal(other.cause, 'unknown');
+  assert.equal(retryCaution(other), 'Nothing changed since it failed, so the same result is likely unless the cause was fixed.');
+  assert.equal(retryable(unreachable), true, 'the restart is warned about, never blocked');
+  const budget = detailReason({ item: { id: '1', state: 'needs_human', provider: 'vikunja', closeReason: 'budget_exhausted_before_fix_round' }, runs: [], events: [] });
+  assert.deepEqual([budget.variant, budget.cause, retryCaution(budget)], [null, null, '']);
+  assert.equal(retryCaution(null), '');
 });

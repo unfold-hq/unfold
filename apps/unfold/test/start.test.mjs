@@ -1,7 +1,7 @@
 import './trackers-support.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { handedMarkup, labelledTeam, pendingHandoffs, priorityOf, readiness, retryMarkup, reviewRoom, roomOf, routeOf, sheetMarkup, startCard, startLimit, startQueue, suggestedTeam, taskKey, whyHere } from '../public/start.js';
+import { handedMarkup, labelledTeam, pendingHandoffs, priorityOf, readiness, retryMarkup, retryNotice, reviewRoom, roomOf, routeOf, sheetMarkup, startCard, startLimit, startQueue, suggestedTeam, taskKey, whyHere } from '../public/start.js';
 import { namedDate } from '../public/core/format.js';
 import { loopCounts, loopMarkup } from '../public/now.js';
 import { countsFromNow } from '../public/core/counts.js';
@@ -243,6 +243,23 @@ test('Try again says what it costs and takes a note for the next attempt', () =>
   assert.match(html, /name="note"/);
   assert.match(retryMarkup(entry, { demo: true }), /nothing restarts and nothing is spent/);
   assert.match(retryMarkup(entry, { error: 'Conflict' }), /Ploeg did not restart it[\s\S]*Conflict/);
+});
+
+test('the Try again dialog is one confirmation for Now and the Work Item page', () => {
+  const entry = { id: '7', team: 'bronze', state: 'needs_human', title: 'Stuck one', latestShift: { budgetUsd: 9.2 } };
+  assert.match(retryMarkup(entry), /<p>Ploeg starts it over from Round 1 with Team bronze, as a new attempt of the same Work Item\. Its history stays\. A new attempt spends from Team bronze’s budget, up to US\$\s9,20 like the last one\.<\/p><div class="field">/, 'what restarts, what stays and what it costs, with no caution by default');
+  const page = retryMarkup(entry, { form: 'work-retry', caution: 'The Run fails again if the cluster still cannot reach the repository’s host.' });
+  assert.match(page, /^<form data-form="work-retry" /, 'the page that opens it names its own submit handler');
+  assert.doesNotMatch(page, /data-form="loop-retry"/);
+  assert.match(page, /like the last one\.<\/p><p>The Run fails again if the cluster still cannot reach the repository’s host\.<\/p><div class="field">/, 'the caution is one plain sentence under the cost');
+  assert.match(page, /<button type="submit" class="button primary" id="loop-retry-submit">[^]*<span class="button-label">Try again<\/span>/, 'a caution never disables the restart');
+  const demo = retryMarkup(entry, { demo: true, form: 'work-retry', caution: 'The Run fails again.' });
+  assert.match(demo, /This is the demo: nothing restarts and nothing is spent\./);
+  assert.doesNotMatch(demo, /The Run fails again/, 'nothing restarts in the demo, so nothing can fail again');
+  assert.match(retryMarkup(entry, { error: 'Conflict' }), /<div role="alert"><div class="callout" data-tone="danger">/, 'a refusal is announced');
+  assert.equal(retryNotice(entry, { fromRound: 1, demo: false }), 'Started “Stuck one” again from Round 1.');
+  assert.equal(retryNotice({ id: '7' }, {}), 'Started “Work Item 7” again from Round 1.');
+  assert.equal(retryNotice(entry, { demo: true, fromRound: 1 }), 'This is the demo: nothing restarted and nothing was spent.');
 });
 
 test('the loop takes every count from one place, folds empty lanes and groups ended Runs per Work Item', () => {
