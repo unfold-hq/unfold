@@ -23,7 +23,7 @@ import { SettingsFileError, agentHostStore, agentHostTokenId, agentsWindowPlan, 
 import { SessionTree, TaskTree, type SessionEntry, type TaskEntry } from './tree.js';
 import { TaskPanels, type TaskPanelHost } from './task-panel.js';
 import { checkOutWorkItemBranch, gitApi } from './checkout.js';
-import { answerTool, currentBranch, invocationMessage, lmToolApi, maxCharsFor, type LmToolName } from './lm-tools.js';
+import { answerTool, currentBranch, invocationMessage, invokeAction, lmToolApi, maxCharsFor, OfferedConfirmations, prepareAction, type ActionContext, type LmActionToolName, type LmToolName } from './lm-tools.js';
 import { sessionEligibility } from './task-view.js';
 import * as wizard from './wizard.js';
 import type { Approval, Bootstrap, Session, TaskSnapshot, TaskSource, CandidateFormat, Decision, Permission, PublicationBinding } from './types.js';
@@ -255,6 +255,18 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       }, token)) as vscode.LanguageModelToolResult,
     });
     context.subscriptions.push(api.register('unfold_now', tool('unfold_now')), api.register('unfold_get_work', tool('unfold_get_work')), api.register('unfold_find_work', tool('unfold_find_work')));
+    const offered = new OfferedConfirmations();
+    const acting = (): ActionContext => ({
+      core: this.core,
+      actor: this.configurationError ? undefined : this.current,
+      configurationError: this.configurationError,
+      signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)),
+    });
+    const action = (name: LmActionToolName): vscode.LanguageModelTool<object> => ({
+      prepareInvocation: options => prepareAction(name, options.input, acting(), offered),
+      invoke: async (options, token) => api.result(await invokeAction(name, options.input, acting(), offered, token)) as vscode.LanguageModelToolResult,
+    });
+    context.subscriptions.push(api.register('unfold_approve_work', action('unfold_approve_work')), api.register('unfold_reject_work', action('unfold_reject_work')), api.register('unfold_retry_work', action('unfold_retry_work')), api.register('unfold_hand_back', action('unfold_hand_back')));
   }
 
   private async ploegMcp(): Promise<RemoteMcpServer | undefined> {

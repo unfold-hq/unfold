@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Agents in VS Code chat can approve, reject, retry and hand back a Work Item: **Unfold: Approve Work Item** (`unfold_approve_work`), **Unfold: Reject Work Item** (`unfold_reject_work`), **Unfold: Try Work Item Again** (`unfold_retry_work`) and **Unfold: Hand Work Item Back** (`unfold_hand_back`). Each reads the Work Item first and returns `confirmationMessages`, so VS Code asks the person before it runs, naming the Work Item, the effect and, for a retry or a hand-back, what it may spend. The tool acts only on the plan the person was shown, once and within ten minutes, through the browser's routes with `X-Unfold-Client: VS Code chat` and `X-Unfold-Confirmation` set to the hash of the agreed text, so the Action Record names both. A refusal comes back in Unfold's words. All seven tools now carry `when: unfold.connected`, so VS Code offers them only while the extension is signed in.
 - In the Agents window, the Command Palette leaves out the commands that need a view, the status bar or a checkout: **Refresh**, **Refresh Tasks**, **Refresh Work**, **Open Agents Window**, **Send Selection to Remote Session…**, **Send Current File to Remote Session…** and **Follow Hand-offs in a Claude Code Terminal**, read from VS Code's `isSessionsWindow` context key. Every editor window still offers them. The README opens with what the extension does in each window.
 
 ## 0.4.0-rc.151
