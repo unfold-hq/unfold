@@ -16,6 +16,7 @@ D(
   MX('@', 36, 'route2.mx.cloudflare.net.'),
   MX('@', 17, 'route3.mx.cloudflare.net.'),
   TXT('@', 'v=spf1 include:_spf.mx.cloudflare.net ~all'),
+  TXT('cf2024-1._domainkey', 'v=DKIM1; h=sha256; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiweykoi+o48IOGuP7GR3X0MOExCUDY/BCRHoWBnh3rChl7WhdyCxW3jgq1daEjPPqoi7sJvdg5hEQVsgVRQP4DcnQDVjGMbASQtrY4WmB1VebF+RPJB2ECPsEDTpeiI5ZyUAwJaVX7r6bznU67g7LvFq35yIo4sdlmtZGV+i0H4cpYH9+3JJ78km4KXwaf9xUJCWF6nxeD+qG6Fyruw1Qlbds2r85U9dkNDVAS3gioCvELryh1TxKGiVTkg4wqHTyHfWsp7KD3WQHYJn0RyfJJu6YEmL77zonn7p2SRMvTMP3ZEXibnC9gz3nnhR6wcYL8Q7zXypKTMD58bTixDSJwIDAQAB'),
   TXT('_dmarc', 'v=DMARC1; p=reject'),
   TXT('_gh-unfold-hq-o', '41a6656e33'),
   TXT('_visual-studio-marketplace-unfold-hq', '9fd376d4-57b2-4fd5-b9ad-29ed8c480bd2'),
