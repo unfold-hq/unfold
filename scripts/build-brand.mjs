@@ -233,8 +233,13 @@ ${wordmarkBody(palette.vouw, -box.left, -box.top, scale)}
 })();
 
 const tileScale = 0.72;
+const tileOptical = 0.5;
+const tileCentre = (() => {
+  const c = centroid(master);
+  return [32 + (32 - c[0]) * tileScale * tileOptical, 32 + (32 - c[1]) * tileScale * tileOptical].map(v => Number(v.toFixed(3)));
+})();
 const tile = square(`<rect width="64" height="64" rx="14" fill="${palette.vouw}"/>
-<g transform="translate(32 32) scale(${tileScale}) translate(-32 -32)">
+<g transform="translate(${tileCentre[0]} ${tileCentre[1]}) scale(${tileScale}) translate(-32 -32)">
 ${markBody(master, palette.vel, palette.bakenNacht)}
 </g>`);
 
