@@ -123,7 +123,17 @@ test('every change a client asks for is rejected, a manual run is refused, and t
   assert.deepEqual((await client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries.map((entry: Json) => entry.resource), before.map((entry: Json) => entry.resource));
 });
 
-test('a refresh publishes a paused team as a disabled route and a team that lost its tracker user as removed, to the watching person only', { timeout: testTimeout(60_000) }, async t => {
+test('a route stays enabled whatever Ploeg says of a paused team, because Ploeg has no write that pauses a route', { timeout: testTimeout(60_000) }, async t => {
+  const f = await fixture(t);
+  f.state.teams = [team('silver', ['silver'], [], true), team('bronze', ['bronze']), team('unfold', []), team('gold', ['gold'], ['77'])];
+  const { client } = await f.attach('op-1');
+  const entries: Json[] = (await client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries;
+  const silver = entries.find(entry => entry.resource === 'ahp-automation:/tracker.board.silver')!;
+  assert.equal(silver.definition.enabled, true, 'nothing in Ploeg sets paused, so a route is never shown as paused');
+  assert.equal(silver._meta['dev.unfoldhq.unfold'].paused, true, 'what Ploeg reported stays readable');
+});
+
+test('a refresh publishes a team that changed as a set route and a team that lost its tracker user as removed, to the watching person only', { timeout: testTimeout(60_000) }, async t => {
   const f = await fixture(t);
   const { client } = await f.attach('op-1');
   const viewer = await f.attach('viewer-1');
@@ -133,7 +143,8 @@ test('a refresh publishes a paused team as a disabled route and a team that lost
   await f.server.app.agentHost.automations.refresh();
   const set = await client.until(message => action(message, catalogue, 'automation/set'));
   assert.equal(set.params.action.automation.resource, 'ahp-automation:/tracker.board.silver');
-  assert.equal(set.params.action.automation.definition.enabled, false, 'a paused team takes no new work');
+  assert.equal(set.params.action.automation.definition.enabled, true, 'a paused flag from Ploeg disables nothing');
+  assert.equal(set.params.action.automation._meta['dev.unfoldhq.unfold'].paused, true);
   const removed = await client.until(message => action(message, catalogue, 'automation/removed'));
   assert.equal(removed.params.action.resource, 'ahp-automation:/tracker.board.bronze');
   const viewerSet = await viewer.client.until(message => action(message, catalogue, 'automation/set'));
