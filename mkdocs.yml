@@ -36,6 +36,8 @@ nav:
       - Review an agent pull request: how-to/review-an-agent-pr.md
       - Follow the work you handed off: how-to/follow-handed-off-work.md
       - Prepare a repository: how-to/prepare-a-repository.md
+      - Connect ClickUp: how-to/connect-clickup.md
+      - Connect GitLab (mostly planned): how-to/connect-gitlab.md
       - Run a pilot batch: how-to/run-a-pilot-batch.md
       - Link your Claude Code sessions: how-to/link-claude-code-sessions.md
       - Connect your Claude routine: how-to/connect-your-claude-routine.md

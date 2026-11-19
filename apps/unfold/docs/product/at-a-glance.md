@@ -40,7 +40,7 @@ All ten are available today. The sections below carry each one's status and evid
 Works with:
 
 - **Trackers.** Hand off by assignment in ClickUp and Vikunja; read tasks from Forgejo, GitHub, GitLab and Jira Cloud. Jira has no hand-off yet. `Available` · [Execution](../features.md#context-execution)
-- **Forges.** Pull requests on Forgejo, GitHub and GitLab (a merge request on GitLab), each through its own publisher. `Available` · [Execution](../features.md#context-execution)
+- **Forges.** Pull requests on Forgejo, GitHub and GitLab (a merge request on GitLab), each through its own publisher. `Available` for Forgejo and GitHub, `Experimental` for GitLab, whose writer Runs share one push token outside Ploeg's supported profile · [Execution](../features.md#context-execution)
 - **Agent tools.** A Claude Code plugin that also installs as an Agent Plugin in Codex, Copilot, VS Code, Cursor and Kiro; an OpenCode 1.x plugin; any Agent Client Protocol (ACP) agent through a pass-through proxy. `Available` · [Participation](../features.md#context-participation)
 - **Codex CLI reporting.** Reports Codex sessions to Unfold; tested with recorded payloads only. `Experimental` · [Participation](../features.md#context-participation)
 - **Model providers.** Any provider your LiteLLM gateway serves. `Available` · [Execution](../features.md#context-execution)

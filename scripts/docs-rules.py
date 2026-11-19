@@ -263,8 +263,24 @@ INTEGRATION_PLACEHOLDER = re.compile(r'\{\{\s*([a-z]+)(?:\.([a-z]+))?\s*\}\}')
 INTEGRATION_CODE = re.compile(r'(^[ \t]*`{3,}[^\n]*\n.*?^[ \t]*`{3,}[^\n]*$|^[ \t]*~{3,}[^\n]*\n.*?^[ \t]*~{3,}[^\n]*$|`+[^`\n]*`+)', re.M | re.S)
 
 
+CONNECTOR_METHODS = {'Authorizer': ('oauth',), 'Manifest': ('github_app_manifest', 'github_app_installation'), 'Prober': ('token',)}
+PLACEHOLDER_PORTS = ('trackers', 'forges')
+
+
+def placeholder_categories(data):
+    categories = []
+    for port in data['ports']:
+        placeholder = port.get('placeholder')
+        if not placeholder:
+            continue
+        fields = [field for field in placeholder['fields'] if field != 'name']
+        choices = [{'id': adapter['id'], 'name': adapter['name'], **{field: adapter[field] for field in fields}} for adapter in port['adapters'] if all(field in adapter for field in fields)]
+        categories.append({'id': placeholder['id'], 'label': placeholder['label'], 'fields': placeholder['fields'], 'choices': choices})
+    return categories
+
+
 def integration_categories(data):
-    return {category['id']: category for category in data['categories']}
+    return {category['id']: category for category in placeholder_categories(data)}
 
 
 def integration_hint(category, field):
@@ -285,13 +301,49 @@ def integration_table(category):
     return '\n'.join([header, '| ' + ' | '.join('---' for _ in fields) + ' |', *rows])
 
 
-def expand_integrations(markdown, data, reference_link):
-    """Replace {{ category.table }} with a table of every integration, and {{ category.field }} outside code with the integration-neutral text, linked to the reference page with every integration's value as its hover text. Return (markdown, problems)."""
+def adapter_connection(adapter, vocabulary):
+    parts = []
+    if adapter.get('static'):
+        parts.append(f"configuration: {adapter['static']}")
+    if adapter.get('runtime'):
+        parts.append('at runtime: ' + ', '.join(vocabulary['methods'][method] for method in adapter['runtime']))
+    if adapter.get('planned'):
+        parts.append('planned: ' + ', '.join(vocabulary['methods'][method] for method in adapter['planned']))
+    return '; '.join(parts) or '-'
+
+
+def catalogue_markdown(data, link):
+    vocabulary = data['vocabulary']
+    sections = []
+    for port in data['ports']:
+        intro = f"{vocabulary['kinds'][port['kind']]}. {port['description']}"
+        if port.get('docs'):
+            intro += ' See ' + ', '.join(link(path) for path in port['docs']) + '.'
+        lines = [f"### {port['label']} {{ #port-{port['id']} }}", '', intro, '', '| Adapter | Status | Owner | What it does | How it connects | Mechanism | Docs |', '| --- | --- | --- | --- | --- | --- | --- |']
+        for adapter in port['adapters']:
+            cells = [
+                adapter['name'],
+                vocabulary['statuses'][adapter['status']],
+                vocabulary['owners'][adapter['owner']],
+                ', '.join(vocabulary['does'][job] for job in adapter['does']),
+                adapter_connection(adapter, vocabulary),
+                ', '.join(vocabulary['mechanisms'][mechanism] for mechanism in adapter['mechanisms']),
+                ', '.join(link(path) for path in adapter.get('docs', [])) or '-',
+            ]
+            lines.append('| ' + ' | '.join(cell.replace('|', '\\|') for cell in cells) + ' |')
+        sections.append('\n'.join(lines))
+    return '\n\n'.join(sections)
+
+
+def expand_integrations(markdown, data, reference_link, link=None):
+    """Replace {{ category.table }} with a table of every integration, {{ catalogue.ports }} with a section per port, and {{ category.field }} outside code with the integration-neutral text, linked to the reference page with every integration's value as its hover text. Return (markdown, problems)."""
     categories = integration_categories(data)
     problems = []
 
     def placeholder(match):
         name, field = match[1], match[2] or 'name'
+        if name == 'catalogue' and field == 'ports':
+            return catalogue_markdown(data, link or (lambda path: f'`{path}`'))
         category = categories.get(name)
         if category is not None and field == 'table':
             return integration_table(category)
@@ -308,20 +360,97 @@ def expand_integrations(markdown, data, reference_link):
     return ''.join(chunks), problems
 
 
-def integration_problems(data, provider_names):
-    """Return why docs/integrations.yml disagrees with itself or with the Ploeg providers it names."""
-    problems = []
-    for category in data['categories']:
-        for choice in category['choices']:
-            missing = [field for field in category['fields'] if field not in choice]
-            if missing:
-                problems.append(f"{category['id']}.{choice['id']}: missing {', '.join(missing)}")
-            if choice['id'] not in provider_names:
-                problems.append(f"{category['id']}.{choice['id']}: Ploeg has no provider named {choice['id']}")
-            if category['id'] == 'tracker':
-                prefix = 'vik' if choice['id'] == 'vikunja' else choice['id']
-                if 'branch' in category['fields'] and not choice.get('branch', '').startswith(f'agent/{prefix}-'):
-                    problems.append(f"tracker.{choice['id']}: Ploeg names the branch agent/{prefix}-<id>, not {choice.get('branch')}")
-                if 'reference' in category['fields'] and not choice.get('reference', '').startswith('VIK-' if prefix == 'vik' else f'{prefix}-'):
-                    problems.append(f"tracker.{choice['id']}: reference {choice.get('reference')} does not match Ploeg's Reference()")
+def ploeg_integration_facts(provider_sources, methods_source, connectors_source, references_source, reference_sources):
+    """Read what the pinned Ploeg serves from its Go sources: provider names, connection methods, the runtime connectors with the methods each serves, and the reference prefix of each tracker that names its own."""
+    providers = set(re.findall(r'(?:Name\(\) string \{ return|const Name =) "([a-z]+)"', provider_sources))
+    methods = set(re.findall(r'^\s*Method\w+\s*=\s*"([a-z_]+)"', methods_source, re.M))
+    body = re.search(r'func connectors\(\)[^{]*\{(.*?)\n\}', connectors_source, re.S)
+    connectors = {}
+    for kind, fields in re.findall(r'^\s*"([a-z]+)":\s*\{(.*)\},?\s*$', body[1] if body else '', re.M):
+        connectors[kind] = {method for capability, served in CONNECTOR_METHODS.items() if re.search(rf'\b{capability}:', fields) for method in served}
+    references = {}
+    for provider, package in re.findall(r'RegisterReferenceNamer\("([a-z]+)",\s*(\w+)\.Reference\)', references_source):
+        prefix = re.search(r'func Reference\(externalID string\) string \{ return "([^"]*)" \+ externalID', reference_sources.get(package, ''))
+        if prefix:
+            references[provider] = prefix[1]
+    return {'providers': providers, 'methods': methods, 'connectors': connectors, 'references': references}
+
+
+def expected_reference(provider, references):
+    if provider == 'vikunja':
+        return 'agent/vik-', 'VIK-'
+    prefix = references.get(provider, f'{provider}-')
+    return f'agent/{prefix}', prefix
+
+
+def adapter_problems(port, adapter, vocabulary, ploeg):
+    where = f"{port['id']}.{adapter['id']}"
+    problems = [f'{where}: unknown {key} {adapter.get(key)}' for key, allowed in [('status', 'statuses'), ('owner', 'owners')] if adapter.get(key) not in vocabulary[allowed]]
+    for key, allowed in [('mechanisms', 'mechanisms'), ('does', 'does'), ('runtime', 'methods'), ('planned', 'methods')]:
+        problems += [f'{where}: unknown {key} entry {entry}' for entry in adapter.get(key, []) if entry not in vocabulary[allowed]]
+    if not adapter.get('mechanisms') or not adapter.get('does'):
+        problems.append(f'{where}: needs mechanisms and does')
+    provider = adapter.get('provider')
+    if provider is None:
+        return problems + ([f'{where}: connects at runtime but names no Ploeg provider'] if adapter.get('runtime') else [])
+    if adapter.get('owner') != 'ploeg':
+        problems.append(f'{where}: names a Ploeg provider but is not owned by Ploeg')
+    if provider not in ploeg['providers']:
+        problems.append(f'{where}: Ploeg has no provider named {provider}')
+    served = ploeg['connectors'].get(provider, set())
+    for method in adapter.get('runtime', []):
+        if method not in ploeg['methods']:
+            problems.append(f'{where}: Ploeg serves no connection method {method}; list it under planned')
+        elif method not in served:
+            problems.append(f"{where}: Ploeg's {provider} connector does not serve {method}")
+    problems += [f'{where}: Ploeg serves {method} now; move it from planned to runtime' for method in adapter.get('planned', []) if method in ploeg['methods'] and method in served]
+    fields = [field for field in port.get('placeholder', {}).get('fields', {}) if field != 'name']
+    missing = [field for field in fields if field not in adapter]
+    if missing:
+        problems.append(f"{where}: missing {', '.join(missing)}")
+    if port['id'] == 'trackers':
+        branch, reference = expected_reference(provider, ploeg['references'])
+        if 'branch' in fields and not adapter.get('branch', '').startswith(branch):
+            problems.append(f"{where}: Ploeg names the branch {branch}<id>, not {adapter.get('branch')}")
+        if 'reference' in fields and not adapter.get('reference', '').startswith(reference):
+            problems.append(f"{where}: Ploeg's Reference() is {reference}<id>, not {adapter.get('reference')}")
     return problems
+
+
+def integration_problems(data, ploeg):
+    """Return why docs/integrations.yml disagrees with itself or with what the pinned Ploeg serves."""
+    vocabulary = data['vocabulary']
+    port_ids = [port['id'] for port in data['ports']]
+    problems = [] if len(set(port_ids)) == len(port_ids) else ['ports: port ids repeat']
+    named, connected = set(), set()
+    for port in data['ports']:
+        if port.get('kind') not in vocabulary['kinds']:
+            problems.append(f"{port['id']}: unknown kind {port.get('kind')}")
+        ids = [adapter['id'] for adapter in port['adapters']]
+        if len(set(ids)) != len(ids):
+            problems.append(f"{port['id']}: adapter ids repeat")
+        for adapter in port['adapters']:
+            problems += adapter_problems(port, adapter, vocabulary, ploeg)
+            if adapter.get('provider') and port['id'] in PLACEHOLDER_PORTS:
+                named.add(adapter['provider'])
+                if adapter.get('runtime'):
+                    connected.add(adapter['provider'])
+    problems += [f'Ploeg connects {kind} at runtime, but no tracker or forge adapter lists its runtime methods' for kind in sorted(set(ploeg['connectors']) - connected)]
+    problems += [f'Ploeg has a provider named {provider}, but no tracker or forge adapter names it' for provider in sorted(ploeg['providers'] - named)]
+    standards = [standard['id'] for standard in data.get('standards', [])]
+    if len(set(standards)) != len(standards):
+        problems.append('standards: ids repeat')
+    problems += [f"standards.{standard['id']}: unknown status {standard.get('status')}" for standard in data.get('standards', []) if standard.get('status') not in vocabulary['statuses']]
+    return problems
+
+
+def site_integrations(data):
+    """The port board and the standards the marketing site renders, in catalogue order."""
+    def adapter(entry):
+        shown = {'label': entry['label']} if entry.get('label') else {'name': entry['name']}
+        return {**shown, **({'note': entry['note']} if entry.get('note') else {}), 'status': entry['status']}
+
+    return {
+        'ports': [{'id': port['id'], 'kind': port['kind'], 'openSocket': port['openSocket'], 'adapters': [adapter(entry) for entry in port['adapters']]} for port in data['ports']],
+        'standards': [{'id': standard['id'], 'name': standard['name'], 'status': standard['status']} for standard in data['standards']],
+    }

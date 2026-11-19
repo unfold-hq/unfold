@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--check', action='store_true')
 parser.add_argument('--stage-only', action='store_true')
 parser.add_argument('--domain', action='store_true')
+parser.add_argument('--integrations', action='store_true', help='write the site\'s integrations data from docs/integrations.yml after checking it against the pinned Ploeg')
 parser.add_argument('--domain-check', action='store_true', help='check only the pages generated from the domain models and the ADR ledgers, which a Ploeg pin move can break, and the landscape explorer that embeds the glossary')
 parser.add_argument('--without-landscape', action='store_true', help='with --domain-check, skip the landscape explorer: rebuilding it needs a browser, and the weekly ploeg-ahead check looks only for what a person must decide')
 args = parser.parse_args()
@@ -38,6 +39,26 @@ glossary_models = ['docs/domain', 'apps/ploeg/docs/domain']
 glossary = 'docs/reference/glossary.md'
 conflict_report = 'ploeg-glossary-conflicts.txt'
 landscape_sources = 'docs/landscape/generated-sources.json'
+integrations = yaml.safe_load((root / 'docs/integrations.yml').read_text())
+site_integrations = 'apps/site/src/data/integrations.json'
+
+
+def go_sources(folder):
+    return ''.join(path.read_text() for path in sorted((ploeg / folder).rglob('*.go')) if not path.name.endswith('_test.go'))
+
+
+def ploeg_facts():
+    return rules.ploeg_integration_facts(
+        go_sources('pkg/provider'),
+        (ploeg / 'pkg/connection/config.go').read_text(),
+        (ploeg / 'cmd/ploegd/runtime_connections.go').read_text(),
+        (ploeg / 'cmd/ploegd/references.go').read_text(),
+        {path.parent.name: path.read_text() for path in (ploeg / 'pkg/provider').glob('*/reference.go')},
+    )
+
+
+def site_integrations_text():
+    return json.dumps(rules.site_integrations(integrations), indent=2, ensure_ascii=False) + '\n'
 
 
 def generate_domain(folder, out):
@@ -82,6 +103,13 @@ def generated_domain_failure(problems):
     return 'Pages generated from the domain models or the ADR ledgers are wrong; docs/operations/ci.md#the-ploeg-pin-pull-request explains each case:\n' + '\n'.join(f'- {problem}' for problem in problems)
 
 
+if args.integrations:
+    problems = rules.integration_problems(integrations, ploeg_facts())
+    if problems:
+        raise SystemExit('docs/integrations.yml disagrees with itself or with the pinned Ploeg:\n' + '\n'.join(problems))
+    (root / site_integrations).write_text(site_integrations_text())
+    print(f'Unfold integrations: {site_integrations} from docs/integrations.yml')
+    sys.exit()
 if args.domain:
     for folder in domain_models:
         generate_domain(folder, root / folder)
@@ -134,7 +162,7 @@ checked = 0
 
 def page_anchors(path):
     if path not in anchor_cache:
-        anchor_cache[path] = rules.anchors(path.read_text())
+        anchor_cache[path] = rules.anchors(rules.expand_integrations(path.read_text(), integrations, '')[0] if path.suffix == '.md' else path.read_text())
     return anchor_cache[path]
 
 
@@ -224,24 +252,35 @@ def rewrite(markdown, source):
     return ''.join(chunks)
 
 
-integrations = yaml.safe_load((root / 'docs/integrations.yml').read_text())
 integration_reference = root / 'docs/reference/integrations.md'
-provider_names = set(re.findall(r'(?:Name\(\) string \{ return|const Name =) "([a-z]+)"', ''.join(path.read_text() for path in (ploeg / 'pkg/provider').rglob('*.go') if not path.name.endswith('_test.go'))))
-integration_failures = rules.integration_problems(integrations, provider_names)
+integration_failures = rules.integration_problems(integrations, ploeg_facts())
+if not (root / site_integrations).is_file() or (root / site_integrations).read_text() != site_integrations_text():
+    integration_failures.append(f'{site_integrations} is stale; run mise run integrations')
+
+
+def page_title(path):
+    heading = next((line[2:].strip() for line in (root / path).read_text().splitlines() if line.startswith('# ')), None) if path.endswith('.md') and (root / path).is_file() else None
+    return heading or Path(path).name
+
+
+def catalogue_link(source):
+    return lambda path: f'[{page_title(path)}]({os.path.relpath(root / path, source.parent)})'
+
+
 for source, relative in mapping.items():
     output = staging / relative
     output.parent.mkdir(parents=True, exist_ok=True)
     if source.suffix == '.md':
-        markdown, unknown = rules.expand_integrations(source.read_text(), integrations, os.path.relpath(integration_reference, source.parent))
+        markdown, unknown = rules.expand_integrations(source.read_text(), integrations, os.path.relpath(integration_reference, source.parent), catalogue_link(source))
         integration_failures += [f'{source.relative_to(root)}: unknown placeholder {placeholder}' for placeholder in unknown if not source.is_relative_to(ploeg)]
         markdown = rewrite(markdown, source)
         output.write_text(rules.mark_history(markdown, relative.as_posix()) if rules.historical(relative.as_posix()) else markdown)
     else:
         shutil.copyfile(source, output)
 if integration_failures:
-    raise SystemExit('Integration placeholders (see docs/integrations.yml):\n' + '\n'.join(integration_failures))
+    raise SystemExit('Integration catalogue and placeholders (see docs/integrations.yml):\n' + '\n'.join(integration_failures))
 (staging / 'assets').mkdir(exist_ok=True)
-(staging / 'assets/integrations.json').write_text(json.dumps(integrations, indent=2) + '\n')
+(staging / 'assets/integrations.json').write_text(json.dumps({'categories': rules.placeholder_categories(integrations)}, indent=2) + '\n')
 if failures:
     raise SystemExit('Missing documentation targets:\n' + '\n'.join(sorted(set(failures))))
 if anchor_failures:
