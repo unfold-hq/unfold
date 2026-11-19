@@ -5848,7 +5848,7 @@ standards:
     date: '2026-10-14'
     url: https://github.com/NVIDIA/gpu-operator/releases/tag/v26.7.2
   watch:
-  - {kind: github-releases, ref: NVIDIA/gpu-operator, current: "v26.7.2"}
+  - {kind: github-releases, ref: NVIDIA/gpu-operator, current: "v26.7.3"}
   adoption:
   - '26.7.0 GPUCluster CR (mutually exclusive with ClusterPolicy; needs k8s >= v1.34.2), DRA driver v0.5.0 → v0.5.1 in 26.7.2,
     Container Toolkit v1.20.0/1.20.1: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/release-notes.html'
