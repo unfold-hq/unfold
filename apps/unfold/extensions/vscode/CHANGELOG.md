@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- On VS Code 1.145 or later, a file's Timeline has an **Unfold** source: the Work Items whose merged pull request changed the file, each with its title, merge date and pull request number. Choosing one opens the Work Item; its inline action opens the pull request. The source runs one `git log --first-parent` per file and matches the commits to the merge and head SHAs on the Run cards of your done Work Items for that repository, read once per repository through your own sign-in and kept for ten minutes; **Refresh** in the Timeline reads again. Signed out, in an untrusted workspace or in the demo it lists nothing. `engines.vscode` stays at `^1.99.0`: an older editor gets no Timeline source.
 - In the Agents window, the Command Palette leaves out the commands that need a view, the status bar or a checkout: **Refresh**, **Refresh Tasks**, **Refresh Work**, **Open Agents Window**, **Send Selection to Remote Session…**, **Send Current File to Remote Session…** and **Follow Hand-offs in a Claude Code Terminal**, read from VS Code's `isSessionsWindow` context key. Every editor window still offers them. The README opens with what the extension does in each window.
 
 ## 0.4.0-rc.151

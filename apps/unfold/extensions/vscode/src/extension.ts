@@ -30,6 +30,10 @@ import type { Approval, Bootstrap, Session, TaskSnapshot, TaskSource, CandidateF
 import { readPublication } from './publication.js';
 import { followHandOffsInTerminal, vscodeTerminalHost } from './claude-terminal.js';
 import { mcpInstallUri, mcpJsonEntry, mcpProviderApi, ploegMcpProviderId, ploegMcpServer, provideServersSetting, type RemoteMcpServer } from './mcp-servers.js';
+import { UnfoldTimeline, timelineApi, timelineItemContext } from './timeline.js';
+import { parseRemote } from './git-remotes.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
 type SessionRef = string | SessionEntry | undefined;
 type Draft = { repositoryId?: string; teamId?: string; runtime?: string; placement?: string; approval?: Approval; model?: string; title?: string; objective?: string; budgetUsd?: number; autoStart?: boolean };
@@ -84,6 +88,15 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private failures = 0;
   private lastSuccess?: Date;
   private readonly mcpServersChanged = new vscode.EventEmitter<void>();
+  private readonly timelineChanged = new vscode.EventEmitter<undefined>();
+  private readonly timeline = new UnfoldTimeline({
+    parseRemote,
+    signedIn: async () => !this.configurationError && Boolean(await this.context.secrets.get(this.current.secretKey)),
+    trusted: () => vscode.workspace.isTrusted,
+    repositories: async () => (await gitApi().catch(() => undefined))?.repositories ?? [],
+    log: async (root, file) => { const git = await gitApi().catch(() => undefined); return (await promisify(execFile)(git?.git?.path || 'git', ['log', '--first-parent', '--format=%H %ct', '--max-count=2000', '--', file], { cwd: root, maxBuffer: 8 * 1024 * 1024, timeout: 15_000, windowsHide: true })).stdout; },
+    reader: () => this.configurationError ? undefined : { origin: this.current.origin, ploegNow: () => this.current.ploegNow(), closedWorkItems: (team, cursor) => this.current.request(`/api/ploeg/work-items?${new URLSearchParams({ team, state: 'closed', cursor })}`), workItemCard: id => this.current.workItemCard(id) },
+  });
 
   constructor(context: vscode.ExtensionContext, core: Core) {
     this.context = context;
@@ -180,6 +193,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     register('review', async value => { const id = await this.choose(value, 'Review which session?'); if (!id) return; const decision = await vscode.window.showQuickPick([{ label: '$(check) Accept', description: 'The outcome is fit to take further', value: 'accepted' as const }, { label: '$(circle-slash) Reject', description: 'Say why so the next attempt can use it', value: 'rejected' as const }], { title: 'Record your review', ignoreFocusOut: true }); if (decision) await this.review(id, decision.value); });
     this.registerMcpServers(context);
     this.registerLanguageModelTools(context);
+    this.registerTimeline(context);
     this.timer = this.poll();
     void this.refresh();
     void this.attachAgentHostOnStart().finally(() => this.watchAgentsWindow());
@@ -202,6 +216,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private connectionChanged() {
     this.generation++;
     this.mcpServersChanged.fire();
+    this.forgetTimeline();
     this.hideAgentsWindow();
     this.failures = 0;
     this.lastSuccess = undefined;
@@ -255,6 +270,32 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       }, token)) as vscode.LanguageModelToolResult,
     });
     context.subscriptions.push(api.register('unfold_now', tool('unfold_now')), api.register('unfold_get_work', tool('unfold_get_work')), api.register('unfold_find_work', tool('unfold_find_work')));
+  }
+
+  private registerTimeline(context: vscode.ExtensionContext) {
+    context.subscriptions.push(this.timelineChanged);
+    const api = timelineApi<object, { id?: string; description?: string; tooltip?: string; command?: vscode.Command; contextValue?: string; iconPath?: vscode.ThemeIcon }>(vscode as unknown as Parameters<typeof timelineApi>[0]);
+    if (!api) return;
+    try {
+      context.subscriptions.push(api.register({
+        onDidChangeTimeline: this.timelineChanged.event,
+        provideTimeline: async (uri: vscode.Uri, options: { triggerKind?: unknown }, token: vscode.CancellationToken) => {
+          if (uri.scheme !== 'file') return undefined;
+          const entries = await this.timeline.entries(uri.fsPath, api.invoked(options.triggerKind), () => token.isCancellationRequested);
+          return { items: entries.map(entry => {
+            const item = api.item(entry.label, entry.timestamp);
+            Object.assign(item, { id: entry.id, description: entry.description, tooltip: entry.tooltip, contextValue: timelineItemContext, iconPath: new vscode.ThemeIcon('unfold-mark'), command: { command: 'unfold.openWorkItem', title: 'Open Work Item', arguments: [entry.workItem] } });
+            this.timeline.remember(item, entry.pullRequestUrl);
+            return item;
+          }) };
+        },
+      }));
+    } catch { return; }
+  }
+
+  private forgetTimeline() {
+    this.timeline.reset();
+    this.timelineChanged.fire(undefined);
   }
 
   private async ploegMcp(): Promise<RemoteMcpServer | undefined> {
@@ -319,6 +360,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
 
   private offline(error: unknown) {
     this.cachedBootstrap = undefined;
+    this.timeline.reset();
+    if (this.lastSuccess) this.timelineChanged.fire(undefined);
     this.lastSuccess = undefined;
     const needsLogin = error instanceof ApiError && error.status === 401;
     const gateway = gatewayWantsCredential(error);
@@ -369,6 +412,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       const handOffs = await this.readHandOffs(client, freshNow);
       if (client !== this.current || generation !== this.generation || this.disposed) return;
       this.failures = 0;
+      if (!this.lastSuccess) this.timelineChanged.fire(undefined);
       this.lastSuccess = new Date();
       this.cachedBootstrap = bootstrap;
       this.ploeg.connected();
@@ -571,7 +615,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   }
 
   private async openPullRequest(value?: NowEntry): Promise<void> {
-    const url = value?.kind === 'item' ? safeHttpsUrl(value.item.pullRequestUrl) : value?.kind === 'handoff' ? safeHttpsUrl(value.handoff.workItem?.pullRequestUrl) : undefined;
+    const url = value?.kind === 'item' ? safeHttpsUrl(value.item.pullRequestUrl) : value?.kind === 'handoff' ? safeHttpsUrl(value.handoff.workItem?.pullRequestUrl) : safeHttpsUrl(this.timeline.pullRequestOf(value));
     if (!url) throw new Error('This Work Item has no HTTPS pull request link yet.');
     await vscode.env.openExternal(vscode.Uri.parse(url));
   }
