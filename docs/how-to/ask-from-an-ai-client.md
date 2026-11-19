@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Read apps/unfold/src/mcp.ts, apps/unfold/scripts/mcp.ts and apps/unfold/src/auth.ts against the MCP 2026-07-28 versioning, stdio and MRTR pages; ran apps/unfold/test/mcp.test.ts and apps/unfold/test/mcp-actions.test.ts. The Ploeg section was read against apps/ploeg cmd/ploeg-mcp on 2026-10-17. The action tools were not checked against a real client or the staging cluster. The MCP Apps section was read against apps/unfold/src/mcp-apps.ts and the MCP Apps 2026-01-26 specification, the client table against each linked page on 2026-10-30, and the card was rendered in headless Chromium through a test host; no real client was tried. The hand-off task section was read against apps/unfold/src/mcp.ts and Claude Code's MCP tasks pages on 2026-10-30, and apps/unfold/test/mcp-tasks.test.ts passed; Claude Code itself was not tried."
+last_verified: 2026-11-19
+verified_by: "Read apps/unfold/src/mcp.ts, apps/unfold/scripts/mcp.ts and apps/unfold/src/auth.ts against the MCP 2026-07-28 versioning, stdio and MRTR pages; ran apps/unfold/test/mcp.test.ts and apps/unfold/test/mcp-actions.test.ts. The Ploeg section was read against apps/ploeg cmd/ploeg-mcp on 2026-10-17. The action tools were not checked against a real client or the staging cluster. The MCP Apps section was read against apps/unfold/src/mcp-apps.ts and the MCP Apps 2026-01-26 specification, the client table against each linked page on 2026-10-30, and the card was rendered in headless Chromium through a test host; no real client was tried. The hand-off task section was read against apps/unfold/src/mcp.ts and Claude Code's MCP tasks pages on 2026-10-30, and apps/unfold/test/mcp-tasks.test.ts passed; Claude Code itself was not tried. The prompts section was read against apps/unfold/src/mcp-prompts.ts on 2026-11-19, and apps/unfold/test/mcp-prompts.test.ts passed; VS Code itself was not tried."
 ---
 
 # Ask Unfold and Ploeg from an AI client
@@ -84,6 +84,18 @@ When you hand a task off from Claude Code (terminal sessions, version 2.1.304 or
 * Stopping the task in `/tasks` only stops following it. The Work Item keeps running; stop it with `unfold_stop_work`.
 
 The VS Code extension, the desktop app, subagents and a one-shot `claude -p` get the hand-off's summary as before. To set up the terminal side, including from VS Code's integrated terminal, see [Follow hand-offs as tasks in a terminal](follow-hand-offs-as-tasks-in-a-terminal.md). How the server side works is in [Serve Unfold's MCP tools over HTTPS](serve-unfold-mcp-over-https.md#follow-a-hand-off-as-a-task). This has been run against a test client only, not Claude Code itself.
+
+### Slash commands from prompts
+
+`unfold-mcp` also offers three MCP prompts, over stdio and over HTTPS. VS Code chat shows each as a slash command named after the server you registered, such as `/mcp.unfold.now`:
+
+| Prompt | Arguments | Asks the model to |
+| --- | --- | --- |
+| `now` | none | Call `unfold_now` and say what waits, reading only |
+| `handoff` | `source`, `task`, `team` | Call `unfold_hand_off` for that tracker task and Team |
+| `takeover` | `work_item` | Call `unfold_take_over` for that Work Item |
+
+Choosing a prompt only fills in the chat. Nothing is handed off or taken over until the tool runs and you confirm, as for every action above. While you type `work_item`, the client completes the ids and titles of the Work Items Unfold's Now page shows you, running ones first; `team` completes your Teams, or, once `source` and `task` are filled in, only the Teams Unfold offers for that task. A viewer gets no Teams. Completion shows at most 20 values, and when Unfold cannot be read it shows none while the prompt still works. Only the id of a completed Work Item reaches the prompt; its title stays out of it. A client that never asks for prompts gets the same tools and answers as before. The prompts are tested against a test client only, not in a running VS Code.
 
 Every action leaves an Action Record with you, the channel (your credential's name and the client, such as `unfold-mcp on ryan-pc-mint (Claude Code 2.1.296)`, or `mcp:<client>` over HTTPS) and the confirmation: an id and the SHA-256 of the exact text you agreed to. Ploeg receives the same channel and confirmation. You find them under **Who did what** on the Work Item and on your Activity page. In the demo, the confirmation and the result both say it is the demo, and nothing real changes.
 
