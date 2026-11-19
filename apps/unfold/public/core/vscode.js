@@ -1,7 +1,7 @@
 import { extensionId } from './checkout.js';
 
 /** Where the Unfold extension is listed for VS Code forks that use Open VSX. */
-export const openVsxListing = 'https://open-vsx.org/extension/unfold-hq/unfold';
+export const openVsxListing = 'https://open-vsx.org/extension/unfold-hq/unfold-workbench';
 
 /** Opens the Unfold extension in VS Code's own Extensions view, from whichever gallery that editor uses. */
 export const extensionViewLink = `vscode:extension/${extensionId}`;
