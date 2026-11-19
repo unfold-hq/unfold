@@ -36,7 +36,7 @@
     "baseUrl": "https://gateway.internal.example/v1"
   },
   "docker": {
-    "image": "ghcr.io/unfold-hq/unfold-agent:0.4.0-rc.132",
+    "image": "ghcr.io/unfold-hq/unfold-agent:0.4.0-rc.135-arm64",
     "cpus": 2,
     "memoryMb": 4096,
     "pidsLimit": 512
