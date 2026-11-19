@@ -163,7 +163,7 @@ The client offers AHP `1.0.0, 0.9.0` (`platform/agentHost/common/agentHostProtoc
 | Repository `enabledPlugins` | **Docs** | See the plugin table | S | M14 |
 | Contact-admin links (`communication.support.url`) and Private Marketplace blocking | **Docs** | [1.146 help links](https://code.visualstudio.com/updates/v1_146#_organization-help-links-for-policy-restrictions), [#341049](https://github.com/microsoft/vscode/pull/341049); neither is in the "In a managed VS Code" section of [install-the-unfold-plugin.md](../../../../docs/how-to/install-the-unfold-plugin.md) | S | M14 |
 | Enterprise proxies | **Docs**, after a check | [1.146 proxies](https://code.visualstudio.com/updates/v1_146#_copilot-sessions-behind-enterprise-proxies), [#347494](https://github.com/microsoft/vscode/issues/347494). Whether the agent-host WebSocket follows PAC, Kerberos and Basic-auth proxies is not verified | S | M14 |
-| `workbench.externalUriOpeners` for Unfold's origin | **Docs** | [1.147 integrated browser](https://code.visualstudio.com/updates/v1_147#_open-nonlocalhost-links-in-the-integrated-browser): Work Item pages linked from chat open beside the session. Not verified for links clicked inside chat | S | M14 |
+| `workbench.externalUriOpeners` for Unfold's origin | **Docs** | [1.147 integrated browser](https://code.visualstudio.com/updates/v1_147#_open-non-localhost-links-in-the-integrated-browser): Work Item pages linked from chat open beside the session. Not verified for links clicked inside chat | S | M14 |
 
 ## The plan
 
@@ -295,3 +295,13 @@ Low priority.
 - That the Agent Plugin's `.mjs` hook scripts run in the Copilot harness's environment (M12).
 - The full model-comparison eligibility of the remote provider, and why VS Code set `supportsOneTimeAutomation: false`: the source tree was a shallow clone without history.
 - The "since" version of AHP commands and fields is inferred from the changelog; open AHP pull requests other than #612 were checked in 1.147 by name only.
+
+## Corrections, 2026-11-19
+
+Later on 2026-11-19, reading the source behind the plan corrected five of its statements. The body above is left as it was written, except for one broken link.
+
+- **The integrated-browser link.** The release-notes anchor was `v1_147#_open-nonlocalhost-links-in-the-integrated-browser`, which does not exist. The page's anchor is [`#_open-non-localhost-links-in-the-integrated-browser`](https://code.visualstudio.com/updates/v1_147#_open-non-localhost-links-in-the-integrated-browser); the link in the Docs table now points there.
+- **M13, icons.** **(source)** VS Code 1.147.0 accepts an MCP icon only as `image/webp`, `image/png`, `image/jpeg`, `image/jpg` or `image/gif` (`workbench/contrib/mcp/common/mcpIcons.ts:13-19`, checked in `validateIcon` at `:41`), so an SVG icon is dropped. A tool does not inherit its server's icon (`workbench/contrib/mcp/common/mcpLanguageModelToolContribution.ts:143-147`), so each tool needs its own. An `http(s)` icon must come from the authority of the MCP server's own URL and is ignored for a stdio server (`mcpIcons.ts:52-64`). `unfold-mcp` lists 23 tools, not 20 ([mcp-http.test.ts:212](../../test/mcp-http.test.ts#L212)). [#145](https://github.com/unfold-hq/unfold/pull/145) builds PNG icons served by the instance.
+- **M08 and M21 are dropped.** Multi-select questions already exist ([host.ts:208](../../src/ahp/host.ts#L208), pinned in [ahp-rendering.test.ts:141](../../test/ahp-rendering.test.ts#L141)), and a Ploeg question carries no type, so there is no number or integer question to offer. A live Run follows Ploeg's polled transcript, which carries no partial tool input, so there is nothing to stream as `chat/toolCallDelta`.
+- **S06, route writes.** Ploeg already deletes tracker bindings and Teams ([`operator_tracker_bindings.go`](https://github.com/ploeg-hq/ploeg/blob/development/pkg/httpapi/operator_tracker_bindings.go#L79), [`operator_runtime_teams.go`](https://github.com/ploeg-hq/ploeg/blob/development/pkg/httpapi/operator_runtime_teams.go#L19)). Pausing a route and running one now do not exist in Ploeg; those two still need a contract.
+- **M02, a stale Work Item.** A stale Work Item stays an error, as the state map of [ADR 0023](../adrs/0023-unfold-submits-work-to-ploeg-and-never-executes-it.md) in [work-items.ts:113](../../src/ahp/work-items.ts#L113) has it; M02 keeps only the Inbox acknowledgement.
