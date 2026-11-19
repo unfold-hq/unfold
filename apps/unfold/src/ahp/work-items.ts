@@ -42,6 +42,25 @@ export function workItemMessageRefusal(item: Pick<PloegItem, 'id' | 'state' | 'p
   return workItemRefusals.message;
 }
 
+/** Whether a message is the prompt VS Code 1.147 sends from the Fix Checks or Address Comments banner of a session with a pull request. */
+export const isPullRequestBannerPrompt = (text: unknown) => typeof text === 'string' && /^\/(fix-ci|act-on-feedback)(\s|$)/.test(text.trimStart());
+
+/**
+ * What Fix Checks or Address Comments on a Work Item session is told: Ploeg runs the Work Item, so the banner's prompt
+ * starts nothing, and the reply names what does instead (a steer for its next Round, or Try Again) and what that spends.
+ */
+export function workItemBannerReply(item: Pick<PloegItem, 'id' | 'state' | 'team' | 'pullRequest' | 'latestShift'>): string {
+  const shift = item.latestShift;
+  const head = `Ploeg runs #${item.id}, so Fix Checks and Address Comments start nothing here.`;
+  const restart = `Try Again restarts it from Round 1 once you confirm, and spends from Team ${item.team}'s budget${shift ? `, up to ${money(shift.budgetUsd)} like its last attempt` : ''}.`;
+  switch (item.state) {
+    case 'leased': case 'queued': return `${head} Type what it should fix instead: your message is saved as a steer for its next Round, which spends from the attempt already open${shift ? ` (${money(shift.spentUsd)} of ${money(shift.budgetUsd)} spent)` : ''}, and nothing more.`;
+    case 'needs_human': case 'stale': return `${head} ${restart} Type what it should fix to restart it with that note instead; that asks you first too.`;
+    case 'awaiting_review': return `${head} Ask for changes on ${item.pullRequest?.number ? `pull request #${item.pullRequest.number}` : 'its pull request'} on the forge. Ploeg restarts it only once it stops and needs you; then ${restart}`;
+    default: return workItemMessageRefusal(item);
+  }
+}
+
 /** The refusal for an action dispatched on a Work Item session's session or chat channel. */
 export function workItemRefusal(actionType: unknown): string {
   switch (actionType) {
@@ -127,7 +146,10 @@ export function workItemActivity(item: PloegItem, runs: readonly PloegRun[] = []
 /** Whether an Operator Execution owns the Work Item: an Unfold session bound to it, which the Agents window already lists as that session. Ploeg opens such a Shift on the branch `operator/<session>`. */
 
 /** One Work Item as the host knows it for a viewer: Ploeg's record, the Runs behind its activity, and whether Ploeg could not be read since. */
-export type WorkItemRecord = { workItemId: string; publicId: string; item: PloegItem; activity: WorkItemActivity; stale: boolean };
+export type WorkItemRecord = { workItemId: string; publicId: string; item: PloegItem; activity: WorkItemActivity; stale: boolean; modifiedAt?: string };
+
+/** The modification time VS Code reads for a Work Item session: the one kept while nothing the person acts on changed, otherwise Ploeg's update time. */
+const modifiedAtOf = (entry: WorkItemRecord) => entry.modifiedAt ?? entry.item.updatedAt;
 
 function record(item: PloegItem, runs: readonly PloegRun[] = [], stale = false, facts: WorkItemReviewFacts = {}): WorkItemRecord {
   return { workItemId: item.id, publicId: workItemSessionId(item.id), item, activity: workItemActivity(item, runs, facts), stale };
@@ -142,9 +164,36 @@ const activityText = (entry: WorkItemRecord, by?: string) => {
 /** The status bits of a Work Item session before the viewer's own read and archive flags. */
 export const workItemStatus = (entry: WorkItemRecord) => statusBits[entry.activity.status];
 
+/** The `_meta` key under which VS Code 1.147 reads a session's pull requests and issues, for its pull-request pill, CI and Inbox. */
+export const sessionArtifactsMetaKey = 'agentHost/sessionArtifacts';
+
+const webLink = (url: string | null | undefined) => { try { return url && ['https:', 'http:'].includes(new URL(url).protocol) ? url : undefined; } catch { return undefined; } };
+const onGitHub = (url: string) => ['github.com', 'www.github.com'].includes(new URL(url).hostname);
+const trackerTask = (item: Pick<PloegItem, 'provider' | 'externalId'>) => {
+  const tracker = findTaskProvider(item.provider)?.label ?? 'tracker';
+  const reference = ploegTrackerReference(item.provider, item.externalId) ?? item.externalId;
+  return reference ? `${tracker} task ${reference}` : `${tracker} task`;
+};
+
+/**
+ * A Work Item's tracker issue and pull request as VS Code session artifacts, oldest first as VS Code stores them. The
+ * pull request is an artifact the work produced, the issue a reference it came from; `isGitHub` holds only for github.com,
+ * so a pull request on another forge shows as a plain link and VS Code reads no CI for it.
+ */
+export function workItemArtifacts(item: Pick<PloegItem, 'id' | 'provider' | 'externalId' | 'url' | 'pullRequest'>): Json[] {
+  const issue = item.provider === 'manual' || item.provider === 'ploeg' ? undefined : webLink(item.url);
+  const pullRequest = webLink(item.pullRequest?.url);
+  const number = item.pullRequest?.number;
+  return [
+    ...(issue ? [{ id: `wi-${item.id}-issue`, type: 'issue', label: trackerTask(item), isArtifact: false, link: issue, isGitHub: onGitHub(issue) }] : []),
+    ...(pullRequest ? [{ id: `wi-${item.id}-pull-request`, type: 'pullRequest', label: number ? `Pull request #${number}` : 'Pull request', isArtifact: true, link: pullRequest, isGitHub: onGitHub(pullRequest) }] : []),
+  ];
+}
+
 function meta(entry: WorkItemRecord): Json {
   const { item } = entry;
-  return { [workItemMetaKey]: { id: item.id, team: item.team, state: item.state, url: item.url, provider: item.provider, externalId: item.externalId, pullRequest: item.pullRequest ? { url: item.pullRequest.url, number: item.pullRequest.number } : null, round: item.latestShift?.round ?? null, budgetUsd: item.latestShift?.budgetUsd ?? null, spentUsd: item.latestShift?.spentUsd ?? null, ...(entry.activity.reason ? { reason: entry.activity.reason } : {}), stale: entry.stale, readOnly: true } };
+  const artifacts = workItemArtifacts(item);
+  return { ...(artifacts.length ? { [sessionArtifactsMetaKey]: artifacts } : {}), [workItemMetaKey]: { id: item.id, team: item.team, state: item.state, url: item.url, provider: item.provider, externalId: item.externalId, pullRequest: item.pullRequest ? { url: item.pullRequest.url, number: item.pullRequest.number } : null, round: item.latestShift?.round ?? null, budgetUsd: item.latestShift?.budgetUsd ?? null, spentUsd: item.latestShift?.spentUsd ?? null, ...(entry.activity.reason ? { reason: entry.activity.reason } : {}), stale: entry.stale, readOnly: true } };
 }
 
 /**
@@ -152,14 +201,14 @@ function meta(entry: WorkItemRecord): Json {
  * cannot take it. `by` names, for this viewer, the person who handed it off; a queued Work Item's activity says so.
  */
 export function workItemChatSummary(entry: WorkItemRecord, spelling: Spelling, flags: ViewFlags, by?: string): Json {
-  return { resource: spelling.chat, title: `#${entry.item.id} ${entry.item.title}`, status: workItemStatus(entry) | flags.chat, activity: activityText(entry, by), modifiedAt: entry.item.updatedAt, origin: { kind: 'user' }, interactivity: 'full' };
+  return { resource: spelling.chat, title: `#${entry.item.id} ${entry.item.title}`, status: workItemStatus(entry) | flags.chat, activity: activityText(entry, by), modifiedAt: modifiedAtOf(entry), origin: { kind: 'user' }, interactivity: 'full' };
 }
 
 /** A Work Item session in `listSessions` and the root channel: `#<id> <title>`, its state, the viewer's own flags and, while it is queued, who handed it off. */
 export function workItemSummary(entry: WorkItemRecord, spelling: Spelling, flags: ViewFlags, protocolVersion: string, by?: string): Json {
   return {
     resource: spelling.session, provider: 'unfold', title: `#${entry.item.id} ${entry.item.title}`, status: workItemStatus(entry) | flags.session, activity: activityText(entry, by),
-    createdAt: entry.item.createdAt, modifiedAt: entry.item.updatedAt,
+    createdAt: entry.item.createdAt, modifiedAt: modifiedAtOf(entry),
     ...sessionChatCatalog(protocolVersion, workItemChatSummary(entry, spelling, flags, by)),
     _meta: meta(entry),
   };
@@ -229,9 +278,28 @@ export function verdictParts(run: PloegRun, item: PloegItem): Json[] {
   return [{ kind: 'markdown', id: `${runToolCallId(run)}-verdict`, content: `**${headline}.**${gist ? ` ${gist}` : ''} Open ${role} above for the full report.` }];
 }
 
-function turnOf(round: Round, index: number, spelling: Spelling, item: PloegItem): Json {
+/** A turn's usage in VS Code's usage hover (AHP `UsageInfo`). */
+export type RoundUsage = { inputTokens: number; outputTokens: number; cacheReadTokens?: number; model?: string };
+
+/**
+ * What a finished Round used, summed from what Ploeg recorded of its Runs: undefined while a Run is unfinished or lacks
+ * its input or output tokens, cache-read tokens only when every Run reports them, and the model only when every Run
+ * reports the same single one. Nothing is estimated.
+ */
+export function roundUsage(runs: readonly PloegRun[]): RoundUsage | undefined {
+  if (!runs.length || runs.some(run => run.state !== 'finished' || run.usage?.inputTokens === undefined || run.usage.outputTokens === undefined)) return undefined;
+  const sum = (count: (run: PloegRun) => number | undefined) => runs.reduce((total, run) => total + (count(run) ?? 0), 0);
+  const cacheReads = runs.every(run => run.usage?.cacheReadInputTokens !== undefined) ? { cacheReadTokens: sum(run => run.usage?.cacheReadInputTokens) } : {};
+  const models = new Set(runs.map(run => run.usage?.models?.length === 1 ? run.usage.models[0] : ''));
+  const [model] = [...models];
+  return { inputTokens: sum(run => run.usage?.inputTokens), outputTokens: sum(run => run.usage?.outputTokens), ...cacheReads, ...(models.size === 1 && model ? { model } : {}) };
+}
+
+function turnOf(round: Round, index: number, spelling: Spelling, item: PloegItem, demo: boolean): Json {
   const turn = { id: round.turnId, startedAt: round.startedAt, message: turnMessage(round), responseParts: [...noticePart(round, index), ...round.runs.flatMap(run => [runPart(run, spelling), ...verdictParts(run, item)])] };
-  return round.open ? turn : { ...turn, duration: duration(round.startedAt, round.finishedAt), state: 'complete' };
+  if (round.open) return turn;
+  const usage = demo ? undefined : roundUsage(round.runs);
+  return { ...turn, duration: duration(round.startedAt, round.finishedAt), state: 'complete', ...(usage ? { usage } : {}) };
 }
 
 /**
@@ -242,9 +310,7 @@ export function briefText(item: PloegItem, by?: string): string {
   const team = ` Team ${item.team} runs it.`;
   if (item.provider === 'manual') return `${by ? `Handed off by ${by}.` : 'Handed off to Ploeg.'}${team}`;
   if (item.provider === 'ploeg') return `Proposed by an agent${item.sourceWorkItemId ? ` while it worked on #${item.sourceWorkItemId}` : ''}.${team}`;
-  const tracker = findTaskProvider(item.provider)?.label ?? 'tracker';
-  const reference = ploegTrackerReference(item.provider, item.externalId) ?? item.externalId;
-  const task = reference ? `${tracker} task ${reference}` : `${tracker} task`;
+  const task = trackerTask(item);
   return `From ${item.url ? `[${task}](${item.url})` : task}${by ? `, handed off by ${by}` : ''}.${team}`;
 }
 
@@ -262,7 +328,7 @@ function briefTurn(item: PloegItem, by?: string): Json {
  * subagent call, and nothing a Run did not report. `by` names, for this viewer, the person who handed it off.
  */
 export function workItemChatState(entry: WorkItemRecord, detail: PloegDetail, spelling: Spelling, flags: ViewFlags, by?: string): Json {
-  const turns = rounds(detail).map((round, index) => ({ round, turn: turnOf(round, index, spelling, detail.item) }));
+  const turns = rounds(detail).map((round, index) => ({ round, turn: turnOf(round, index, spelling, detail.item, Boolean(detail.demo)) }));
   const active = turns.find(({ round }) => round.open);
   return { ...workItemChatSummary(entry, spelling, flags, by), turns: [briefTurn(detail.item, by), ...turns.filter(({ round }) => !round.open).map(({ turn }) => turn)], ...(active ? { activeTurn: active.turn } : {}), changesets: [] };
 }
@@ -365,7 +431,7 @@ export function workItemTranscriptActions(before: PloegDetail, after: PloegDetai
   rounds(after).forEach((round, index) => {
     const prior = previous.get(round.key);
     if (prior && !prior.open) return;
-    const turn = turnOf(round, index, spelling, after.item);
+    const turn = turnOf(round, index, spelling, after.item, Boolean(after.demo));
     if (!prior) {
       actions.push({ to: 'chat', action: { type: 'chat/turnStarted', turnId: turn.id, startedAt: turn.startedAt, message: turn.message } });
       for (const part of turn.responseParts) actions.push(...(part.kind === 'toolCall' ? spawnActions(turn.id, part) : [{ to: 'chat' as const, action: { type: 'chat/responsePart', turnId: turn.id, part } }]));
@@ -378,6 +444,7 @@ export function workItemTranscriptActions(before: PloegDetail, after: PloegDetai
         else if (part.toolCall.status === 'completed' && previousRuns.get(run.id)?.state !== 'finished') actions.push(completeAction(turn.id, part.toolCall), ...verdicts);
       }
     }
+    if (turn.usage) actions.push({ to: 'chat', action: { type: 'chat/usage', turnId: turn.id, usage: turn.usage } });
     if (!round.open) actions.push({ to: 'chat', action: { type: 'chat/turnComplete', turnId: turn.id, duration: turn.duration } });
   });
   for (const run of [...after.runs].sort(byId)) actions.push(...runChatActions(previousRuns.get(run.id), run, spelling, after.item.updatedAt));
@@ -417,6 +484,7 @@ export class WorkItemSessions {
   private readonly finished = new Map<string, PloegItem>();
   private readonly recent = new Map<string, { team: string; at: string }>();
   private readonly admitters = new Map<string, string>();
+  private readonly shown = new Map<string, { at: string; facts: string; question?: string }>();
   private cursor: string | undefined;
   private seeding: Promise<void> | undefined;
   private timer?: ReturnType<typeof setInterval>;
@@ -493,7 +561,7 @@ export class WorkItemSessions {
     }
     if (sessionDriven(detail.item)) return undefined;
     this.keep(workItemId, detail);
-    const entry = record(detail.item, detail.runs, this.stale, await this.reviewFacts(detail.item));
+    const entry = this.stamped(record(detail.item, detail.runs, this.stale, await this.reviewFacts(detail.item)), detail);
     const seen = this.seen.get(user.id) ?? new Map();
     seen.set(entry.publicId, { entry, fingerprint: fingerprint(entry) });
     this.seen.set(user.id, seen);
@@ -567,7 +635,7 @@ export class WorkItemSessions {
     try { detail = await this.ploeg.detail(allowed[0], workItemId, true); }
     catch (error) { if (!(error instanceof PloegError) || ![403, 404].includes(error.status)) throw error; }
     if (!detail) { for (const user of allowed) if (this.seen.get(user.id)?.has(publicId)) this.publishList(user, [], [], [publicId]); return; }
-    const entry = record(detail.item, detail.runs, false, await this.reviewFacts(detail.item));
+    const entry = this.stamped(record(detail.item, detail.runs, false, await this.reviewFacts(detail.item)), detail);
     const listed = !sessionDriven(detail.item) && this.inWindow(detail.item);
     const before = this.details.get(workItemId);
     this.keep(workItemId, detail);
@@ -653,7 +721,25 @@ export class WorkItemSessions {
     const runs = new Map(await Promise.all(open.filter(item => item.state === 'leased').map(async item => [item.id, (await this.ploeg.detail(user, item.id).catch(() => undefined))?.runs ?? []] as const)));
     const read = (kind: 'ci' | 'approved') => open.filter(item => reviewRead(nowItem(item)) === kind).slice(0, reviewRowsRead);
     const facts = new Map(await Promise.all([...read('ci'), ...read('approved')].map(async item => [item.id, await this.reviewFacts(item)] as const)));
-    return [...open, ...finished].slice(0, this.cap).map(item => record(item, runs.get(item.id) ?? [], false, facts.get(item.id)));
+    return [...open, ...finished].slice(0, this.cap).map(item => this.stamped(record(item, runs.get(item.id) ?? [], false, facts.get(item.id))));
+  }
+
+  /**
+   * The record with the modification time VS Code 1.147's Inbox compares to bring an acknowledged session back: the time
+   * last shown while the Work Item's state, reason, pull request and waiting questions stay the same, otherwise Ploeg's
+   * update time. A read without the detail leaves the waiting questions as last seen.
+   */
+  private stamped(entry: WorkItemRecord, detail?: PloegDetail): WorkItemRecord {
+    const { item } = entry;
+    const facts = JSON.stringify([item.state, entry.activity.reason?.code ?? null, item.pullRequest?.number ?? null]);
+    const question = detail ? (workItemQuestions(detail)?.questions.map(asked => asked.id).join(' ') ?? '') : undefined;
+    const prior = this.shown.get(item.id);
+    const same = prior !== undefined && prior.facts === facts && (question === undefined || prior.question === undefined || prior.question === question);
+    const at = same ? prior.at : item.updatedAt;
+    this.shown.delete(item.id);
+    this.shown.set(item.id, { at, facts, question: question ?? (same ? prior.question : undefined) });
+    if (this.shown.size > 5000) this.shown.delete(this.shown.keys().next().value!);
+    return { ...entry, modifiedAt: at };
   }
 
   private async reviewFacts(item: PloegItem): Promise<WorkItemReviewFacts> {

@@ -445,6 +445,24 @@
         }
       }
     },
+    "chatSkills": [
+      {
+        "path": "./media/agent/skills/operate-agent-session/SKILL.md",
+        "when": "unfold.connected"
+      }
+    ],
+    "chatInstructions": [
+      {
+        "path": "./media/unfold.instructions.md",
+        "when": "unfold.connected"
+      }
+    ],
+    "chatPlugins": [
+      {
+        "path": "./media/agent/plugin",
+        "when": "unfold.connected"
+      }
+    ],
     "mcpServerDefinitionProviders": [
       {
         "id": "unfold.ploeg",
@@ -628,6 +646,34 @@
         {
           "command": "unfold.openInAgentsWindow",
           "when": "unfold.connected"
+        },
+        {
+          "command": "unfold.refresh",
+          "when": "!isSessionsWindow"
+        },
+        {
+          "command": "unfold.refreshTasks",
+          "when": "!isSessionsWindow"
+        },
+        {
+          "command": "unfold.refreshPloeg",
+          "when": "!isSessionsWindow"
+        },
+        {
+          "command": "unfold.openAgentsWindow",
+          "when": "!isSessionsWindow"
+        },
+        {
+          "command": "unfold.attachSelection",
+          "when": "!isSessionsWindow"
+        },
+        {
+          "command": "unfold.attachFile",
+          "when": "!isSessionsWindow"
+        },
+        {
+          "command": "unfold.followHandOffsInTerminal",
+          "when": "!isSessionsWindow"
         }
       ],
       "view/title": [
@@ -897,7 +943,7 @@
       "editor/context": [
         {
           "command": "unfold.attachSelection",
-          "when": "editorHasSelection && isWorkspaceTrusted",
+          "when": "editorHasSelection && isWorkspaceTrusted && !isSessionsWindow",
           "group": "unfold"
         }
       ]

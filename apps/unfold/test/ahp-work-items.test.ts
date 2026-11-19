@@ -4,13 +4,13 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../src/auth.ts';
 import { ploegDemo } from '../src/ploeg-demo.ts';
-import { PloegClient, cancelShiftChanged, noteFailures, nowItem, type PloegItem } from '../src/ploeg.ts';
+import { PloegClient, cancelShiftChanged, detail as parseDetail, noteFailures, nowItem, type PloegItem } from '../src/ploeg.ts';
 import { listReason, waitingGroup } from '../public/core/reasons.js';
 import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
-import { briefText, noAgentMessages, noRunMessages, ploegRunToolName, workItemActivity, workItemMessageRefusal, workItemRefusals } from '../src/ahp/work-items.ts';
+import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
-import { unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
+import { messageLimits, unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
 import { runChatChannel } from '../src/ahp/runs.ts';
 import { condenseTraceback } from '../src/ahp/tracebacks.ts';
@@ -321,6 +321,36 @@ test('a viewer lists the open and recently finished Work Items of their teams, o
   await assert.rejects(op.rpc('subscribe', { channel: 'unfold:/wi-210' }), (error: Json) => error.code === -32001, 'an operator-owned Work Item is its Unfold session');
 });
 
+test('a Work Item session names its pull request and tracker issue under VS Code\'s session artifacts key, with GitHub only for github.com, and offers no merge', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const onGitHub = f.state.details.get('205')!.item;
+  Object.assign(onGitHub, { provider: 'github', externalId: 'acme/order-service#7', url: 'https://github.com/acme/order-service/issues/7', pullRequest: { ...onGitHub.pullRequest, url: 'https://github.com/acme/order-service/pull/42' } });
+  Object.assign(f.state.details.get('207')!.item, { url: 'https://tracker.invalid/tasks/T-207' });
+  const op = await f.attach('op-1');
+  const work = new Map(workItemsOf(await f.listed(op)).map(item => [item.resource, item]));
+  assert.deepEqual(work.get('unfold:/wi-205')!._meta[sessionArtifactsMetaKey], [
+    { id: 'wi-205-issue', type: 'issue', label: 'GitHub task acme/order-service#7', isArtifact: false, link: 'https://github.com/acme/order-service/issues/7', isGitHub: true },
+    { id: 'wi-205-pull-request', type: 'pullRequest', label: 'Pull request #42', isArtifact: true, link: 'https://github.com/acme/order-service/pull/42', isGitHub: true },
+  ], 'a github.com pull request and issue, which VS Code polls CI for with the person\'s own sign-in');
+  assert.deepEqual(work.get('unfold:/wi-207')!._meta[sessionArtifactsMetaKey].map((artifact: Json) => [artifact.type, artifact.link, artifact.isGitHub]), [['issue', 'https://tracker.invalid/tasks/T-207', false], ['pullRequest', 'https://forge.invalid/pulls/41', false]], 'another forge\'s pull request is a plain link, without CI');
+  assert.equal(work.get('unfold:/wi-201')!._meta[sessionArtifactsMetaKey], undefined, 'no pull request and no tracker link, no artifacts');
+  assert.deepEqual(work.get('unfold:/wi-205')!._meta['unfold.workItem'].pullRequest, { url: 'https://github.com/acme/order-service/pull/42', number: 42 }, 'Unfold\'s own key stays for other clients');
+  assert.deepEqual(workItemArtifacts({ ...(onGitHub as PloegItem), provider: 'manual', url: 'https://github.com/acme/order-service/issues/7', pullRequest: undefined }), [], 'a hand-off names no tracker issue');
+  assert.deepEqual(workItemArtifacts({ ...(onGitHub as PloegItem), pullRequest: { ...(onGitHub as PloegItem).pullRequest!, url: 'javascript:alert(1)' } }).map(artifact => artifact.type), ['issue'], 'only a web link becomes an artifact');
+
+  const session = (await op.rpc('subscribe', { channel: 'unfold:/wi-205' })).snapshot.state;
+  const chat = (await op.rpc('subscribe', { channel: defaultChatOf('unfold:/wi-205') })).snapshot.state;
+  assert.equal(session._meta[sessionArtifactsMetaKey].length, 2, 'the subscribed session carries the same artifacts');
+  assert.deepEqual([session.changesets, chat.changesets], [[], []], 'no changeset, so no pull-request operation and no Merge in VS Code\'s Inbox');
+  assert.equal(work.get('unfold:/wi-205')!.changesets, undefined);
+
+  Object.assign(f.state.details.get('201')!.item, { state: 'awaiting_review', updatedAt: new Date().toISOString(), pullRequest: { url: 'https://github.com/acme/order-service/pull/44', number: 44, mergeState: 'clean', baseBranch: 'main', headSha: 'fed', checkedAt: minutesAgo(0) } });
+  f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'ploegd:writer', action: 'work_item.awaiting_review', workItemId: '201', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  const opened = await op.until(message => message.method === 'root/sessionSummaryChanged' && message.params.session === 'unfold:/wi-201');
+  assert.equal(opened.params.changes._meta[sessionArtifactsMetaKey].at(-1).link, 'https://github.com/acme/order-service/pull/44', 'a pull request that opens later reaches the list without a new listing');
+});
+
 test('a Work Item\'s session takes no review comments, so it names no annotations channel', { timeout: testTimeout(20_000) }, async t => {
   const f = await fixture(t);
   const op = await f.attach('op-1');
@@ -415,7 +445,68 @@ test('the fleet poller follows Ploeg\'s events in order from its cursor and tell
   assert.ok(op.inbox.some(message => message.method === 'root/sessionSummaryChanged' && message.params.session === 'unfold:/wi-203' && message.params.changes.activity === 'Queued for delivery'));
 });
 
-test('Ploeg events page oldest first from an after cursor, scoped to the caller\'s teams', { timeout: testTimeout(20_000) }, async t => {
+test('a Work Item keeps its modification time while only Ploeg\'s update time moves, so an acknowledged one stays out of the VS Code Inbox, and takes a new one when its state changes', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const op = await f.attach('op-1');
+  const first = new Map(workItemsOf(await f.listed(op)).map(item => [item.resource, item.modifiedAt]));
+  for (const id of ['201', '202', '205']) assert.equal(first.get(`unfold:/wi-${id}`), f.state.details.get(id)!.item.updatedAt, 'a Work Item listed for the first time shows Ploeg\'s update time');
+  await f.host.workItems.tick();
+
+  const reviewed = f.state.details.get('205')!.item.updatedAt;
+  f.state.details.get('205')!.item.updatedAt = minutesAgo(0);
+  f.state.details.set('202', workItem('202', { state: 'leased', spent: 1.25, round: 2, updated: minutesAgo(0), runs: [{ id: '301', role: 'implementer', round: 1 }, { id: '311', role: 'reviewer', round: 2, state: 'running' }] }));
+  f.state.events.push(
+    { id: '1004', at: minutesAgo(0), actor: 'ploegd:review', action: 'work_item.checked', workItemId: '205', team: 'delivery', detail: {} },
+    { id: '1005', at: minutesAgo(0), actor: 'team:delivery', action: 'run.finished', workItemId: '202', team: 'delivery', detail: {} },
+  );
+  await f.host.workItems.tick();
+  await settled(op);
+  const changed = (resource: string, after = 0) => op.inbox.slice(after).filter(message => message.method === 'root/sessionSummaryChanged' && message.params.session === resource && 'modifiedAt' in message.params.changes).at(-1)?.params.changes;
+  assert.equal(changed('unfold:/wi-205')?.modifiedAt, reviewed, 'the same state, reason, pull request and question keep the time shown');
+  assert.equal(changed('unfold:/wi-202')?.activity, `Reviewer · Round 2 · ${money(1.25)}/${money(3)}`, 'the activity line still follows spend and Round');
+  assert.equal(changed('unfold:/wi-202')?.modifiedAt, first.get('unfold:/wi-202'), 'spend and Round alone keep the time shown');
+  assert.equal(workItemsOf(await f.listed(op)).find(item => item.resource === 'unfold:/wi-205')!.modifiedAt, reviewed, 'a fresh list keeps it too');
+
+  const mark = op.inbox.length;
+  const awaiting = minutesAgo(0);
+  f.state.details.set('202', workItem('202', { state: 'awaiting_review', pullRequest: 43, updated: awaiting, runs: [{ id: '301', role: 'implementer', round: 1 }, { id: '311', role: 'reviewer', round: 2 }] }));
+  f.state.events.push({ id: '1006', at: awaiting, actor: 'team:delivery', action: 'work_item.awaiting_review', workItemId: '202', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  await settled(op);
+  assert.equal(changed('unfold:/wi-202', mark)?.modifiedAt, awaiting, 'running to ready for review takes Ploeg\'s update time');
+});
+
+test('a question to a person keeps its input request id across a reconnect, and a new question gets a new id and a new modification time', { timeout: testTimeout(20_000) }, async t => {
+  const f = await commanding(t);
+  parkedOnQuestions(f.state);
+  const opened = (await f.client.rpc('subscribe', { channel: 'unfold:/wi-204' })).snapshot.state;
+  const asked = opened.inputNeeded[0].id;
+  await f.host.workItems.tick();
+
+  const again = await f.attach('op-1');
+  await f.listed(again);
+  const reopened = (await again.rpc('subscribe', { channel: 'unfold:/wi-204' })).snapshot.state;
+  assert.equal(reopened.inputNeeded[0].id, asked, 'the same question after a reconnect keeps its id');
+  assert.equal(reopened.modifiedAt, opened.modifiedAt);
+
+  const detail = f.state.details.get('204')!;
+  const moved = minutesAgo(0);
+  detail.item.updatedAt = moved;
+  Object.assign(detail.questions[0], { answer: 'Away from zero.', answeredBy: 'op-1', waitingForPerson: false });
+  detail.questions.push({ id: 'q302-3', shiftId: '9204', runId: '302', role: 'implementer', round: 1, to: 'person', text: 'Also round the tax lines?', answer: null, answeredBy: null, waitingForPerson: true });
+  detail.resume.waitingQuestionIds = ['q302-3'];
+  const mark = again.inbox.length;
+  f.state.events.push({ id: '1004', at: moved, actor: 'team:delivery', action: 'run.question_asked', workItemId: '204', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  await settled(again);
+  const requested = (await again.until(message => action(message, 'unfold:/wi-204', 'session/inputNeededSet') && again.inbox.indexOf(message) >= mark)).params.action.request;
+  assert.notEqual(requested.id, asked, 'a new question gets a new id');
+  assert.equal(requested.request.questions[0].message, 'Also round the tax lines?');
+  const summary = again.inbox.slice(mark).filter(message => message.method === 'root/sessionSummaryChanged' && message.params.session === 'unfold:/wi-204' && 'modifiedAt' in message.params.changes).at(-1)?.params.changes;
+  assert.equal(summary?.modifiedAt, moved, 'a new waiting question takes Ploeg\'s update time');
+});
+
+test('Ploeg events page oldest first from an after cursor, scoped to the caller\'s teams',{ timeout: testTimeout(20_000) }, async t => {
   const f = await fixture(t);
   f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'team:research', action: 'run.started', workItemId: '209', team: 'research', detail: {} });
   const ploeg = new PloegClient(f.server.config);
@@ -658,6 +749,32 @@ test('a Work Item waiting for review points a message at its pull request, and a
   const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'review-1', message: { text: 'Looks good, ship it', origin: { kind: 'user' } } });
   assert.equal((await f.answered(sent)).params.rejectionReason, workItemMessageRefusal(item('205')));
   assert.equal(f.state.writes.length, 0);
+});
+
+test('Fix Checks and Address Comments on a Work Item session start no Run: the reply names a steer or Try Again and what it spends', { timeout: testTimeout(20_000) }, async t => {
+  const item = (id: string) => world().details.get(id)!.item as PloegItem;
+  assert.ok(isPullRequestBannerPrompt('/fix-ci\nPull request: https://github.com/acme/order-service/pull/42\nFailed CI checks:'));
+  assert.ok(isPullRequestBannerPrompt('/act-on-feedback for #42'));
+  assert.ok(isPullRequestBannerPrompt('/fix-ci and /act-on-feedback'));
+  assert.ok(!isPullRequestBannerPrompt('/fix-cid'), 'only the banner\'s own commands');
+  assert.ok(!isPullRequestBannerPrompt('Please fix the checks'));
+  assert.equal(workItemBannerReply(item('205')), `Ploeg runs #205, so Fix Checks and Address Comments start nothing here. Ask for changes on pull request #42 on the forge. Ploeg restarts it only once it stops and needs you; then Try Again restarts it from Round 1 once you confirm, and spends from Team delivery's budget, up to ${money(3)} like its last attempt.`);
+  assert.equal(workItemBannerReply(item('204')), `Ploeg runs #204, so Fix Checks and Address Comments start nothing here. Try Again restarts it from Round 1 once you confirm, and spends from Team delivery's budget, up to ${money(3)} like its last attempt. Type what it should fix to restart it with that note instead; that asks you first too.`);
+  assert.equal(workItemBannerReply(item('202')), `Ploeg runs #202, so Fix Checks and Address Comments start nothing here. Type what it should fix instead: your message is saved as a steer for its next Round, which spends from the attempt already open (${money(0.5)} of ${money(3)} spent), and nothing more.`);
+  assert.equal(workItemBannerReply(item('207')), workItemMessageRefusal(item('207')));
+
+  const f = await commanding(t);
+  for (const [id, text] of [['205', '/fix-ci\nPull request: https://forge.invalid/pulls/42\nFailed CI checks:\n\nCheck: unit'], ['204', '/act-on-feedback'], ['202', '/fix-ci and /act-on-feedback']] as const) {
+    const chat = defaultChatOf(`unfold:/wi-${id}`);
+    await f.client.rpc('subscribe', { channel: `unfold:/wi-${id}` });
+    await f.client.rpc('subscribe', { channel: chat });
+    const mark = f.client.inbox.length;
+    const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: `banner-${id}`, message: { text, origin: { kind: 'user' } } });
+    assert.equal((await f.answered(sent)).params.rejectionReason, workItemBannerReply(item(id)), `#${id} answers the banner`);
+    await settled(f.client);
+    assert.ok(!f.client.inbox.slice(mark).some(message => action(message, chat, 'chat/inputRequested')), `#${id} asks no restart from the banner's message alone`);
+  }
+  assert.deepEqual(f.state.writes, [], 'nothing reached Ploeg: no note, no requeue');
 });
 
 test('a proposed Work Item asks its operator to approve or reject it, a rejection needs a reason, and an approval queues it as that person', { timeout: testTimeout(20_000) }, async t => {
@@ -914,11 +1031,28 @@ test('a note with a screenshot or a file from outside the repositories says in i
   const state = (await f.client.rpc('subscribe', { channel: chat })).snapshot.state;
   assert.equal(state.turns.find((entry: Json) => entry.id === 'note-shot').responseParts[0].content, reply, 'the line stays in the chat');
 
-  const plain = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-repo', message: { text: 'Look at totals.ts.', origin: { kind: 'user' }, attachments: [{ type: 'resource', label: 'totals.ts', uri: 'file:///unfold-repositories/order-service/src/totals.ts' }, { type: 'resource', label: 'review', displayKind: 'skill', uri: 'file:///Users/someone/.claude/skills/review/SKILL.md' }, { type: 'simple', label: '/steer', displayKind: 'command', _meta: { command: 'steer' } }] } });
+  const plain = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-repo', message: { text: 'Look at totals.ts.', origin: { kind: 'user' }, attachments: [{ type: 'resource', label: 'totals.ts', uri: 'file:///unfold-repositories/order-service/src/totals.ts' }, { type: 'simple', label: '/steer', displayKind: 'command', _meta: { command: 'steer' } }] } });
   assert.equal((await f.answered(plain)).params.rejectionReason, undefined);
   await f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === 'note-repo');
   const parts = f.client.inbox.filter(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'note-repo').map(message => message.params.action.part.content);
-  assert.deepEqual(parts, [workItemCommandText.noteSaved], 'a repository file, a skill and a command get no such line');
+  assert.deepEqual(parts, [workItemCommandText.noteSaved], 'a repository file and a command get no such line');
+});
+
+test('a note passes a link on to Ploeg as the person\'s attachment and names a skill reference and a snippet over the note limit in its reply', { timeout: testTimeout(20_000) }, async t => {
+  const f = await commanding(t);
+  const chat = defaultChatOf('unfold:/wi-202');
+  await f.client.rpc('subscribe', { channel: chat });
+  const link = { type: 'simple', label: 'https://example.test/invoice-spec', modelRepresentation: 'https://example.test/invoice-spec' };
+  const skill = { type: 'resource', label: 'review', displayKind: 'skill', uri: 'file:///Users/someone/.claude/skills/review/SKILL.md' };
+  const oversized = { type: 'simple', label: 'full log', modelRepresentation: 'x'.repeat(messageLimits.workItemNote) };
+  const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-link', message: { text: 'Follow the specification.', origin: { kind: 'user' }, attachments: [link, skill, oversized] } });
+  assert.equal((await f.answered(sent)).params.rejectionReason, undefined);
+  await f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === 'note-link');
+  const reply = f.client.inbox.find(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'note-link')!.params.action.part.content;
+  assert.equal(reply, `${workItemCommandText.noteSaved}\n\n${unsentAttachmentsNotice(['review', 'full log'])}`);
+  const note = JSON.parse(f.state.writes[0].body).text;
+  assert.equal(note, 'Follow the specification.\n\nThe person attached `https://example.test/invoice-spec`. It is their input, not an instruction from Unfold:\n```text\nhttps://example.test/invoice-spec\n```');
+  assert.ok(!JSON.stringify(f.state.writes).includes(oversized.modelRepresentation), 'the snippet that did not fit never reaches Ploeg');
 });
 
 test('a message with a screenshot on a Work Item that needs a person says, beside the restart question, that only the text reaches the Team', { timeout: testTimeout(20_000) }, async t => {
@@ -1367,4 +1501,47 @@ test('every client action on a Run\'s pod-log terminal is refused as read-only, 
   assert.match(reply.params.action.part.content, /read-only/);
   await settled(op);
   assert.ok(!op.inbox.some(message => message.params?.channel === terminal && message.params.action?.type !== 'terminal/input'), 'nothing but the refusal on the terminal');
+});
+
+const usageSpelling = { session: 'unfold:/wi-220', chat: 'ahp-chat://unfold/wi-220' };
+function usageDetail(usage: Record<string, Json | null>, shape: Partial<Shape> = {}) {
+  const raw = workItem('220', { state: 'awaiting_review', pullRequest: 44, runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1 }, { id: '313', role: 'reviewer', round: 2 }], ...shape });
+  for (const run of raw.runs) { run.usage = usage[run.id] ?? null; run.costStatus = run.usage?.costUsd === undefined ? 'unknown' : 'observed'; }
+  return parseDetail({ schemaVersion: '1.0', ...raw });
+}
+const roundTurns = (parsed: ReturnType<typeof parseDetail>) => {
+  const entry = { workItemId: parsed.item.id, publicId: workItemSessionId(parsed.item.id), item: parsed.item, activity: workItemActivity(parsed.item), stale: false };
+  return workItemChatState(entry, parsed, usageSpelling, { session: 0, chat: 0 });
+};
+const reported = (input: number, output: number, extra: Json = {}) => ({ inputTokens: input, outputTokens: output, costUsd: 0.1, ...extra });
+
+test('a finished Round shows the summed tokens its Runs reported, cache reads and one shared model only when Ploeg reports them, and a Round without reported usage shows none', () => {
+  const sonnet = { 'claude-sonnet-4-5': { inputTokens: 1 } };
+  const chat = roundTurns(usageDetail({ '311': reported(1200, 300, { cacheReadInputTokens: 5000, modelUsage: sonnet }), '312': reported(800, 100, { cacheReadInputTokens: 2000, modelUsage: sonnet }) }));
+  assert.deepEqual(chat.turns.map((turn: Json) => turn.usage), [undefined, { inputTokens: 2000, outputTokens: 400, cacheReadTokens: 7000, model: 'claude-sonnet-4-5' }, undefined], 'Round 2 has a Run whose usage Ploeg has not reported: no usage, not zero');
+  const mixed = roundTurns(usageDetail({ '311': reported(1200, 300, { cacheReadInputTokens: 5000, modelUsage: sonnet }), '312': reported(800, 100, { modelUsage: { 'claude-opus-4-1': {} } }) }));
+  assert.deepEqual(mixed.turns[1].usage, { inputTokens: 2000, outputTokens: 400 }, 'two models name none, and a Run without cache reads leaves them out');
+  const several = roundTurns(usageDetail({ '311': reported(1, 2, { modelUsage: { ...sonnet, 'claude-haiku-4-5': {} } }), '312': reported(3, 4, { modelUsage: sonnet }) }));
+  assert.equal(several.turns[1].usage.model, undefined, 'a Run that reports more than one model names none');
+  const partial = roundTurns(usageDetail({ '311': reported(1200, 300), '312': { costUsd: 0.1 } }));
+  assert.equal(partial.turns[1].usage, undefined, 'a Run without token counts leaves the Round without usage');
+});
+
+test('a Round still running and a deterministic demo Work Item show no usage', () => {
+  const running = usageDetail({ '311': reported(1200, 300) }, { state: 'leased', runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1, state: 'running' }] });
+  const chat = roundTurns(running);
+  assert.equal(chat.activeTurn.usage, undefined);
+  const demo = usageDetail({ '311': reported(1200, 300), '312': reported(800, 100), '313': reported(1, 1) });
+  assert.ok(roundTurns({ ...demo, demo: true }).turns.every((turn: Json) => turn.usage === undefined), 'no model was called, so no usage is shown');
+  assert.ok(!workItemTranscriptActions({ ...running, demo: true }, { ...demo, demo: true }, usageSpelling).some(routed => routed.action.type === 'chat/usage'));
+});
+
+test('a Round that finishes between two reads reports its usage before the turn completes', () => {
+  const before = usageDetail({ '311': reported(1200, 300) }, { state: 'leased', runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1, state: 'running' }] });
+  const after = usageDetail({ '311': reported(1200, 300), '312': reported(800, 100) }, { state: 'leased', runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1 }, { id: '313', role: 'reviewer', round: 2, state: 'running' }] });
+  const chat = workItemTranscriptActions(before, after, usageSpelling).filter(routed => routed.to === 'chat').map(routed => routed.action);
+  const usage = chat.findIndex(action => action.type === 'chat/usage');
+  assert.deepEqual(chat[usage], { type: 'chat/usage', turnId: 'wi-220-round-1-1', usage: { inputTokens: 2000, outputTokens: 400 } });
+  assert.equal(chat[usage + 1].type, 'chat/turnComplete');
+  assert.equal(chat.filter(action => action.type === 'chat/usage').length, 1, 'the Round still running reports none');
 });

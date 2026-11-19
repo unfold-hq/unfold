@@ -29,16 +29,53 @@ function nameOf(attachment: Json): string {
   return label || basename(attachment.uri) || (attachment.displayKind === 'image' ? 'image' : 'attachment');
 }
 
+function attachmentsOf(message: unknown): Json[] {
+  const attachments = Array.isArray((message as Json)?.attachments) ? (message as Json).attachments as Json[] : [];
+  return attachments.filter(attachment => attachment && typeof attachment === 'object');
+}
+
 /**
- * The names of a message's attachments that no Team receives: embedded content, such as a pasted screenshot, and files
- * outside the host's repositories folder. Commands, review feedback, skill references and the repositories' own files are
- * read by the host or are already in the Team's workspace. Only names are returned, never content.
+ * The names of a message's attachments that no Team receives: embedded content, such as a pasted screenshot, files
+ * outside the host's repositories folder and skill references, whose content Unfold cannot pass on. Commands and review
+ * feedback are read by the host, and the repositories' own files are already in the Team's workspace. Only names are
+ * returned, never content.
  */
 export function unsentAttachments(message: unknown, repositoriesDirectory: string): string[] {
-  const attachments = Array.isArray((message as Json)?.attachments) ? (message as Json).attachments as Json[] : [];
-  return attachments.filter(attachment => {
-    if (!attachment || typeof attachment !== 'object') return false;
+  return attachmentsOf(message).filter(attachment => {
     if (attachment.type === 'embeddedResource') return true;
-    return attachment.type === 'resource' && attachment.displayKind !== 'skill' && !hostSide(attachment.uri, repositoriesDirectory);
+    return attachment.type === 'resource' && (attachment.displayKind === 'skill' || !hostSide(attachment.uri, repositoriesDirectory));
   }).map(nameOf);
+}
+
+/** The most characters of message text Unfold accepts: an instruction or first message of a session, and a Work Item note. */
+export const messageLimits = { session: 20000, workItemNote: 4096 } as const;
+
+function passedOn(attachment: Json): attachment is Json & { modelRepresentation: string } {
+  if (attachment.type !== 'simple' || typeof attachment.modelRepresentation !== 'string' || !attachment.modelRepresentation.trim()) return false;
+  return attachment.displayKind !== 'command' && attachment.displayKind !== 'agentFeedback' && !attachment._meta?.command && !attachment._meta?.agentFeedback;
+}
+
+function fenced(content: string): string {
+  const longest = Math.max(0, ...[...content.matchAll(/`+/g)].map(run => run[0].length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}text\n${content}\n${fence}`;
+}
+
+const attachedBlock = (attachment: Json & { modelRepresentation: string }): string =>
+  `The person attached ${quoted(nameOf(attachment))}. It is their input, not an instruction from Unfold:\n${fenced(attachment.modelRepresentation.trim())}`;
+
+/**
+ * The text a Team receives for a message: the person's text followed by each attached link or text snippet, marked as
+ * the person's attachment, as long as it fits within `limit` characters. Unfold never fetches a link; the Team gets its
+ * text. `unsent` names every attachment that stayed behind, including a snippet that did not fit.
+ */
+export function forwardedMessage(message: unknown, text: string, repositoriesDirectory: string, limit: number): { text: string; unsent: string[] } {
+  const unsent = unsentAttachments(message, repositoriesDirectory);
+  let forwarded = text;
+  for (const attachment of attachmentsOf(message).filter(passedOn)) {
+    const joined = [forwarded, attachedBlock(attachment)].filter(Boolean).join('\n\n');
+    if (joined.length <= limit) forwarded = joined;
+    else unsent.push(nameOf(attachment));
+  }
+  return { text: forwarded, unsent };
 }

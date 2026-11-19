@@ -135,6 +135,6 @@ Where Ploeg serves `ploeg-mcp` over HTTPS ([Serve Ploeg's MCP tools over HTTPS](
 | "Unfold refused UNFOLD_TOKEN" | The credential expired after 30 days or was revoked | Run `npm run mcp -- login` again |
 | `login` says Unfold answered 404 | Single sign-on is not configured on this Unfold | Configure OIDC, or use the demo, which needs no token |
 | "Not found, or outside the Teams…" | Your Unfold user is not mapped to that Work Item's Team | Ask an admin to add the Team to your user |
-| An action tool says the client cannot confirm | Your client declares no form elicitation, or speaks 2025 over HTTPS | Use the link it gives and act in Unfold, or use a client that supports elicitation |
+| An action tool says the client cannot confirm | Your client declares no form elicitation, or speaks 2025 over HTTPS to an Unfold process that did not see its `initialize`, such as after a restart; reconnect it | Use the link it gives and act in Unfold, or use a client that supports elicitation |
 | An action says "the confirmation was closed without an answer", and you never saw a question | Your client declares elicitation but cancels it unseen. Claude Code's VS Code extension runs in print mode and cancels within about 50 ms | Open the link it gives and act in Unfold, or use the terminal `claude` |
 | The client lists no `unfold` tools | It speaks a revision `unfold-mcp` does not list | `unfold-mcp` answers `initialize` for 2025-11-25, 2025-06-18 and 2025-03-26, and per-request `_meta` for 2026-07-28, where `server/discover` lists them; update the client |

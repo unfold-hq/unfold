@@ -7,9 +7,17 @@ import type { AppConfig, InsightEvent, User } from './types.ts';
 
 /** One onboarding step a later slice builds, with the Ploeg read route that tells whether Ploeg serves it and the release that adds it. */
 export type PloegStep = { id: StepId; stage: number; record: string; read: string | null; release: string | null };
-export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'read-scopes' | 'prepare-repository' | 'bind-lists' | 'connect-claude';
-/** `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding checklist that need a Ploeg route, and the first release that ships Ploeg ADR-0192, below which an installation on another forge cannot add the onboarding forge. */
-export type PloegSteps = { schemaVersion: 1; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null } };
+export type StepId = 'connect-github' | 'connect-gitlab' | 'connect-gitlab-service-account' | 'register-repositories' | 'connect-clickup' | 'read-scopes' | 'prepare-repository' | 'bind-lists' | 'connect-claude';
+/**
+ * `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding
+ * checklist that need a Ploeg route, the first release that ships Ploeg ADR-0192, below which an installation on another
+ * forge cannot add the onboarding forge, and GitLab as the other forge: its Ploeg instance name and the record and
+ * release that let Ploeg mint a Run's GitLab credential.
+ */
+export type PloegSteps = {
+  schemaVersion: 1; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null };
+  gitlab: { forge: string; forgeName: string; instance: string; mint: { record: string; release: string | null } };
+};
 
 export const ploegStepsUrl = new URL('./ploeg-steps.json', import.meta.url);
 export const ploegSteps = JSON.parse(readFileSync(ploegStepsUrl, 'utf8')) as PloegSteps;
@@ -487,6 +495,8 @@ function budgetOf(team: PloegTeam, state: StepState, manage: boolean): TeamBudge
 export function unavailableText(step: PloegStep, pinned: string): string {
   const what: Record<StepId, string> = {
     'connect-github': 'connect GitHub from the screen',
+    'connect-gitlab': 'connect GitLab from the screen',
+    'connect-gitlab-service-account': 'create a GitLab service account from a temporary Owner token',
     'register-repositories': 'register repositories at runtime',
     'connect-clickup': 'connect ClickUp from the screen',
     'read-scopes': 'list a tracker connection’s Lists for Unfold',
