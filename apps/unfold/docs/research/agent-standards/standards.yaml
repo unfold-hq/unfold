@@ -6550,7 +6550,7 @@ standards:
     date: '2026-10-31'
     url: https://github.com/UKGovernmentBEIS/inspect_ai/releases/tag/0.3.287
   watch:
-  - {kind: github-releases, ref: UKGovernmentBEIS/inspect_ai, current: "0.3.287"}
+  - {kind: github-releases, ref: UKGovernmentBEIS/inspect_ai, current: "0.3.291"}
   adoption:
   - inspect_evals benchmark collection (https://github.com/UKGovernmentBEIS/inspect_evals)
   - Repo is MIT-licensed, ~3.2k stars (https://github.com/UKGovernmentBEIS/inspect_ai)
