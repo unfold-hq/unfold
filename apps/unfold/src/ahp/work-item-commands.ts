@@ -6,6 +6,7 @@ import { listReason } from '../../public/core/reasons.js';
 import { answerLimit } from '../../public/core/blackboard.js';
 import { money } from '../../public/core/format.js';
 import type { WorkItemRecord } from './work-items.ts';
+import { unsentAttachmentsNotice } from './attachments.ts';
 
 type Json = Record<string, any>;
 
@@ -212,10 +213,10 @@ export class WorkItemCommands {
    * open, and returns the finished turn it shows as. The running Run never sees it. Ploeg's refusal propagates as a
    * `PloegError` with a plain sentence.
    */
-  async note(user: User, entry: WorkItemRecord, text: string, turnId: string, expectedShiftId: string | undefined): Promise<WorkItemNote> {
+  async note(user: User, entry: WorkItemRecord, text: string, turnId: string, expectedShiftId: string | undefined, unsentAttachments: readonly string[] = []): Promise<WorkItemNote> {
     const body = { text, ...(expectedShiftId !== undefined ? { expectedShiftId } : {}) };
     await this.command(user, entry.workItemId, 'note', body, commandId => this.ploeg.note(user, entry.workItemId, { commandId, ...body }));
-    const note: WorkItemNote = { turnId, userId: user.id, workItemId: entry.workItemId, publicId: entry.publicId, text, startedAt: new Date().toISOString(), reply: workItemCommandText.noteSaved };
+    const note: WorkItemNote = { turnId, userId: user.id, workItemId: entry.workItemId, publicId: entry.publicId, text, startedAt: new Date().toISOString(), reply: [workItemCommandText.noteSaved, ...(unsentAttachments.length ? [unsentAttachmentsNotice(unsentAttachments)] : [])].join('\n\n') };
     this.noted.set(`${user.id}:${entry.workItemId}`, [...this.notes(user.id, entry.workItemId), note].slice(-keepOpen));
     return note;
   }
@@ -231,7 +232,7 @@ export class WorkItemCommands {
    * open question is closed as replaced, and returned so the host can say so. A restart carries the person's note and, when
    * the last Shift's budget ran out, offers a raised pool.
    */
-  ask(user: User, entry: WorkItemRecord, kind: WorkItemCommandKind, placement: { attachTo?: string; ownTurnId?: string; opening?: WorkItemPrompt['opening']; expectedShiftId?: string } = {}, note?: string, asked?: WorkItemQuestions): { prompt: WorkItemPrompt; created: boolean; replaced?: WorkItemPrompt } {
+  ask(user: User, entry: WorkItemRecord, kind: WorkItemCommandKind, placement: { attachTo?: string; ownTurnId?: string; opening?: WorkItemPrompt['opening']; expectedShiftId?: string; unsentAttachments?: readonly string[] } = {}, note?: string, asked?: WorkItemQuestions): { prompt: WorkItemPrompt; created: boolean; replaced?: WorkItemPrompt } {
     if (kind === 'answer' && !asked?.questions.length) throw new Error('An answer prompt needs the questions it asks');
     const current = this.open(user.id, entry.workItemId);
     if (current?.kind === kind && note === undefined) return { prompt: current, created: false };
@@ -251,7 +252,7 @@ export class WorkItemCommands {
     const requests: Record<WorkItemCommandKind, () => Json> = { decide: () => decideRequest(requestId, entry), withdraw: () => withdrawRequest(requestId, entry), requeue: () => requeueRequest(requestId, entry, Boolean(note), raisedPoolUsd), answer: () => answerRequest(requestId, entry, asked!) };
     const prompt: WorkItemPrompt = {
       requestId, kind, userId: user.id, workItemId: entry.workItemId, team: entry.item.team, publicId: entry.publicId,
-      turnId: placement.attachTo ?? placement.ownTurnId ?? `${entry.publicId}-command-${randomUUID()}`, ownTurn, startedAt: new Date().toISOString(), opening, explanation: explanations[kind](),
+      turnId: placement.attachTo ?? placement.ownTurnId ?? `${entry.publicId}-command-${randomUUID()}`, ownTurn, startedAt: new Date().toISOString(), opening, explanation: [explanations[kind](), ...(placement.unsentAttachments?.length ? [unsentAttachmentsNotice(placement.unsentAttachments)] : [])].join('\n\n'),
       request: requests[kind](), expectedState: entry.item.state, ...(placement.expectedShiftId !== undefined ? { expectedShiftId: placement.expectedShiftId } : {}), ...(note ? { note } : {}), ...(raisedPoolUsd !== undefined ? { raisedPoolUsd } : {}), ...(kind === 'answer' ? { questions: asked } : {}),
     };
     const key = `${user.id}:${entry.workItemId}`;
