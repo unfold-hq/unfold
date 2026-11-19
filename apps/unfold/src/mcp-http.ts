@@ -9,6 +9,7 @@ import type { User, UserRole } from './types.ts';
 import type { McpAuditEntry } from './audit/service.ts';
 import { clientAddress } from './client-address.ts';
 import type { McpEventsHandler } from './mcp-events.ts';
+import { unfoldMcpIcons } from './mcp-icons.ts';
 
 /** What the MCP endpoint inside the Unfold server needs from the rest of it. */
 export type McpHttpOptions = {
@@ -97,6 +98,7 @@ export function createMcpHttp(options: McpHttpOptions) {
   const metadataPaths = new Set(['/.well-known/oauth-protected-resource', metadataPath(endpoint)]);
   const verifier = new AccessTokenVerifier(settings, { ...(options.fetch ? { fetch: options.fetch } : {}), ...(options.now ? { now: options.now } : {}) });
   const confirmations = confirmationLedger();
+  const icons = unfoldMcpIcons(resource.origin);
   const taskCache: McpTasks['cache'] = new Map();
   const metadata = resourceMetadata(settings);
   const appClients = new Map<string, number>();
@@ -172,7 +174,7 @@ export function createMcpHttp(options: McpHttpOptions) {
       const follow = options.tasks;
       const tasks: McpTasks | undefined = follow ? { enabled: () => follow.enabled(user), keys: () => follow.keys(), tenantOf: source => follow.tenantOf(user, source), cache: taskCache } : undefined;
       const events = modern && options.events && await options.events.enabled(user).catch(() => false) ? options.events.handler(user) : undefined;
-      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, ...(!modern && declaredApps(appsKey) ? { mcpApps: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
+      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, ...(!modern && declaredApps(appsKey) ? { mcpApps: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
       answer = await server.handle(message);
       if (!modern && method === 'initialize' && answer?.result) rememberApps(appsKey, server.declaredMcpApps());
     } finally { delegated.revoke(); }
