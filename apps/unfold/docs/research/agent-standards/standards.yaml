@@ -3373,9 +3373,9 @@ standards:
     url: https://datatracker.ietf.org/doc/draft-niyikiza-oauth-attenuating-agent-tokens/
   watch:
   - {kind: ietf-draft, ref: draft-niyikiza-oauth-attenuating-agent-tokens, current: "02"}
-  - {kind: github-releases, ref: tenuo-ai/tenuo, current: "v0.3.5"}
+  - {kind: github-releases, ref: tenuo-ai/tenuo, current: "v0.3.7"}
   adoption:
-  - 'Tenuo: task-scoped warrants for agents (105 stars, pushed 2026-11-04): https://github.com/tenuo-ai/tenuo'
+  - 'Tenuo: task-scoped warrants for agents, v0.3.7 (2026-11-12), Rust core with Python, WASM and TypeScript bindings, no Go (108 stars): https://github.com/tenuo-ai/tenuo'
   relations:
     competes_with:
     - delegate-sd-jwt
@@ -3423,7 +3423,7 @@ standards:
   - docs/design/rfc-0011-every-agent-action-names-its-person.md
   watchlist:
   - T34
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-19'
 - id: okta-xaa
   name: Okta Cross App Access (XAA)
   disambiguation: Okta's productisation of ID-JAG, also sold as part of "Agent SSO".

@@ -151,7 +151,7 @@ Not to be confused with: Offline-derivable, tool- and argument-constrained token
 | Superseded by | — |
 | Decisions | [0078-runs-reach-read-only-mcp-tools-only-through-the-gateway-bounded-by-a-litellm-team](../../../../../apps/ploeg/docs/adrs/0078-runs-reach-read-only-mcp-tools-only-through-the-gateway-bounded-by-a-litellm-team.md), [adr-0031-people-ask-about-a-work-item-through-a-metered-read-only-ask-paid-from-a-monthly-allowance](../../../../../docs/adr/adr-0031-people-ask-about-a-work-item-through-a-metered-read-only-ask-paid-from-a-monthly-allowance.md), [rfc-0011-every-agent-action-names-its-person](../../../../../docs/design/rfc-0011-every-agent-action-names-its-person.md) |
 | Watchlist | T34 |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-19 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -161,11 +161,11 @@ Not to be confused with: Offline-derivable, tool- and argument-constrained token
 | Proposed: Client-scoped tokens for the portal | Client Portal | Attenuate an Agency token down to one Client. | M | Clients get exactly their scope. |
 | Proposed: audit chains of attenuation | Action Records | Record the derivation chain in the audit trail of Unfold ADR-0061. | S | Reviewers see how authority narrowed. |
 
-**Shipped adoption:** Tenuo: task-scoped warrants for agents (105 stars, pushed 2026-11-04): https://github.com/tenuo-ai/tenuo
+**Shipped adoption:** Tenuo: task-scoped warrants for agents, v0.3.7 (2026-11-12), Rust core with Python, WASM and TypeScript bindings, no Go (108 stars): https://github.com/tenuo-ai/tenuo
 
 **Open problems:** Individual draft. Competing attenuation drafts: draft-hamr-oauth-agent-delegation-03, draft-asor-wimse-agent-delegation-chain-03: https://datatracker.ietf.org/doc/draft-hamr-oauth-agent-delegation/
 
-**Watched:** ietf-draft `draft-niyikiza-oauth-attenuating-agent-tokens` at 02, github-releases `tenuo-ai/tenuo` at v0.3.5
+**Watched:** ietf-draft `draft-niyikiza-oauth-attenuating-agent-tokens` at 02, github-releases `tenuo-ai/tenuo` at v0.3.7
 
 ## Cedar policy language { #cedar }
 
