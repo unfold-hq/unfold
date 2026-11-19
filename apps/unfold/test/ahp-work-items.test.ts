@@ -1703,7 +1703,7 @@ test('VS Code 1.147 may open a side chat on a Work Item session, which lists bes
   const fresh = connect(`${f.server.url.replace(/^http/, 'ws')}/?tkn=${f.host.issueToken({ id: 'op-1', name: 'op-1', role: 'operator' })}`);
   t.after(() => fresh.close());
   await fresh.open;
-  const initialized = await fresh.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'side-chat-probe', clientInfo: { name: 'vscode-agents-window' }, _meta: { 'vscode.ahpSessionUris': true }, initialSubscriptions: ['ahp-root://'] });
+  const initialized = await fresh.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'side-chat-probe', clientInfo: { name: 'vscode-agents-window' }, _meta: { 'vscode.ahpSessionUris': true, 'vscode.ahpChatUris': true }, initialSubscriptions: ['ahp-root://'] });
   assert.equal(initialized._meta[sideChatWithoutContextMeta], true, 'VS Code 1.147 refuses a side chat without source context unless the host says so');
   const agent = initialized.snapshots[0].state.agents.find((entry: Json) => entry.provider === 'unfold');
   assert.deepEqual(agent.capabilities, { multipleChats: { sideChat: true } }, 'VS Code offers a side chat only on an agent that advertises it');

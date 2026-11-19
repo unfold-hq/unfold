@@ -8,6 +8,8 @@ type Json = Record<string, any>;
 
 /** Advertised in `initialize` so VS Code 1.147 may open a side chat that does not carry the source chat's history. */
 export const sideChatWithoutContextMeta = 'vscode.sideChatWithoutContext';
+/** Declared by a client that addresses chats beside a session's default chat, as VS Code 1.147 does and 1.142 does not. */
+export const chatUrisClientMeta = 'vscode.ahpChatUris';
 /** The agent capability without which VS Code 1.147 offers no side chat on a session. */
 export const sideChatCapabilities = { multipleChats: { sideChat: true } } as const;
 

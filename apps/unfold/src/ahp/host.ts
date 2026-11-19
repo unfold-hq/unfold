@@ -27,7 +27,7 @@ import { knownSecrets, plainRedactedText, withoutKnownSecrets } from '../redacti
 import { CommandLog, clientTerminalState, clientTerminalUri, maxClientTerminals, noClientShell, noClientTerminals, parseTerminalChannel, readOnlyTerminal, terminalActionChannel } from './terminals.ts';
 import { catalogOf, isActionKnownToVersion, negotiateProtocolVersion, oldestBaseline, sessionChatCatalog, speaksCatalog, supportedVersions } from './versions.ts';
 import { ChatAsks, askMarkdown, commandCompletions, messageIntent, type ChatAskEntry, type ChatAskService } from './asks.ts';
-import { WorkItemSideChats, parseSideChatUri, sideChatCapabilities, sideChatOrigin, sideChatText, sideChatUri, sideChatWithoutContextMeta, type SideChat } from './side-chats.ts';
+import { WorkItemSideChats, chatUrisClientMeta, parseSideChatUri, sideChatCapabilities, sideChatOrigin, sideChatText, sideChatUri, sideChatWithoutContextMeta, type SideChat } from './side-chats.ts';
 import { candidateEdits, carryRuns, parseRunChannel, runChatChannel, runChatState, runChats, runFinished, runMessage, runRoute, runStarted, runTool, runTranscripts, stopRuns, toolActions, type RunTranscripts, type Spelling } from './runs.ts';
 import { WorkItemSessions, isPullRequestBannerPrompt, isWorkItemSession, workItemBannerReply, workItemChatState, workItemIdOf, workItemMessageRefusal, workItemQuestions, workItemRefusal, workItemRefusals, workItemRunChatState, workItemSessionState, workItemStatus, workItemSummary, type RoutedAction, type WorkItemRecord } from './work-items.ts';
 import { RunLive, type LiveAction } from './run-live.ts';
@@ -1629,18 +1629,18 @@ export class AgentHost {
       if (!negotiated) throw new RpcError(codes.unsupportedVersion, `None of the offered protocol versions is in ${supportedVersions.join(', ')}`, { supportedVersions });
       if (typeof params.clientId !== 'string') throw new RpcError(codes.invalidParams, 'clientId is required');
       const declaresSessionUris = params._meta?.[sessionUrisMeta] === true;
-      client.clientId = params.clientId; client.scheme = sessionSchemeFor(params.clientInfo, params._meta); client.offersSideChats = declaresSessionUris; client.initialized = true; client.clientInfo = describedClient(params.clientInfo); client.protocolVersion = negotiated;
+      client.clientId = params.clientId; client.scheme = sessionSchemeFor(params.clientInfo, params._meta); client.offersSideChats = params._meta?.[chatUrisClientMeta] === true; client.initialized = true; client.clientInfo = describedClient(params.clientInfo); client.protocolVersion = negotiated;
       this.remember(params.clientId, client.user, client.scheme, client.clientInfo, negotiated);
       this.workItems.watch();
       this.resumeActiveClient(params.clientId, Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]);
       const snapshots: Json[] = [];
       for (const channel of Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]) snapshots.push(await this.subscribe(client, channel));
-      return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', version: this.config.mode === 'demo' ? 'demo' : 'live' }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true, [sideChatWithoutContextMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
+      return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', version: this.config.mode === 'demo' ? 'demo' : 'live' }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available || client.offersSideChats ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}), ...(client.offersSideChats ? { [sideChatWithoutContextMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
     }
     if (method === 'reconnect' && !client.initialized) {
       const known = typeof params.clientId === 'string' ? this.knownClients.get(params.clientId) : undefined;
       if (!known || known.userId !== client.user.id) throw new RpcError(codes.notFound, 'This host does not know that client; initialize');
-      client.clientId = params.clientId; client.scheme = params._meta?.[sessionUrisMeta] === true ? 'ahp-session' : known.scheme; client.offersSideChats = params._meta?.[sessionUrisMeta] === true; client.initialized = true; client.clientInfo = known.clientInfo; client.protocolVersion = known.protocolVersion ?? oldestBaseline;
+      client.clientId = params.clientId; client.scheme = params._meta?.[sessionUrisMeta] === true ? 'ahp-session' : known.scheme; client.offersSideChats = params._meta?.[chatUrisClientMeta] === true; client.initialized = true; client.clientInfo = known.clientInfo; client.protocolVersion = known.protocolVersion ?? oldestBaseline;
       this.remember(params.clientId, client.user, client.scheme, client.clientInfo, client.protocolVersion);
       this.workItems.watch();
       this.resumeActiveClient(params.clientId, Array.isArray(params.subscriptions) ? params.subscriptions : []);
