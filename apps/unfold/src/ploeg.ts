@@ -38,7 +38,7 @@ export type PloegClientClaim = { run: { id: string; workItemId: string; shiftId:
 export type PloegMergeState = 'clean' | 'conflicted' | 'unknown';
 /** A Work Item's pull request as Ploeg reports it. `mergeState` is null when Ploeg did not report one; `number`, `baseBranch` and `checkedAt` are null when unknown. */
 export type PloegPullRequest = { url: string; number: number | null; mergeState: PloegMergeState | null; baseBranch: string | null; headSha: string; checkedAt: string | null };
-export type PloegRun = { id: string; workItemId: string; shiftId: string | null; team: string; role: string; round: number; writes: boolean; state: 'pending' | 'running' | 'finished'; startedAt: string | null; finishedAt: string | null; expiresAt: string | null; outcome: string | null; summary: string; stuckReason: string; links: string[]; findings: string; verdict: string; problem: string; solution: string; failureReason: string | null; authorizedUsd: number; usage: { inputTokens?: number; outputTokens?: number; costUsd?: number } | null; costStatus: PloegCostStatus; keyAlias: string | null; limits?: PloegRunLimits; harness?: string | null } & PloegBlackboardRun;
+export type PloegRun = { id: string; workItemId: string; shiftId: string | null; team: string; role: string; round: number; writes: boolean; state: 'pending' | 'running' | 'finished'; startedAt: string | null; finishedAt: string | null; expiresAt: string | null; outcome: string | null; summary: string; stuckReason: string; links: string[]; findings: string; verdict: string; problem: string; solution: string; failureReason: string | null; authorizedUsd: number; usage: { inputTokens?: number; outputTokens?: number; costUsd?: number; cacheReadInputTokens?: number; models?: string[] } | null; costStatus: PloegCostStatus; keyAlias: string | null; limits?: PloegRunLimits; harness?: string | null } & PloegBlackboardRun;
 /** A shadow reviewer's Run (Ploeg ADR-0096) carries `shadow: true`; any other Run leaves it out. */
 export type PloegBlackboardRun = { shadow?: true };
 /** A finding raised by id on a Work Item, with the writer's answer (Ploeg ADR-0121, ploeg-hq/ploeg#180). */
@@ -374,10 +374,15 @@ function provenance(data: Record<string, unknown>): Pick<PloegItem, 'sourceWorkI
   const sourceId = typeof source === 'string' && /^[1-9][0-9]{0,19}$/.test(source) ? source : typeof source === 'number' && Number.isSafeInteger(source) && source > 0 ? String(source) : undefined;
   return { ...(sourceId ? { sourceWorkItemId: sourceId } : {}), ...(typeof kind === 'string' && /^[a-z_]{1,32}$/.test(kind) ? { createdKind: kind } : {}), ...(typeof data.ready === 'boolean' ? { ready: data.ready } : {}) };
 }
+const reportedCacheReads = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? { cacheReadInputTokens: value } : {};
+const reportedModels = (value: unknown) => {
+  const models = value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).filter(model => model.trim() && model.length <= 256) : [];
+  return models.length ? { models } : {};
+};
 function run(value: unknown): PloegRun {
   const data = record(value);
   if (!(runStates as string[]).includes(data.state as string) || !(runCostStatuses as string[]).includes(data.costStatus as string)) throw invalid();
-  const usage = nullable(data.usage, value => { const usage = record(value); return Object.fromEntries(['inputTokens', 'outputTokens', 'costUsd'].filter(key => usage[key] !== undefined).map(key => [key, numeric(usage[key], key !== 'costUsd')])); });
+  const usage = nullable(data.usage, (value): NonNullable<PloegRun['usage']> => { const usage = record(value); return { ...Object.fromEntries(['inputTokens', 'outputTokens', 'costUsd'].filter(key => usage[key] !== undefined).map(key => [key, numeric(usage[key], key !== 'costUsd')])), ...reportedCacheReads(usage.cacheReadInputTokens), ...reportedModels(usage.modelUsage) }; });
   if (data.costStatus !== 'unknown' && usage?.costUsd === undefined) throw invalid();
   return { id: identifier(data.id), workItemId: identifier(data.workItemId), shiftId: nullable(data.shiftId, identifier), team: field(data.team, 100), role: field(data.role, 100), round: numeric(data.round, true), writes: boolean(data.writes), state: data.state as PloegRun['state'], startedAt: nullable(data.startedAt, timestamp), finishedAt: nullable(data.finishedAt, timestamp), expiresAt: nullable(data.expiresAt, timestamp), outcome: nullable(data.outcome, value => field(value, 100)), summary: field(data.summary, 64000), stuckReason: field(data.stuckReason, 16000), links: array(data.links, link, 100).filter(Boolean), findings: field(data.findings, 64000), verdict: field(data.verdict, 100), problem: optionalText(data.problem, 16000), solution: optionalText(data.solution, 16000), failureReason: nullable(data.failureReason, value => field(value, 16000)), authorizedUsd: numeric(data.authorizedUsd), usage, costStatus: data.costStatus as PloegRun['costStatus'], keyAlias: nullable(data.keyAlias, value => field(value, 512)), ...limitsOf(data.limits), ...harnessOf(data.harness), ...blackboardOf(data) };
 }

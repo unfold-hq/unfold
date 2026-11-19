@@ -275,9 +275,28 @@ export function verdictParts(run: PloegRun, item: PloegItem): Json[] {
   return [{ kind: 'markdown', id: `${runToolCallId(run)}-verdict`, content: `**${headline}.**${gist ? ` ${gist}` : ''} Open ${role} above for the full report.` }];
 }
 
-function turnOf(round: Round, index: number, spelling: Spelling, item: PloegItem): Json {
+/** A turn's usage in VS Code's usage hover (AHP `UsageInfo`). */
+export type RoundUsage = { inputTokens: number; outputTokens: number; cacheReadTokens?: number; model?: string };
+
+/**
+ * What a finished Round used, summed from what Ploeg recorded of its Runs: undefined while a Run is unfinished or lacks
+ * its input or output tokens, cache-read tokens only when every Run reports them, and the model only when every Run
+ * reports the same single one. Nothing is estimated.
+ */
+export function roundUsage(runs: readonly PloegRun[]): RoundUsage | undefined {
+  if (!runs.length || runs.some(run => run.state !== 'finished' || run.usage?.inputTokens === undefined || run.usage.outputTokens === undefined)) return undefined;
+  const sum = (count: (run: PloegRun) => number | undefined) => runs.reduce((total, run) => total + (count(run) ?? 0), 0);
+  const cacheReads = runs.every(run => run.usage?.cacheReadInputTokens !== undefined) ? { cacheReadTokens: sum(run => run.usage?.cacheReadInputTokens) } : {};
+  const models = new Set(runs.map(run => run.usage?.models?.length === 1 ? run.usage.models[0] : ''));
+  const [model] = [...models];
+  return { inputTokens: sum(run => run.usage?.inputTokens), outputTokens: sum(run => run.usage?.outputTokens), ...cacheReads, ...(models.size === 1 && model ? { model } : {}) };
+}
+
+function turnOf(round: Round, index: number, spelling: Spelling, item: PloegItem, demo: boolean): Json {
   const turn = { id: round.turnId, startedAt: round.startedAt, message: turnMessage(round), responseParts: [...noticePart(round, index), ...round.runs.flatMap(run => [runPart(run, spelling), ...verdictParts(run, item)])] };
-  return round.open ? turn : { ...turn, duration: duration(round.startedAt, round.finishedAt), state: 'complete' };
+  if (round.open) return turn;
+  const usage = demo ? undefined : roundUsage(round.runs);
+  return { ...turn, duration: duration(round.startedAt, round.finishedAt), state: 'complete', ...(usage ? { usage } : {}) };
 }
 
 /**
@@ -306,7 +325,7 @@ function briefTurn(item: PloegItem, by?: string): Json {
  * subagent call, and nothing a Run did not report. `by` names, for this viewer, the person who handed it off.
  */
 export function workItemChatState(entry: WorkItemRecord, detail: PloegDetail, spelling: Spelling, flags: ViewFlags, by?: string): Json {
-  const turns = rounds(detail).map((round, index) => ({ round, turn: turnOf(round, index, spelling, detail.item) }));
+  const turns = rounds(detail).map((round, index) => ({ round, turn: turnOf(round, index, spelling, detail.item, Boolean(detail.demo)) }));
   const active = turns.find(({ round }) => round.open);
   return { ...workItemChatSummary(entry, spelling, flags, by), turns: [briefTurn(detail.item, by), ...turns.filter(({ round }) => !round.open).map(({ turn }) => turn)], ...(active ? { activeTurn: active.turn } : {}), changesets: [] };
 }
@@ -409,7 +428,7 @@ export function workItemTranscriptActions(before: PloegDetail, after: PloegDetai
   rounds(after).forEach((round, index) => {
     const prior = previous.get(round.key);
     if (prior && !prior.open) return;
-    const turn = turnOf(round, index, spelling, after.item);
+    const turn = turnOf(round, index, spelling, after.item, Boolean(after.demo));
     if (!prior) {
       actions.push({ to: 'chat', action: { type: 'chat/turnStarted', turnId: turn.id, startedAt: turn.startedAt, message: turn.message } });
       for (const part of turn.responseParts) actions.push(...(part.kind === 'toolCall' ? spawnActions(turn.id, part) : [{ to: 'chat' as const, action: { type: 'chat/responsePart', turnId: turn.id, part } }]));
@@ -422,6 +441,7 @@ export function workItemTranscriptActions(before: PloegDetail, after: PloegDetai
         else if (part.toolCall.status === 'completed' && previousRuns.get(run.id)?.state !== 'finished') actions.push(completeAction(turn.id, part.toolCall), ...verdicts);
       }
     }
+    if (turn.usage) actions.push({ to: 'chat', action: { type: 'chat/usage', turnId: turn.id, usage: turn.usage } });
     if (!round.open) actions.push({ to: 'chat', action: { type: 'chat/turnComplete', turnId: turn.id, duration: turn.duration } });
   });
   for (const run of [...after.runs].sort(byId)) actions.push(...runChatActions(previousRuns.get(run.id), run, spelling, after.item.updatedAt));

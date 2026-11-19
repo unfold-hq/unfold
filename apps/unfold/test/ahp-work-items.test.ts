@@ -4,11 +4,11 @@ import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../src/auth.ts';
 import { ploegDemo } from '../src/ploeg-demo.ts';
-import { PloegClient, cancelShiftChanged, noteFailures, nowItem, type PloegItem } from '../src/ploeg.ts';
+import { PloegClient, cancelShiftChanged, detail as parseDetail, noteFailures, nowItem, type PloegItem } from '../src/ploeg.ts';
 import { listReason, waitingGroup } from '../public/core/reasons.js';
 import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
-import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemMessageRefusal, workItemRefusals } from '../src/ahp/work-items.ts';
+import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
 import { unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
@@ -1423,4 +1423,47 @@ test('every client action on a Run\'s pod-log terminal is refused as read-only, 
   assert.match(reply.params.action.part.content, /read-only/);
   await settled(op);
   assert.ok(!op.inbox.some(message => message.params?.channel === terminal && message.params.action?.type !== 'terminal/input'), 'nothing but the refusal on the terminal');
+});
+
+const usageSpelling = { session: 'unfold:/wi-220', chat: 'ahp-chat://unfold/wi-220' };
+function usageDetail(usage: Record<string, Json | null>, shape: Partial<Shape> = {}) {
+  const raw = workItem('220', { state: 'awaiting_review', pullRequest: 44, runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1 }, { id: '313', role: 'reviewer', round: 2 }], ...shape });
+  for (const run of raw.runs) { run.usage = usage[run.id] ?? null; run.costStatus = run.usage?.costUsd === undefined ? 'unknown' : 'observed'; }
+  return parseDetail({ schemaVersion: '1.0', ...raw });
+}
+const roundTurns = (parsed: ReturnType<typeof parseDetail>) => {
+  const entry = { workItemId: parsed.item.id, publicId: workItemSessionId(parsed.item.id), item: parsed.item, activity: workItemActivity(parsed.item), stale: false };
+  return workItemChatState(entry, parsed, usageSpelling, { session: 0, chat: 0 });
+};
+const reported = (input: number, output: number, extra: Json = {}) => ({ inputTokens: input, outputTokens: output, costUsd: 0.1, ...extra });
+
+test('a finished Round shows the summed tokens its Runs reported, cache reads and one shared model only when Ploeg reports them, and a Round without reported usage shows none', () => {
+  const sonnet = { 'claude-sonnet-4-5': { inputTokens: 1 } };
+  const chat = roundTurns(usageDetail({ '311': reported(1200, 300, { cacheReadInputTokens: 5000, modelUsage: sonnet }), '312': reported(800, 100, { cacheReadInputTokens: 2000, modelUsage: sonnet }) }));
+  assert.deepEqual(chat.turns.map((turn: Json) => turn.usage), [undefined, { inputTokens: 2000, outputTokens: 400, cacheReadTokens: 7000, model: 'claude-sonnet-4-5' }, undefined], 'Round 2 has a Run whose usage Ploeg has not reported: no usage, not zero');
+  const mixed = roundTurns(usageDetail({ '311': reported(1200, 300, { cacheReadInputTokens: 5000, modelUsage: sonnet }), '312': reported(800, 100, { modelUsage: { 'claude-opus-4-1': {} } }) }));
+  assert.deepEqual(mixed.turns[1].usage, { inputTokens: 2000, outputTokens: 400 }, 'two models name none, and a Run without cache reads leaves them out');
+  const several = roundTurns(usageDetail({ '311': reported(1, 2, { modelUsage: { ...sonnet, 'claude-haiku-4-5': {} } }), '312': reported(3, 4, { modelUsage: sonnet }) }));
+  assert.equal(several.turns[1].usage.model, undefined, 'a Run that reports more than one model names none');
+  const partial = roundTurns(usageDetail({ '311': reported(1200, 300), '312': { costUsd: 0.1 } }));
+  assert.equal(partial.turns[1].usage, undefined, 'a Run without token counts leaves the Round without usage');
+});
+
+test('a Round still running and a deterministic demo Work Item show no usage', () => {
+  const running = usageDetail({ '311': reported(1200, 300) }, { state: 'leased', runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1, state: 'running' }] });
+  const chat = roundTurns(running);
+  assert.equal(chat.activeTurn.usage, undefined);
+  const demo = usageDetail({ '311': reported(1200, 300), '312': reported(800, 100), '313': reported(1, 1) });
+  assert.ok(roundTurns({ ...demo, demo: true }).turns.every((turn: Json) => turn.usage === undefined), 'no model was called, so no usage is shown');
+  assert.ok(!workItemTranscriptActions({ ...running, demo: true }, { ...demo, demo: true }, usageSpelling).some(routed => routed.action.type === 'chat/usage'));
+});
+
+test('a Round that finishes between two reads reports its usage before the turn completes', () => {
+  const before = usageDetail({ '311': reported(1200, 300) }, { state: 'leased', runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1, state: 'running' }] });
+  const after = usageDetail({ '311': reported(1200, 300), '312': reported(800, 100) }, { state: 'leased', runs: [{ id: '311', role: 'implementer', round: 1 }, { id: '312', role: 'reviewer', round: 1 }, { id: '313', role: 'reviewer', round: 2, state: 'running' }] });
+  const chat = workItemTranscriptActions(before, after, usageSpelling).filter(routed => routed.to === 'chat').map(routed => routed.action);
+  const usage = chat.findIndex(action => action.type === 'chat/usage');
+  assert.deepEqual(chat[usage], { type: 'chat/usage', turnId: 'wi-220-round-1-1', usage: { inputTokens: 2000, outputTokens: 400 } });
+  assert.equal(chat[usage + 1].type, 'chat/turnComplete');
+  assert.equal(chat.filter(action => action.type === 'chat/usage').length, 1, 'the Round still running reports none');
 });
