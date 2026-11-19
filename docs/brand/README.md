@@ -17,7 +17,7 @@ Five base points on a 64 × 64 grid define the plane: the nose `N` (55, 10), the
 1. The sheet is the triangle `N W T1`.
 2. The crease is a band of constant width along the line `N T1`. The fold's edge is that line moved one gap towards `K`. Where it meets `N K` is `A1`; where it meets `K T2` is `A2`. The fold is the triangle `A1 K A2`. The nose belongs to the sheet alone, so the two shapes never meet in a point.
 3. Every corner is a true arc cut inside the outline, never a stroke, so nothing grows past its outline.
-4. The pair is centred on (32, 32) by its bounding box. Centring by centre of mass was tried and rejected after measuring it; `optical` stays 0.
+4. The pair is centred on (32, 32) by its bounding box. Centring by centre of mass was tried and rejected after measuring it; `optical` stays 0. The tile is the exception: on a filled square the thin wingtip leaves the mark looking pushed right and up, so `tileOptical` moves it half of the way from its box centre towards its centre of mass, about 1.3 units left and 0.5 down at the tile's scale. That one offset reaches every raster icon built from the tile, the editor extension's included.
 
 | | Master | Favicon cut |
 | --- | --- | --- |
