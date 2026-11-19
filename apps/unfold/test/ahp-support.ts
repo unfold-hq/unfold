@@ -6,10 +6,17 @@ export function connect(url: string) {
   const socket = new WebSocket(url);
   const inbox: Json[] = [];
   const waiters: Array<{ predicate: (message: Json) => boolean; resolve: (message: Json) => void }> = [];
+  const pings: Json[] = [];
+  let answersPings = true;
   let nextId = 1;
   const pending = new Map<number, { resolve: (value: Json) => void; reject: (error: Error) => void }>();
   socket.addEventListener('message', event => {
     const message = JSON.parse(String(event.data));
+    if (message.method === 'ping' && message.id !== undefined) {
+      pings.push(message);
+      if (answersPings) socket.send(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: null }));
+      return;
+    }
     if (message.id !== undefined && pending.has(message.id)) {
       const waiter = pending.get(message.id)!; pending.delete(message.id);
       if (message.error) waiter.reject(Object.assign(new Error(message.error.message), { code: message.error.code, data: message.error.data })); else waiter.resolve(message.result);
@@ -20,7 +27,8 @@ export function connect(url: string) {
   });
   const open = new Promise<void>((resolve, reject) => { socket.addEventListener('open', () => resolve()); socket.addEventListener('error', () => reject(new Error('connection refused'))); });
   return {
-    socket, inbox, open,
+    socket, inbox, open, pings,
+    stopAnsweringPings() { answersPings = false; },
     rpc(method: string, params: Json): Promise<Json> { const id = nextId++; socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); return new Promise((resolve, reject) => pending.set(id, { resolve, reject })); },
     notify(method: string, params: Json) { socket.send(JSON.stringify({ jsonrpc: '2.0', method, params })); },
     until(predicate: (message: Json) => boolean, timeoutMs = scaledTimeout(25_000)): Promise<Json> {

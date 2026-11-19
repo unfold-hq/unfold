@@ -10,6 +10,12 @@ export const idleSessionMs = 600_000;
 export const provisionalSessionMs = 86_400_000;
 /** How many provisional sessions one person keeps; the next one removes their oldest unused one nobody subscribes to. */
 export const maxProvisionalSessions = 20;
+/** How long the host waits after its last `ping` to a client before it sends the next: 30 seconds. */
+export const heartbeatIntervalMs = 30_000;
+/** How long a client has to answer the host's `ping` before the host closes its connection: 30 seconds. */
+export const heartbeatTimeoutMs = 30_000;
+/** How often the host checks its clients' heartbeats; a third of the interval, so a client that stops answering is closed about a minute after its last answer. */
+export const heartbeatCheckMs = heartbeatIntervalMs / 3;
 
 const sequenceKey = 'ahp-server-seq';
 const clientsKey = 'ahp-known-clients';
@@ -112,4 +118,43 @@ export class IdleSessions {
   }
 
   forget(id: string): void { this.since.delete(id); }
+}
+
+export type HeartbeatCheck<Peer> = { ping: Array<{ peer: Peer; id: number }>; silent: Peer[] };
+
+/**
+ * Decides when the host pings each peer and which peers stopped answering: a peer gets a `ping` once `intervalMs` passed
+ * since its previous one and that one was answered, and is silent once a `ping` stayed unanswered for `timeoutMs`.
+ */
+export class Heartbeats<Peer> {
+  private readonly peers = new Map<Peer, { sentAt: number; awaiting?: number }>();
+  private nextId = 1;
+  readonly intervalMs: number;
+  readonly timeoutMs: number;
+
+  constructor(intervalMs = heartbeatIntervalMs, timeoutMs = heartbeatTimeoutMs) { this.intervalMs = intervalMs; this.timeoutMs = timeoutMs; }
+
+  check(peers: Iterable<Peer>, now: number): HeartbeatCheck<Peer> {
+    const result: HeartbeatCheck<Peer> = { ping: [], silent: [] };
+    const seen = new Set<Peer>();
+    for (const peer of peers) {
+      seen.add(peer);
+      const beat = this.peers.get(peer);
+      if (beat?.awaiting !== undefined) { if (now - beat.sentAt >= this.timeoutMs) { this.peers.delete(peer); result.silent.push(peer); } continue; }
+      if (beat && now - beat.sentAt < this.intervalMs) continue;
+      const id = this.nextId++;
+      this.peers.set(peer, { sentAt: now, awaiting: id });
+      result.ping.push({ peer, id });
+    }
+    for (const peer of [...this.peers.keys()]) if (!seen.has(peer)) this.peers.delete(peer);
+    return result;
+  }
+
+  /** Whether `id` answers the `ping` the host awaits from `peer`; it clears the wait when it does. */
+  answered(peer: Peer, id: unknown): boolean {
+    const beat = this.peers.get(peer);
+    if (beat?.awaiting === undefined || beat.awaiting !== id) return false;
+    beat.awaiting = undefined;
+    return true;
+  }
 }
