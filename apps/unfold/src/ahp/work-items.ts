@@ -31,6 +31,7 @@ export const workItemRefusals = {
   tryAgain: 'Ploeg restarts a Work Item once it stopped and needs you or went stale.',
   dispose: 'A Work Item stays in Ploeg. Archive it to hide it from your Agents window.',
   readOnly: 'A Work Item is Ploeg\'s record and is read-only in the Agents window. Act on it from its Work Item page.',
+  history: 'A Work Item keeps every Round as Ploeg\'s record, so an earlier message cannot be edited. Send a new message instead.',
 } as const;
 
 /** What a typed message on a Work Item that takes neither notes nor a restart is told, by where the Work Item stands. */
@@ -66,6 +67,7 @@ export function workItemRefusal(actionType: unknown): string {
   switch (actionType) {
     case 'chat/turnStarted': case 'chat/pendingMessageSet': return workItemRefusals.message;
     case 'chat/turnResume': return workItemRefusals.tryAgain;
+    case 'chat/truncated': return workItemRefusals.history;
     default: return customizationRefusal(actionType) ?? workItemRefusals.readOnly;
   }
 }

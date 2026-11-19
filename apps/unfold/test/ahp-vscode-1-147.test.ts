@@ -5,7 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { application, request } from './api-support.ts';
-import { action, connect, defaultChatOf, vscodeAgentsWindow, type Json } from './ahp-support.ts';
+import { action, closed, connect, defaultChatOf, vscode1147ChatModel, vscode1147Truncation, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { repositoriesDirectory } from '../src/ahp/host.ts';
 import { forwardedMessage, messageLimits } from '../src/ahp/attachments.ts';
 import { DemoRuntime } from '../src/runtime/demo.ts';
@@ -170,4 +170,62 @@ test('a message with a skill reference, a URL attachment or a claimed non-user o
   const session = server.app.store.listSessions()[0];
   const instructions = server.app.store.events(session.id).filter(event => event.type === 'message' && (event.data as Json).role === 'operator');
   assert.deepEqual(instructions.map(event => [event.actor, (event.data as Json).text]), received.map(text => [session.ownerId, text]), 'each is the signed-in person\'s instruction, as typed, with only the URL added as their attachment');
+});
+
+test('a message from VS Code 1.147 after its connection slept through a turn of another window is sent, and an edit of an earlier message is still refused and removes nothing', { timeout: testTimeout(60_000) }, async t => {
+  const dataDir = await mkdtemp(join(tmpdir(), 'unfold-ahp-1-147-'));
+  t.after(() => rm(dataDir, { recursive: true, force: true }));
+  const { server, token, client, clientId, dispatch } = await attached(t, new DemoRuntime({ dataDir, delayMs: 5 }));
+  const session = `ahp-session:/${randomUUID()}`;
+  const chat = defaultChatOf(session);
+  await client.rpc('createSession', { channel: session, provider: 'unfold', workingDirectories: [`${repositoriesDirectory}/order-service`], config: { team: 'delivery', budgetUsd: '1', title: 'Slept through a turn' } });
+  await client.rpc('subscribe', { channel: session });
+  const opened = (await client.rpc('subscribe', { channel: chat })).snapshot.state;
+  const mark = client.inbox.length;
+  const first = randomUUID();
+  const sentFirst = await dispatch(chat, { type: 'chat/turnStarted', turnId: first, startedAt: new Date().toISOString(), message: { text: 'Hello there', origin: { kind: 'user' } } });
+  assert.equal(sentFirst.params.rejectionReason, undefined, sentFirst.params.rejectionReason);
+  await client.until(message => action(message, chat, 'chat/error') && message.params.action.turnId === first);
+  const before = vscode1147ChatModel(opened, client.inbox, chat, mark, opened.turns.map((turn: Json) => turn.id));
+  client.close();
+  await closed(client.socket);
+
+  const other = await window(t, server, token);
+  await other.client.rpc('subscribe', { channel: session });
+  await other.client.rpc('subscribe', { channel: chat });
+  const second = randomUUID();
+  const sentSecond = await other.dispatch(chat, { type: 'chat/turnStarted', turnId: second, startedAt: new Date().toISOString(), message: { text: 'Anyone there?', origin: { kind: 'user' } } });
+  assert.equal(sentSecond.params.rejectionReason, undefined, sentSecond.params.rejectionReason);
+  await other.client.until(message => action(message, chat, 'chat/error') && message.params.action.turnId === second);
+
+  const resumed = connect(`${server.url.replace(/^http/, 'ws')}/?tkn=${token}`);
+  t.after(() => resumed.close());
+  await resumed.open;
+  const reconnected = await resumed.rpc('reconnect', { channel: 'ahp-root://', clientId, lastSeenServerSeq: 0, subscriptions: ['ahp-root://', session, chat], _meta: vscode1147Meta });
+  assert.equal(reconnected.type, 'snapshot');
+  const snapshot = reconnected.snapshots.find((entry: Json) => entry.resource === chat).state;
+  assert.deepEqual(snapshot.turns.map((turn: Json) => turn.id), [first, second], 'the snapshot holds the turn the window slept through');
+  await resumed.rpc('ping', {});
+  const seen = vscode1147ChatModel(snapshot, resumed.inbox, chat, 0, before.known);
+  let seq = 1000;
+  const send = (dispatched: Json) => {
+    const clientSeq = ++seq;
+    resumed.notify('dispatchAction', { channel: chat, clientSeq, action: dispatched });
+    return resumed.until(message => message.method === 'action' && message.params.origin?.clientId === clientId && message.params.origin?.clientSeq === clientSeq);
+  };
+  const truncation = vscode1147Truncation(seen.state, seen.known);
+  if (truncation) {
+    const confirmed = await send(truncation);
+    assert.equal(confirmed.params.rejectionReason, undefined, `Chat history could not be restored: ${confirmed.params.rejectionReason}`);
+  }
+  const third = randomUUID();
+  const sentThird = await send({ type: 'chat/turnStarted', turnId: third, startedAt: new Date().toISOString(), message: { text: objective, origin: { kind: 'user' } } });
+  assert.equal(sentThird.params.rejectionReason, undefined, sentThird.params.rejectionReason);
+  await resumed.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === third);
+  const started = (await resumed.rpc('subscribe', { channel: chat })).snapshot.state.turns.map((turn: Json) => turn.id);
+  assert.equal(started.at(-1), third);
+
+  const edited = await send({ type: 'chat/truncated' });
+  assert.match(edited.params.rejectionReason ?? '', /keeps a session's history/, 'an edit of an earlier message is refused and says the history is kept');
+  assert.deepEqual((await resumed.rpc('subscribe', { channel: chat })).snapshot.state.turns.map((turn: Json) => turn.id), started, 'and removes nothing');
 });

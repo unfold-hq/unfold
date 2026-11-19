@@ -114,6 +114,7 @@ export function reduceChat(state: Json, action: Json): Json {
       return { ...state, activeTurn: { ...active, responseParts } };
     }
     case 'chat/activityChanged': return { ...state, activity: action.activity };
+    case 'chat/turnsLoaded': { const held = new Set(state.turns.map((turn: Json) => turn.id)); return { ...state, turns: [...action.turns.filter((turn: Json) => !held.has(turn.id)), ...state.turns], turnsNextCursor: action.turnsNextCursor }; }
     default: return state;
   }
 }
@@ -121,6 +122,36 @@ export function reduceChat(state: Json, action: Json): Json {
 /** A chat as a client sees it after its snapshot: every action the host confirmed on the chat since, applied with {@link reduceChat}; refused actions change nothing. */
 export function chatAsSeen(snapshot: Json, inbox: readonly Json[], chat: string, from = 0): Json {
   return inbox.slice(from).filter(message => message.method === 'action' && message.params.channel === chat && !message.params.rejectionReason).reduce((state, message) => reduceChat(state, message.params.action), snapshot);
+}
+
+/**
+ * The requests VS Code 1.147's chat model holds for a chat, after its snapshot and the actions the host confirmed since:
+ * the turns it restored when it opened the chat (`known`), each turn it watched start
+ * (`agentHostSessionHandler.ts:3088-3140`), and every turn of the chat on a `chat/turnsLoaded`, on which it rebuilds its
+ * history (`agentHostSessionHandler.ts:3027-3060`). A snapshot alone adds none.
+ */
+export function vscode1147ChatModel(snapshot: Json, inbox: readonly Json[], chat: string, from: number, known: Iterable<string>): { state: Json; known: Set<string> } {
+  const held = new Set(known);
+  let state = snapshot;
+  for (const message of inbox.slice(from)) {
+    if (message.method !== 'action' || message.params.channel !== chat || message.params.rejectionReason) continue;
+    state = reduceChat(state, message.params.action);
+    if (message.params.action.type === 'chat/turnStarted') held.add(message.params.action.turnId);
+    if (message.params.action.type === 'chat/turnsLoaded') for (const turn of state.turns) held.add(turn.id);
+  }
+  return { state, known: held };
+}
+
+/**
+ * The `chat/truncated` VS Code 1.147 dispatches through `dispatchConfirmed` before a message
+ * (`agentHostSessionHandler.ts:3877-3909`): when the chat has turns after the last one its chat model holds, it truncates
+ * to that turn, and a refusal stops the message with "Chat history could not be restored". Undefined when it sends at once.
+ */
+export function vscode1147Truncation(state: Json, known: ReadonlySet<string>): Json | undefined {
+  if (!state.turns.length) return undefined;
+  const seenAt = state.turns.findLastIndex((turn: Json) => known.has(turn.id));
+  if (seenAt >= state.turns.length - 1) return undefined;
+  return { type: 'chat/truncated', ...(seenAt >= 0 ? { turnId: state.turns[seenAt].id } : {}) };
 }
 
 /** The `clientInfo` VS Code 1.141 and main send from the Agents window (`agentHostClientInfo.ts`); the editor window sends `vscode-editor-window`. */
