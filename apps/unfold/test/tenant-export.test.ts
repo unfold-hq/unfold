@@ -154,6 +154,7 @@ test('with Tenant checks enforced, the bundle holds only what the Tenant owns', 
   for (const [id, item] of [['so-acme', '101'], ['so-globex', '202']]) store.db.prepare('INSERT INTO client_sign_offs(id,work_item_id,pull_request_id,head_sha,state,recorded_at,body) VALUES(?,?,?,?,?,?,?)').run(id, item, 'pr', 'sha', 'current', '2026-10-30T00:00:00.000Z', '{}');
   for (const repository of ['acme/app', 'globex/app']) store.db.prepare('INSERT INTO client_sign_off_exclusions(client,repository,updated_at,body) VALUES(?,?,?,?)').run('', repository, '2026-10-30T00:00:00.000Z', '{}');
   store.db.prepare('INSERT INTO flag_overrides(flag_key,variant,reason,set_by,set_at) VALUES(?,?,?,?,?)').run('work.live-view', 'on', 'r', 'admin', '2026-10-30T00:00:00.000Z');
+  for (const [person, id] of [['alice', 's-acme'], ['bob', 's-globex']]) store.setReviewedFiles(person, id, new Map([['src/order.js', 'digest']]), true, '2026-10-30T00:00:00.000Z');
   const asked: string[] = [];
   const sources: ExportSources = { ...base(store, config), workItemsInTenant: async ids => { asked.push(...ids); return new Set(ids.filter(id => id === '101')); }, deliveryLedger: async () => ({ window: '30d', rows: [{ workItemId: '101' }, { workItemId: '202' }] as never }) };
 
@@ -171,6 +172,7 @@ test('with Tenant checks enforced, the bundle holds only what the Tenant owns', 
   assert.deepEqual(rows(acme, 'client-sign-offs').map(row => row.workItemId), ['101']);
   assert.deepEqual(rows(acme, 'client-sign-off-exclusions').map(row => row.repository), ['acme/app']);
   assert.deepEqual(rows(acme, 'delivery-ledger').map(row => row.workItemId), ['101']);
+  assert.deepEqual(rows(acme, 'changeset-reviews').map(row => [row.userId, row.sessionId, row.fileId]), [['alice', 's-acme', 'src/order.js']], 'reviewed-file ticks go with the person who made them');
   assert.deepEqual(rows(acme, 'flag-overrides'), [], 'installation-wide rows go only with the default Tenant');
   assert.equal(acme.members.has('flags.flagd.json'), false);
   assert.deepEqual([...new Set(asked)].sort(), ['101', '202']);
