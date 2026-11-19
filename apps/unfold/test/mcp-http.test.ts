@@ -742,6 +742,29 @@ test('over HTTP, the Tasks extension follows the person\'s mcp.tasks flag, and a
   assert.deepEqual(undeclared.json.error.data, { requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } } });
 });
 
+test('over HTTP, skills follow the person\'s mcp.skills flag, which is off by default', async t => {
+  const off = await served(t);
+  const hidden = await post(off.unfold.url, { jsonrpc: '2.0', id: 1, method: 'server/discover' }, { token: off.token() });
+  assert.equal(hidden.json.result.capabilities.extensions?.['io.modelcontextprotocol/skills'], undefined, 'off by default');
+  const unserved = await post(off.unfold.url, { jsonrpc: '2.0', id: 2, method: 'skills/list' }, { token: off.token() });
+  assert.equal(unserved.status, 404);
+  assert.equal(unserved.json.error.code, -32601);
+  const legacy = await post(off.unfold.url, { jsonrpc: '2.0', id: 3, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: off.token(), version: '2025-11-25' });
+  assert.equal(legacy.json.result.capabilities.extensions, undefined);
+
+  const on = await served(t, {}, config => { config.flags = { document: { flags: { 'mcp.skills': { defaultVariant: 'on' } } }, unknown: [] }; });
+  const shown = await post(on.unfold.url, { jsonrpc: '2.0', id: 4, method: 'server/discover' }, { token: on.token() });
+  assert.deepEqual(shown.json.result.capabilities.extensions, { 'io.modelcontextprotocol/skills': {} });
+  const listed = await post(on.unfold.url, { jsonrpc: '2.0', id: 5, method: 'skills/list' }, { token: on.token() });
+  assert.equal(listed.status, 200);
+  assert.ok(listed.json.result.skills.some((skill: any) => skill.uri === 'skill://unfold/SKILL.md' && /^sha256:[0-9a-f]{64}$/.test(skill.resources[0].digest)));
+  const read = await post(on.unfold.url, { jsonrpc: '2.0', id: 6, method: 'resources/read', params: { uri: 'skill://unfold/SKILL.md' } }, { token: on.token(), headers: { 'mcp-name': 'skill://unfold/SKILL.md' } });
+  assert.equal(read.status, 200);
+  assert.match(read.json.result.contents[0].text, /^---\nname: unfold\n/);
+  const legacyOn = await post(on.unfold.url, { jsonrpc: '2.0', id: 7, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: on.token(), version: '2025-11-25' });
+  assert.deepEqual(legacyOn.json.result.capabilities.extensions, { 'io.modelcontextprotocol/skills': {} });
+});
+
 async function streamedCall(url: string, message: Record<string, any>, access: string, agent: string) {
   const controller = new AbortController();
   const response = await fetch(`${url}/mcp`, { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${access}`, 'mcp-protocol-version': '2025-11-25', 'user-agent': agent }, body: JSON.stringify(message) });

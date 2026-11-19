@@ -43,6 +43,8 @@ export type McpHttpOptions = {
   tasks?: { enabled(user: User): Promise<boolean>; keys(): TaskKeyRing; tenantOf(user: User, source: string): string | undefined };
   /** MCP Events for a 2026-07-28 client: whether the person may use them, and their `events/*` handler. */
   events?: { enabled(user: User): Promise<boolean>; handler(user: User): McpEventsHandler };
+  /** Whether the `mcp.skills` flag is on for a person, so `unfold-mcp` serves the plugin's skills to their client. */
+  skills?: { enabled(user: User): Promise<boolean> };
 };
 
 const maxBodyBytes = 1_048_576;
@@ -204,8 +206,9 @@ export function createMcpHttp(options: McpHttpOptions) {
     try {
       const follow = options.tasks;
       const tasks: McpTasks | undefined = follow ? { enabled: () => follow.enabled(user), keys: () => follow.keys(), tenantOf: source => follow.tenantOf(user, source), cache: taskCache } : undefined;
+      const skills = options.skills ? await options.skills.enabled(user).catch(() => false) : false;
       const events = modern && options.events && await options.events.enabled(user).catch(() => false) ? options.events.handler(user) : undefined;
-      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, prompts: true, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
+      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, prompts: true, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}), ...(skills ? { skills } : {}) });
       if (streamable && server.confirmsFirst(String(params?.name))) server.connect(askOnStream(res, user.id, token.client ?? '', waitMs));
       answer = await server.handle(message);
       if (!modern && method === 'initialize' && answer?.result) rememberClient(appsKey, server.declaredMcpApps(), server.declaredFormElicitation());
