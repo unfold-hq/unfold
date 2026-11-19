@@ -243,6 +243,40 @@ test('annotations are kept with the session for the people who may see it, and a
   await assert.rejects(bob.rpc('invokeChangesetOperation', { channel: `ahp-changeset:/${id}`, operationId: 'reject' }), (error: any) => error.code === -32001);
 });
 
+test('a candidate without comments advertises its annotations channel, so a client that never derives it stores the first comment', { timeout: testTimeout(60_000) }, async t => {
+  const { server, client, address, id, session } = await reviewable(t);
+  const entry = (await client.rpc('listSessions', { channel: 'ahp-root://' })).items.find((item: Json) => item.resource === session);
+  assert.equal(server.app.store.getSecret(`ahp-annotations:${id}`), undefined, 'nobody commented yet');
+  const advertised = entry.annotations.resource;
+  assert.deepEqual(entry.annotations, { resource: advertised, annotationCount: 0, entryCount: 0 }, 'the session list names the channel before the first comment');
+  assert.deepEqual((await client.rpc('subscribe', { channel: session })).snapshot.state.annotations, entry.annotations, 'the session state names the same channel');
+
+  assert.deepEqual((await client.rpc('subscribe', { channel: advertised })).snapshot.state, { annotations: [] });
+  client.notify('dispatchAction', { channel: advertised, clientSeq: 2, action: { type: 'annotations/set', annotation: comment('first', 'The first comment.') } });
+  await client.until(message => action(message, advertised, 'annotations/set') && !message.params.rejectionReason);
+  const counted = await client.until(message => message.method === 'root/sessionSummaryChanged' && message.params.session === session && Boolean(message.params.changes.annotations));
+  assert.deepEqual(counted.params.changes.annotations, { resource: advertised, annotationCount: 1, entryCount: 1 }, 'the list learns the new count');
+
+  const again = connect(address);
+  t.after(() => again.close());
+  await again.open;
+  await again.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'review-second-window', clientInfo: vscodeAgentsWindow, _meta: { 'vscode.ahpSessionUris': true } });
+  const seen = (await again.rpc('listSessions', { channel: 'ahp-root://' })).items.find((item: Json) => item.resource === session);
+  assert.deepEqual(seen.annotations, { resource: advertised, annotationCount: 1, entryCount: 1 });
+  assert.deepEqual((await again.rpc('subscribe', { channel: seen.annotations.resource })).snapshot.state.annotations.map((annotation: Json) => annotation.id), ['first'], 'a second window of the same person shows the first comment');
+
+  server.app.store.addUser({ id: 'bob-channel', name: 'bob-channel', role: 'operator', passwordHash: 'unused' });
+  const bob = connect(`${address.split('?')[0]}?tkn=${server.app.agentHost.issueToken({ id: 'bob-channel', name: 'bob-channel', role: 'operator' })}`);
+  t.after(() => bob.close());
+  await bob.open;
+  await bob.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'bob-channel' });
+  const bobs = (await bob.rpc('listSessions', { channel: 'ahp-root://' })).items as Json[];
+  assert.ok(!bobs.some(item => item.resource === session || item.annotations?.resource === advertised), 'another person is named no channel');
+  bob.notify('dispatchAction', { channel: advertised, clientSeq: 1, action: { type: 'annotations/set', annotation: comment('bob', 'Mine now.') } });
+  await bob.until(message => action(message, advertised, 'annotations/set'));
+  assert.equal(bob.inbox.find(message => action(message, advertised, 'annotations/set'))!.params.rejectionReason, 'Session not found');
+});
+
 test('feedback comments are read from both attachment shapes VS Code 1.141 sends, with file paths and one-based lines', () => {
   const annotation = comment('a1', 'From the channel.', 9);
   const comments = feedbackComments({ attachments: [

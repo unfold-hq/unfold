@@ -121,6 +121,10 @@ export function changesInstruction(previous: Session, message: string, comments:
   return [`Changes were requested on the candidate of the previous session, "${previous.title}".`, message ? `What should change:\n${message}` : '', comments.length ? `Comments on the candidate's files:\n${commentList(comments)}` : ''].filter(Boolean).join('\n\n');
 }
 
+function annotationCounts(annotations: readonly Json[]): { annotationCount: number; entryCount: number } {
+  return { annotationCount: annotations.length, entryCount: annotations.reduce((count, annotation) => count + (Array.isArray(annotation.entries) ? annotation.entries.length : 0), 0) };
+}
+
 function validEntry(entry: unknown): entry is Json {
   const value = entry as Json;
   return Boolean(value) && typeof value.id === 'string' && value.id.length > 0 && value.id.length <= limits.id && textOf(value.text).length <= limits.text && (typeof value.text === 'string' || typeof value.text?.markdown === 'string');
@@ -189,6 +193,7 @@ export type ReviewHost = {
   claimTurn: (session: Session, turnId: unknown, origin: Origin) => string | undefined;
   claimAnswer: (session: Session, key: string, origin: Origin) => () => void;
   announceSession: (session: Session) => void;
+  annotationsCounted: (session: Session) => void;
   sessionPage: (session: Session) => string;
   choiceEvents: { offered: string; answered: string; reported: string };
 };
@@ -218,11 +223,9 @@ export class CandidateReview {
   /** The annotations a candidate's reviewers left, kept with the session. */
   annotations(session: Session): Json[] { return this.host.store.getSecret<Json[]>(`ahp-annotations:${session.id}`) ?? []; }
 
-  /** The annotations summary of a session's state, under the annotations channel in the client's spelling of the session. */
+  /** The annotations summary of a session's summary and state, under the annotations channel in the client's spelling of the session, with zero counts before the first comment so a client never has to derive the channel. */
   annotationsSummary(session: Session, sessionUri: string): Json {
-    const annotations = this.annotations(session);
-    if (!annotations.length) return {};
-    return { annotations: { resource: annotationsChannel(sessionUri), annotationCount: annotations.length, entryCount: annotations.reduce((count, annotation) => count + (Array.isArray(annotation.entries) ? annotation.entries.length : 0), 0) } };
+    return { annotations: { resource: annotationsChannel(sessionUri), ...annotationCounts(this.annotations(session)) } };
   }
 
   /** The snapshot of a session's annotations channel. */
@@ -240,10 +243,14 @@ export class CandidateReview {
     if (!session) return 'Session not found';
     if (!annotationActions.has(String(action.type))) return `Unsupported action ${String(action.type)}`;
     if (client.user.role === 'viewer') return 'Viewers cannot comment on a candidate';
-    const next = reduceAnnotations(this.annotations(session), action);
+    const previous = this.annotations(session);
+    const next = reduceAnnotations(previous, action);
     if (typeof next === 'string') return next;
     this.host.store.setSecret(`ahp-annotations:${session.id}`, next);
     this.host.echo(client, channel, action, origin, other => this.host.mayView(other.user, session.ownerId));
+    const before = annotationCounts(previous);
+    const after = annotationCounts(next);
+    if (before.annotationCount !== after.annotationCount || before.entryCount !== after.entryCount) this.host.annotationsCounted(session);
     return undefined;
   }
 
