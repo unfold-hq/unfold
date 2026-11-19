@@ -27,6 +27,7 @@ import { knownSecrets, plainRedactedText, withoutKnownSecrets } from '../redacti
 import { CommandLog, clientTerminalState, clientTerminalUri, maxClientTerminals, noClientShell, noClientTerminals, parseTerminalChannel, readOnlyTerminal, terminalActionChannel } from './terminals.ts';
 import { catalogOf, isActionKnownToVersion, negotiateProtocolVersion, oldestBaseline, sessionChatCatalog, speaksCatalog, supportedVersions } from './versions.ts';
 import { ChatAsks, askMarkdown, commandCompletions, messageIntent, type ChatAskEntry, type ChatAskService } from './asks.ts';
+import { WorkItemSideChats, parseSideChatUri, sideChatCapabilities, sideChatOrigin, sideChatText, sideChatUri, sideChatWithoutContextMeta, type SideChat } from './side-chats.ts';
 import { candidateEdits, carryRuns, parseRunChannel, runChatChannel, runChatState, runChats, runFinished, runMessage, runRoute, runStarted, runTool, runTranscripts, stopRuns, toolActions, type RunTranscripts, type Spelling } from './runs.ts';
 import { WorkItemSessions, isPullRequestBannerPrompt, isWorkItemSession, workItemBannerReply, workItemChatState, workItemIdOf, workItemMessageRefusal, workItemQuestions, workItemRefusal, workItemRefusals, workItemRunChatState, workItemSessionState, workItemStatus, workItemSummary, type RoutedAction, type WorkItemRecord } from './work-items.ts';
 import { RunLive, type LiveAction } from './run-live.ts';
@@ -121,7 +122,7 @@ export function sessionSchemeFor(clientInfo: unknown, meta: unknown): SessionSch
 }
 
 type Json = Record<string, any>;
-type Client = { id: string; clientId?: string; scheme: SessionScheme; protocolVersion: string; connection: WebSocketConnection; user: User; token: string; checkedAt: number; connectedAt: string; clientInfo?: { name?: string; version?: string }; subscriptions: Set<string>; initialized: boolean; activeSessions?: number; terminals?: Map<string, unknown> };
+type Client = { id: string; clientId?: string; scheme: SessionScheme; protocolVersion: string; connection: WebSocketConnection; user: User; token: string; checkedAt: number; connectedAt: string; clientInfo?: { name?: string; version?: string }; subscriptions: Set<string>; initialized: boolean; activeSessions?: number; terminals?: Map<string, unknown>; offersSideChats?: boolean };
 /** One initialized connection as its owner sees it in `GET /api/agent-host`. */
 export type AttachedClient = { name?: string; version?: string; protocolVersion: string; connectedAt: string; tokenId: string };
 /** The session a link into the person's Agents window names, in that window's spelling, and whether an Agents window of theirs is attached now. */
@@ -155,7 +156,13 @@ const sessionIdFrom = (uri: string) => parseChannel(uri)?.id;
 const subscribedSessionId = (uri: string) => sessionIdFrom(uri) ?? parseTerminalChannel(uri)?.sessionId;
 const clientTurnId = /^[A-Za-z0-9_.:-]{1,128}$/;
 const actionOrigins = new WeakMap<Json, Origin>();
-const channelKey = (uri: string) => { if (isAutomationsChannel(uri)) return automationsChannel; const parsed = parseChannel(uri); const annotations = parsed ? undefined : parseAnnotationsChannel(uri); return parsed ? `${parsed.kind}:${parsed.id}${parsed.run ? `:${parsed.run}` : ''}` : annotations ? `annotations:${annotations.id}` : uri; };
+/** The Work Item session and chat id of a side chat's URI, in any spelling of the session. */
+function parseSideChat(uri: string): { publicId: string; chatId: string } | undefined {
+  const side = parseSideChatUri(uri);
+  const owner = side ? parseChannel(side.session) : undefined;
+  return side && owner?.kind === 'session' && isWorkItemSession(owner.id) ? { publicId: owner.id, chatId: side.chatId } : undefined;
+}
+const channelKey = (uri: string) => { if (isAutomationsChannel(uri)) return automationsChannel; const parsed = parseChannel(uri); const side = parsed ? undefined : parseSideChat(uri); const annotations = parsed || side ? undefined : parseAnnotationsChannel(uri); return parsed ? `${parsed.kind}:${parsed.id}${parsed.run ? `:${parsed.run}` : ''}` : side ? `side:${side.publicId}:${side.chatId}` : annotations ? `annotations:${annotations.id}` : uri; };
 
 /** Keeps the dollar signs of every Markdown part a client receives literal, so VS Code's chat typesets no maths. */
 const plainDollars = (_key: string, value: unknown) => value && typeof value === 'object' && (value as Json).kind === 'markdown' && typeof (value as Json).content === 'string' ? { ...(value as Json), content: escapeMathDelimiters((value as Json).content) } : value;
@@ -320,6 +327,7 @@ export class AgentHost {
 
   private readonly review: CandidateReview;
   private readonly chatAsks: ChatAsks;
+  private readonly sideChats: WorkItemSideChats;
   private readonly ploegClients: PloegClient[];
   /** Ploeg's tracker routes as a read-only automation catalogue. */
   readonly automations: TrackerAutomations;
@@ -348,6 +356,7 @@ export class AgentHost {
     this.heartbeat = setInterval(() => this.checkHeartbeats(), heartbeatCheckMs);
     this.heartbeat.unref();
     this.chatAsks = new ChatAsks(store);
+    this.sideChats = new WorkItemSideChats(store, this.chatAsks);
     this.review = new CandidateReview({
       config, store, engine, choiceEvents,
       serverSeq: () => this.serverSeq,
@@ -395,7 +404,7 @@ export class AgentHost {
   useChat(service: ChatService): void { this.chats.service = service; }
 
   /** Connects the Ask service, so a person can ask about a session's Work Item from its chat without reaching the team (system ADR-0031). */
-  useAsks(service: ChatAskService): void { this.chatAsks.service = service; }
+  useAsks(service: ChatAskService | undefined): void { this.chatAsks.service = service; }
 
   /** Connects candidate delivery, so a gated session's verified candidate offers Accept and open pull request through the publish route. */
   useDelivery(service: DeliveryService): void { this.delivery = service; }
@@ -720,12 +729,12 @@ export class AgentHost {
     return session;
   }
 
-  rootState(user: User): Json {
+  rootState(user: User, offersSideChats = false): Json {
     return {
       agents: [{
         provider, displayName: 'Unfold teams', description: 'Operator-led agent teams in isolated workspaces; every session ends in a reviewable candidate.',
         models: [{ ...composerModel(this.config), provider }],
-        protectedResources: [],
+        protectedResources: [], ...(offersSideChats ? { capabilities: sideChatCapabilities } : {}),
       }, ...(this.chats.available ? [this.chats.agent()] : [])],
       activeSessions: this.activeSessionCount(user),
     };
@@ -1474,7 +1483,7 @@ export class AgentHost {
   }
 
   private snapshot(client: Client, channel: string): Json {
-    if (channel === rootChannel) { const state = this.rootState(client.user); client.activeSessions = state.activeSessions; return { resource: rootChannel, state, fromSeq: this.serverSeq }; }
+    if (channel === rootChannel) { const state = this.rootState(client.user, client.offersSideChats); client.activeSessions = state.activeSessions; return { resource: rootChannel, state, fromSeq: this.serverSeq }; }
     const terminal = parseTerminalChannel(channel);
     if (terminal) return { resource: channel, state: this.terminalState(client, terminal), fromSeq: this.serverSeq };
     if (client.terminals?.has(channel)) return { resource: channel, state: clientTerminalState(client.clientId ?? client.id, client.terminals.get(channel)), fromSeq: this.serverSeq };
@@ -1583,6 +1592,8 @@ export class AgentHost {
     if (isAutomationsChannel(channel)) { const state = await this.automations.snapshot(client.user); client.subscriptions.add(channel); return { resource: channel, state, fromSeq: this.serverSeq }; }
     const terminal = parseTerminalChannel(channel);
     if (terminal && isWorkItemSession(terminal.sessionId)) { const snapshot = await this.podLogsSnapshot(client, channel, terminal); client.subscriptions.add(channel); return snapshot; }
+    const side = parseSideChat(channel);
+    if (side) { const state = this.sideChatState(client, side); client.subscriptions.add(channel); return { resource: channel, state, fromSeq: this.serverSeq }; }
     const parsed = parseChannel(channel);
     if (parsed && isWorkItemSession(parsed.id)) { const snapshot = await this.workItemSnapshot(client, channel, parsed); client.subscriptions.add(channel); return snapshot; }
     if (parsed && this.chats.has(parsed.id)) {
@@ -1618,18 +1629,18 @@ export class AgentHost {
       if (!negotiated) throw new RpcError(codes.unsupportedVersion, `None of the offered protocol versions is in ${supportedVersions.join(', ')}`, { supportedVersions });
       if (typeof params.clientId !== 'string') throw new RpcError(codes.invalidParams, 'clientId is required');
       const declaresSessionUris = params._meta?.[sessionUrisMeta] === true;
-      client.clientId = params.clientId; client.scheme = sessionSchemeFor(params.clientInfo, params._meta); client.initialized = true; client.clientInfo = describedClient(params.clientInfo); client.protocolVersion = negotiated;
+      client.clientId = params.clientId; client.scheme = sessionSchemeFor(params.clientInfo, params._meta); client.offersSideChats = declaresSessionUris; client.initialized = true; client.clientInfo = describedClient(params.clientInfo); client.protocolVersion = negotiated;
       this.remember(params.clientId, client.user, client.scheme, client.clientInfo, negotiated);
       this.workItems.watch();
       this.resumeActiveClient(params.clientId, Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]);
       const snapshots: Json[] = [];
       for (const channel of Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]) snapshots.push(await this.subscribe(client, channel));
-      return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', version: this.config.mode === 'demo' ? 'demo' : 'live' }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
+      return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', version: this.config.mode === 'demo' ? 'demo' : 'live' }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true, [sideChatWithoutContextMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
     }
     if (method === 'reconnect' && !client.initialized) {
       const known = typeof params.clientId === 'string' ? this.knownClients.get(params.clientId) : undefined;
       if (!known || known.userId !== client.user.id) throw new RpcError(codes.notFound, 'This host does not know that client; initialize');
-      client.clientId = params.clientId; client.scheme = params._meta?.[sessionUrisMeta] === true ? 'ahp-session' : known.scheme; client.initialized = true; client.clientInfo = known.clientInfo; client.protocolVersion = known.protocolVersion ?? oldestBaseline;
+      client.clientId = params.clientId; client.scheme = params._meta?.[sessionUrisMeta] === true ? 'ahp-session' : known.scheme; client.offersSideChats = params._meta?.[sessionUrisMeta] === true; client.initialized = true; client.clientInfo = known.clientInfo; client.protocolVersion = known.protocolVersion ?? oldestBaseline;
       this.remember(params.clientId, client.user, client.scheme, client.clientInfo, client.protocolVersion);
       this.workItems.watch();
       this.resumeActiveClient(params.clientId, Array.isArray(params.subscriptions) ? params.subscriptions : []);
@@ -1650,7 +1661,7 @@ export class AgentHost {
       case 'createTerminal': return this.createClientTerminal(client, params);
       case 'disposeTerminal': if (parseTerminalChannel(String(params.channel))) throw new RpcError(codes.permissionDenied, noClientTerminals); client.terminals?.delete(String(params.channel)); return {};
       case 'disposeSession': return this.disposeSession(client, params);
-      case 'disposeChat': return {};
+      case 'disposeChat': return this.disposeSideChat(client, String(params.channel ?? ''));
       case 'fetchTurns': return {};
       case 'completions': return { items: this.completionItems(client, params) };
       case 'resourceRead': {
@@ -1735,6 +1746,7 @@ export class AgentHost {
       if (params.initialMessage?.text) queueMicrotask(() => { this.chats.message(client.user, chatId, { type: 'chat/turnStarted', turnId: randomUUID(), message: params.initialMessage }, accepted => this.broadcast(chat, accepted, { clientId: client.clientId!, clientSeq: 0 }, viewer => viewer.user.id === client.user.id)); });
       return {};
     }
+    if (chatId && isWorkItemSession(chatId) && params.source?.kind === 'sideChat') return this.createSideChat(client, chatId, chat, params);
     const pending = this.pendingFor(channel);
     if (pending) {
       if (!this.mayView(client.user, pending.user.id)) throw new RpcError(codes.sessionNotFound, 'Unfold has no such session, or it is not yours. Reopen it from the Unfold view.');
@@ -1888,7 +1900,7 @@ export class AgentHost {
     const flags = this.viewOf(client, parsed.id);
     const by = this.handedOffBy(client.user, found.entry.workItemId);
     const open = this.workItemCommands.open(client.user.id, found.entry.workItemId);
-    const sessionState = parsed.kind === 'session' && !parsed.run ? { ...workItemSessionState(found.entry, found.detail, spelling, flags, client.protocolVersion, this.activeClientsOf(parsed.id), by), ...this.workItemProject(found.entry.item), inputNeeded: open ? [promptInputNeeded(open, spelling.chat)] : [] } : undefined;
+    const sessionState = parsed.kind === 'session' && !parsed.run ? this.withSideChats(client, parsed.id, { ...workItemSessionState(found.entry, found.detail, spelling, flags, client.protocolVersion, this.activeClientsOf(parsed.id), by), ...this.workItemProject(found.entry.item), inputNeeded: open ? [promptInputNeeded(open, spelling.chat)] : [] }) : undefined;
     const pullRequest = found.entry.item.pullRequest;
     const lead = this.openElsewhere(client.user, { kind: 'work-item', id: found.entry.workItemId }, this.workItemPage(found.entry.workItemId), 'Work Item', `${parsed.id}-open-elsewhere`, pullRequest?.url ? { url: pullRequest.url, number: pullRequest.number } : undefined);
     const chatState = parsed.kind === 'chat' && !parsed.run ? withLeadingPart(withPrompts(workItemChatState(found.entry, found.detail, spelling, flags, by), this.workItemCommands.prompts(client.user.id, found.entry.workItemId), this.workItemCommands.notes(client.user.id, found.entry.workItemId)), lead) : undefined;
@@ -1961,6 +1973,102 @@ export class AgentHost {
       case 'chat/draftChanged': case 'chat/inputAnswerChanged': this.echo(client, channel, action, origin); return undefined;
       case 'session/activeClientSet': case 'session/activeClientRemoved': return kind === 'session' ? this.setActiveClient(client, channel, publicId, action, origin) : `${action.type} is dispatched on the session channel`;
       default: return workItemRefusal(action.type);
+    }
+  }
+
+  /** A Work Item session's chats with the viewer's own side chats after its default and Run chats. */
+  private withSideChats(view: View, publicId: string, state: Json): Json {
+    const side = this.sideChats.list(view.user.id, publicId).map(chat => this.sideChats.summary(chat, sessionChannel(publicId, view.scheme)));
+    return side.length ? { ...state, chats: [...state.chats, ...side] } : state;
+  }
+
+  private sideChatOf(user: User, side: { publicId: string; chatId: string }): { chat: SideChat; entry: WorkItemRecord } | undefined {
+    const entry = this.workItems.remembered(user, side.publicId);
+    if (!entry || !this.workItems.allows(user, entry.item.team)) return undefined;
+    const chat = this.sideChats.find(user.id, side.publicId, side.chatId);
+    return chat ? { chat, entry } : undefined;
+  }
+
+  private sideChatState(client: Client, side: { publicId: string; chatId: string }): Json {
+    const found = this.sideChatOf(client.user, side);
+    if (!found) throw new RpcError(codes.sessionNotFound, 'Unfold has no such chat, or it is not yours. Reopen the Work Item from the Unfold view.');
+    return this.sideChats.state(found.chat, sessionChannel(side.publicId, client.scheme));
+  }
+
+  /**
+   * Opens a side chat beside a Work Item's chat (VS Code 1.147): an Ask chat that only the person who opened it sees.
+   * It never reaches the Team, starts a Run or writes to Ploeg. Unfold's own sessions keep exactly one chat.
+   */
+  private createSideChat(client: Client, publicId: string, chat: string, params: Json): Json {
+    const user = client.user;
+    const entry = this.workItems.remembered(user, publicId);
+    if (!entry || !this.workItems.allows(user, entry.item.team)) throw new RpcError(codes.sessionNotFound, 'Unfold has no such session, or it is not yours. Reopen it from the Unfold view.');
+    const side = parseSideChat(chat);
+    if (side?.publicId !== publicId) throw new RpcError(codes.invalidParams, `A side chat of ${publicId} needs a chat URI of that session`);
+    const origin = sideChatOrigin(params);
+    if ('refused' in origin) throw new RpcError(codes.invalidParams, origin.refused);
+    const opened = this.sideChats.open(user, publicId, entry.workItemId, side.chatId, origin);
+    client.subscriptions.add(chat);
+    const own = (viewer: Client) => viewer.user.id === user.id;
+    this.broadcast(sessionChannel(publicId), viewer => ({ type: 'session/chatAdded', summary: this.sideChats.summary(opened, sessionChannel(publicId, viewer.scheme)) }), undefined, own);
+    if (params.initialMessage?.text) queueMicrotask(() => void this.dispatchToSideChat(client, chat, side, { type: 'chat/turnStarted', turnId: randomUUID(), message: { ...params.initialMessage, origin: { kind: 'user' } } }, { clientId: client.clientId!, clientSeq: 0 }));
+    return {};
+  }
+
+  private disposeSideChat(client: Client, channel: string): Json {
+    const side = parseSideChat(channel);
+    if (!side || !this.sideChats.close(client.user.id, side.publicId, side.chatId)) return {};
+    const own = (viewer: Client) => viewer.user.id === client.user.id;
+    this.broadcast(sessionChannel(side.publicId), viewer => ({ type: 'session/chatRemoved', chat: sideChatUri(side.chatId, sessionChannel(side.publicId, viewer.scheme)) }), undefined, own);
+    for (const item of this.clients) if (own(item)) for (const subscription of [...item.subscriptions]) if (channelKey(subscription) === channelKey(channel)) item.subscriptions.delete(subscription);
+    return {};
+  }
+
+  /**
+   * A side chat on a Work Item takes the person's questions and their answer to a spend confirmation, and nothing else.
+   * Every question goes to the Ask path; none reaches the Work Item's own chat, its Team or Ploeg's commands.
+   */
+  private async dispatchToSideChat(client: Client, channel: string, side: { publicId: string; chatId: string }, action: Json, origin: Origin): Promise<string | undefined> {
+    const found = this.sideChatOf(client.user, side);
+    if (!found) return 'Chat not found';
+    const { chat, entry } = found;
+    const own = (viewer: Client) => viewer.user.id === client.user.id;
+    const session = sessionChannel(side.publicId);
+    const outlet = {
+      chat: (actions: Json[]) => { for (const item of actions) this.broadcast(channel, item, undefined, own); },
+      status: (changed: SideChat) => this.broadcast(session, viewer => ({ type: 'session/chatUpdated', chat: sideChatUri(changed.chatId, sessionChannel(side.publicId, viewer.scheme)), changes: { status: this.sideChats.status(changed), modifiedAt: changed.modifiedAt } }), undefined, own),
+    };
+    const page = this.workItemPage(entry.workItemId);
+    if (viewFlags[String(action.type)]?.channel === 'chat') { this.echo(client, channel, action, origin, own); return undefined; }
+    switch (action.type) {
+      case 'chat/turnStarted': {
+        if (action.message?.origin?.kind !== 'user') return 'Only a person\'s own question is asked';
+        if (typeof action.turnId !== 'string' || !clientTurnId.test(action.turnId)) return 'A turn needs an id';
+        const text = typeof action.message.text === 'string' ? action.message.text.trim() : '';
+        const refused = this.sideChats.refusal(chat, text);
+        if (refused) return refused;
+        this.echo(client, channel, action, origin, own);
+        await this.sideChats.ask(client.user, chat, action.turnId, text, entry.item.team, page, outlet);
+        return undefined;
+      }
+      case 'chat/inputCompleted': {
+        const requestId = String(action.requestId ?? '');
+        if (!this.sideChats.waiting(chat, requestId)) return 'Unknown question';
+        const response = action.response === 'accept' ? 'accept' : 'cancel';
+        const answers = response === 'accept' && action.answers && typeof action.answers === 'object' ? action.answers as Json : undefined;
+        this.echo(client, channel, { type: 'chat/inputCompleted', requestId, response, ...(answers ? { answers } : {}) }, origin, own);
+        await this.sideChats.confirm(client.user, chat, requestId, response, answers, page, outlet);
+        return undefined;
+      }
+      case 'chat/turnCancelled': {
+        const requestId = `${String(action.turnId ?? '')}-confirm`;
+        if (!this.sideChats.waiting(chat, requestId)) return 'An Ask on its way finishes on its own and spends nothing more after its answer.';
+        this.echo(client, channel, { type: 'chat/inputCompleted', requestId, response: 'cancel' }, origin, own);
+        await this.sideChats.confirm(client.user, chat, requestId, 'cancel', undefined, page, outlet);
+        return undefined;
+      }
+      case 'chat/draftChanged': case 'chat/inputAnswerChanged': this.echo(client, channel, action, origin, own); return undefined;
+      default: return sideChatText.readOnly;
     }
   }
 
@@ -2671,6 +2779,8 @@ export class AgentHost {
       const terminal = parseTerminalChannel(channel);
       if (terminal) { reject((isWorkItemSession(terminal.sessionId) ? client.subscriptions.has(channel) : this.sessionFor(client.user, sessionChannel(terminal.sessionId))) ? readOnlyTerminal : 'Terminal not found'); return; }
       if (client.terminals?.has(channel)) { reject(noClientShell); return; }
+      const side = parseSideChat(channel);
+      if (side) { const refused = await this.dispatchToSideChat(client, channel, side, action, origin); if (refused) reject(refused); return; }
       const parsed = parseChannel(channel);
       if (!parsed) { reject('Unknown channel'); return; }
       if (parsed.run) { reject('A Run\'s chat is read-only; send messages in the session\'s chat'); return; }
