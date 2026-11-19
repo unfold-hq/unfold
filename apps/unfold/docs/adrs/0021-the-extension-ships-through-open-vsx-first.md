@@ -1,6 +1,6 @@
 # 0021 — The extension ships through Open VSX first, and reaches the Marketplace only on stable versions
 
-Date: 2026-09-11. Status: accepted for 0.3.0; the publishers themselves are an open manual gate.
+Date: 2026-11-19. Status: accepted for 0.3.0; the publishers themselves are an open manual gate.
 
 ## Context
 
@@ -100,3 +100,12 @@ A plain-VS-Code user asks for it and the Azure subscription becomes worth openin
 changes its version rules, the extension leaves preview and the `preview` flag should come off,
 or Unfold acquires a second publishable extension and the publisher identity deserves to be
 shared deliberately.
+
+## Update, 2026-11-19
+
+Azure DevOps postponed the retirement of global personal access tokens from 2026-12-01 to
+2027-01-27, "to avoid disruption during the December holiday season"
+([Microsoft's notice](https://devblogs.microsoft.com/devops/retirement-of-global-personal-access-tokens-in-azure-devops/),
+updated 2026-10-23). The Marketplace step now treats `VSCE_PAT` as retired from 2027-01-27: until
+then it publishes with a warning, from that day it fails. The decision is unchanged; the Entra
+credential remains the route that does not expire.

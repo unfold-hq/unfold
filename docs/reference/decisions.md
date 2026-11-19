@@ -138,7 +138,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | Unfold | [0016](../../apps/unfold/docs/adrs/0016-sign-in-and-link-your-own-accounts.md) | People sign in with the estate and link their own accounts | 2026-09-10 | — |
 | Unfold | [0019](../../apps/unfold/docs/adrs/0019-verify-canonical-candidates-outside-agent-workspaces.md) | Verify canonical candidates outside agent workspaces | 2026-10-11 | — |
 | Unfold | [0020](../../apps/unfold/docs/adrs/0020-the-name-and-mark-are-trademarks.md) | The name and mark are trademarks under a usage policy, not CC-licensed artwork | 2026-09-11 | — |
-| Unfold | [0021](../../apps/unfold/docs/adrs/0021-the-extension-ships-through-open-vsx-first.md) | The extension ships through Open VSX first, and reaches the Marketplace only on stable versions | 2026-09-11 | — |
+| Unfold | [0021](../../apps/unfold/docs/adrs/0021-the-extension-ships-through-open-vsx-first.md) | The extension ships through Open VSX first, and reaches the Marketplace only on stable versions | 2026-11-19 | — |
 | Unfold | [0022](../../apps/unfold/docs/adrs/0022-apache-2-0-is-the-estate-licence.md) | Apache-2.0 is a decision here, not an inheritance | 2026-09-11 | — |
 | Unfold | [0023](../../apps/unfold/docs/adrs/0023-unfold-submits-work-to-ploeg-and-never-executes-it.md) | Unfold submits Work Items to Ploeg and never executes them | 2026-10-11 | — |
 | Unfold | [0036](../../apps/unfold/docs/adrs/0036-the-agent-host-speaks-websocket-through-ws.md) | The agent host speaks WebSocket through `ws` | 2026-10-03 | — |
