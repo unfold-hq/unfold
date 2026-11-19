@@ -8,7 +8,7 @@ import type { AppConfig, InsightEvent, User } from './types.ts';
 /** One onboarding step a later slice builds, with the Ploeg read route that tells whether Ploeg serves it and the release that adds it. */
 export type PloegStep = { id: StepId; stage: number; record: string; read: string | null; release: string | null };
 export type StepId = 'connect-github' | 'register-repositories' | 'connect-clickup' | 'read-scopes' | 'prepare-repository' | 'bind-lists' | 'connect-claude';
-/** `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding checklist that need a Ploeg route, and the release that ships Ploeg ADR-0192 for the second-forge gate. */
+/** `src/ploeg-steps.json`: the forge and tracker the onboarding connects first (decision D4), the steps of the onboarding checklist that need a Ploeg route, and the first release that ships Ploeg ADR-0192, below which an installation on another forge cannot add the onboarding forge. */
 export type PloegSteps = { schemaVersion: 1; pair: { forge: string; forgeName: string; tracker: string; trackerName: string }; steps: PloegStep[]; secondForge: { record: string; release: string | null } };
 
 export const ploegStepsUrl = new URL('./ploeg-steps.json', import.meta.url);
@@ -325,7 +325,7 @@ export class Onboarding {
       { id: 'installation', stage: 1, title: 'Installation', status: installStatus, text: installStatus === 'ok' ? 'Every install value Unfold can read is set.' : installStatus === 'problem' ? 'An install value is missing. The person who installed Unfold and Ploeg sets it.' : 'Ploeg does not report every install value; the first step that needs one tells.', checks: installation, ...(manage ? { action: { label: 'Show the install values', kind: 'install-values' as const } } : readOnly) },
     ];
 
-    const secondForge = otherForges.length ? ` This installation pushes to ${list(otherForges)}. Adding ${pair.forgeName} needs Ploeg ${this.steps.secondForge.release ?? `with ${this.steps.secondForge.record}, not released yet`}.` : '';
+    const secondForge = otherForges.length && !secondForgeOpen(this.steps, this.pinned) ? ` This installation pushes to ${list(otherForges)}. Adding ${pair.forgeName} needs Ploeg ${this.steps.secondForge.release ?? `with ${this.steps.secondForge.record}, not released yet`}.` : '';
     const github = repositories.filter(repository => repository.forge === pair.forge);
     lines.push(github.length
       ? { id: 'connect-github', stage: 2, title: 'Connect GitHub', status: 'ok', configured: true, text: `Configured by the installation: Ploeg pushes to ${pair.forgeName} for ${github.length === 1 ? '1 repository' : `${github.length} repositories`}.` }
