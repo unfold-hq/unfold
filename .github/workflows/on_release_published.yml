@@ -399,7 +399,7 @@ jobs:
         run: |
           set -euo pipefail
           cd apps/unfold/extensions/vscode
-          retired=2026-12-01
+          retired=2027-01-27
           guide=apps/unfold/docs/operations/release.md#registry-credentials
           summary() { printf -- '- Visual Studio Marketplace: %s\n' "$1" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
           if [[ "$VERSION" == *-* ]]; then

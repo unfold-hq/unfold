@@ -43,7 +43,7 @@ The extension job of the publication workflow reuses a VSIX already attached to 
 | --- | --- |
 | GitHub release | Attach the VSIX, its checksum and its sigstore bundle while the release is a draft, before any registry publication |
 | Open VSX | Publish with Trusted Publishing (`ovsx publish --trusted-publishing`, ovsx 1.4.0 or newer); no token is stored |
-| Visual Studio Marketplace | Skip versions containing a hyphen; for a stable version use the Entra credential, else `VSCE_PAT` until 2026-12-01; skip with a warning when neither is set |
+| Visual Studio Marketplace | Skip versions containing a hyphen; for a stable version use the Entra credential, else `VSCE_PAT` until 2027-01-27; skip with a warning when neither is set |
 
 [ADR 0021](../adrs/0021-the-extension-ships-through-open-vsx-first.md) records the Open VSX-first decision, and [ADR-0055](../../../../docs/adr/adr-0055-github-unfold-hq-is-the-project-home.md) moved the extension id to `unfold-hq.unfold`. Each registry step writes what it did, or why it skipped, to the job summary. A green job with a skip line is not evidence of a registry listing. Account ownership and external registry availability require a fresh check when publishing there.
 
@@ -68,7 +68,7 @@ Neither registry takes this signature. Open VSX signs every published version wi
 
 Open VSX publishes through Trusted Publishing, configured on open-vsx.org for `unfold-hq/unfold` and `on_release_published.yml`, so no Open VSX token exists. Trusted Publishing cannot create an extension, so `unfold-hq.unfold` must exist on Open VSX before the first publication from GitHub; until then the owner of the `unfold-hq` namespace publishes it once with a token.
 
-The Marketplace step prefers the Entra credential (`MARKETPLACE_AZURE_CLIENT_ID` and `MARKETPLACE_AZURE_TENANT_ID`, a managed identity added to the Marketplace publisher) and fails when only one of the two is set. With only `VSCE_PAT` set, the step publishes with a deprecation warning. Azure DevOps retires global personal access tokens on 2026-12-01, and a Marketplace token is one, so from that date the step fails and its error names the fix. No release is published to the Marketplace today: every Unfold release is a `-rc.N` candidate, which the step skips.
+The Marketplace step prefers the Entra credential (`MARKETPLACE_AZURE_CLIENT_ID` and `MARKETPLACE_AZURE_TENANT_ID`, a managed identity added to the Marketplace publisher) and fails when only one of the two is set. With only `VSCE_PAT` set, the step publishes with a deprecation warning. Azure DevOps retires global personal access tokens on 2027-01-27 ([Microsoft's notice](https://devblogs.microsoft.com/devops/retirement-of-global-personal-access-tokens-in-azure-devops/), which on 2026-10-23 moved the date from 2026-12-01), and a Marketplace token is one, so from that date the step fails and its error names the fix. No release is published to the Marketplace today: every Unfold release is a `-rc.N` candidate, which the step skips.
 
 For installation, download the matching VSIX and checksum from a completed [GitHub release](https://github.com/unfold-hq/unfold/releases), verify the checksum, then use the editor's **Install from VSIX** command. The [extension guide](../../extensions/vscode/README.md#install) gives the user-facing steps.
 
