@@ -63,7 +63,7 @@ Qualify cross-project rule references as "Product R8" or "Ploeg R18". If a share
 
 When a page moves, update every link to its new path. `mise run docs-check` fails a current page that links through a moved path, using the [12 September path mapping](research/2026-09-12-glide-document-paths.json). The published site redirects an old URL to its new page, so the repository keeps no compatibility stub at the old path.
 
-On 2026-11-01 the owner deleted the last nine "Documentation moved" stubs under `apps/unfold/docs/`: the policy, migration, five landscape and two operations pages. The published site's route in `webgrip/homelab-cluster` already sends every old path to its current page with a 302, and that route is unchanged. Do not add a stub back; a repository-relative link to an old path belongs in the file that needs it, pointing at the current page.
+On 2026-11-01 the owner deleted the last nine "Documentation moved" stubs under `apps/unfold/docs/`: the policy, migration, five landscape and two operations pages. The published site's route, kept in the repository of the cluster that serves the site, already sends every old path to its current page with a 302, and that route is unchanged. Do not add a stub back; a repository-relative link to an old path belongs in the file that needs it, pointing at the current page.
 
 ## Decisions
 

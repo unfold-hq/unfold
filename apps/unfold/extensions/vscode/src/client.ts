@@ -205,17 +205,18 @@ export class UnfoldClient {
     if (fault) { await response.body?.cancel().catch(() => undefined); throw fault; }
     return workbenchFault(body);
   }
-  async request<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  async request<T>(path: string, method = 'GET', body?: unknown, extra: Record<string, string> = {}): Promise<T> {
     if (!path.startsWith('/api/') || path.includes('://') || path.includes('..')) throw new Error('Invalid API route.');
-    try { return await this.attempt<T>(path, method, body); }
+    try { return await this.attempt<T>(path, method, body, extra); }
     catch (error) {
       if (method !== 'GET' || !transient(error)) throw error;
       await new Promise(resolve => setTimeout(resolve, this.retryDelay));
-      return this.attempt<T>(path, method, body);
+      return this.attempt<T>(path, method, body, extra);
     }
   }
-  private async attempt<T>(path: string, method: string, body?: unknown): Promise<T> {
+  private async attempt<T>(path: string, method: string, body?: unknown, extra: Record<string, string> = {}): Promise<T> {
     const { headers, gatewayHeadersStored } = await this.outgoing('application/json');
+    Object.assign(headers, extra);
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     let response: Response;
     try {
@@ -266,6 +267,10 @@ export class UnfoldClient {
   answerQuestion(id: string, questionId: string, body: { commandId: string; answer: string }): Promise<unknown> { return this.request(`/api/ploeg/work-items/${workItemId(id)}/questions/${encodeURIComponent(questionText(questionId))}/answer`, 'POST', body); }
   /** Restarts or resumes a Work Item that waits on a person, with an optional note for its next Run. */
   requeue(id: string, body: { commandId: string; expectedState: 'needs_human'; note?: string; resume?: true }): Promise<{ demo?: boolean; resumed?: boolean; fromRound?: number }> { return this.request(`/api/ploeg/work-items/${workItemId(id)}/requeue`, 'POST', body); }
+  /** Approves, rejects, restarts or hands back a Work Item through the browser's routes, naming the channel and the agreed confirmation so its Action Record carries both. */
+  workItemAction(id: string, action: 'approve' | 'reject' | 'requeue' | 'hand-back', body: Record<string, unknown>, via: { client: string; confirmation: string }): Promise<Record<string, unknown>> {
+    return this.request(`/api/ploeg/work-items/${workItemId(id)}/${action}`, 'POST', body, { 'X-Unfold-Client': via.client, 'X-Unfold-Confirmation': via.confirmation });
+  }
   async workItemCard(id: string): Promise<RunCard | undefined> {
     try { return (await this.request<{ card?: RunCard }>(`/api/ploeg/work-items/${workItemId(id)}/card`)).card; }
     catch (error) { if (error instanceof ApiError && error.status === 404) return undefined; throw error; }

@@ -205,7 +205,7 @@ export function createMcpHttp(options: McpHttpOptions) {
       const follow = options.tasks;
       const tasks: McpTasks | undefined = follow ? { enabled: () => follow.enabled(user), keys: () => follow.keys(), tenantOf: source => follow.tenantOf(user, source), cache: taskCache } : undefined;
       const events = modern && options.events && await options.events.enabled(user).catch(() => false) ? options.events.handler(user) : undefined;
-      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, prompts: true, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
+      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, prompts: true, contextResources: true, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
       if (streamable && server.confirmsFirst(String(params?.name))) server.connect(askOnStream(res, user.id, token.client ?? '', waitMs));
       answer = await server.handle(message);
       if (!modern && method === 'initialize' && answer?.result) rememberClient(appsKey, server.declaredMcpApps(), server.declaredFormElicitation());

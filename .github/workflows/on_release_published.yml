@@ -409,6 +409,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          paused="$(python3 scripts/marketplace_version.py --paused)"
+          if [ -n "$paused" ]; then
+            echo "::notice::Visual Studio Marketplace publication is paused: ${paused}."
+            echo "- Visual Studio Marketplace: **skipped**, publication is paused: ${paused}" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           cd apps/unfold/extensions/vscode
           vsix="unfold-${VERSION}.vsix"
           channel=release

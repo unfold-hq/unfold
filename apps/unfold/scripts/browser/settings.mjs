@@ -75,7 +75,8 @@ export async function run({ page, assert, screenshot }) {
   assert.equal(await connectCard.getByRole('link', { name: 'Connect VS Code', exact: true }).getAttribute('href'), `vscode://unfold-hq.unfold/connect-agents-window?origin=${encodeURIComponent(origin)}`);
   await connectCard.getByText('No Unfold extension in VS Code?', { exact: true }).click();
   assert.equal(await connectCard.getByRole('link', { name: 'Open VSX' }).getAttribute('href'), 'https://open-vsx.org/extension/unfold-hq/unfold');
-  assert.equal(await connectCard.getByRole('link', { name: 'the Extensions view in VS Code' }).getAttribute('href'), 'vscode:extension/unfold-hq.unfold');
+  await connectCard.getByText('Extensions: Install from VSIX…', { exact: true }).waitFor();
+  assert.equal(await connectCard.locator('a[href^="vscode:extension/"]').count(), 0, 'the card links a gallery lookup that VS Code\'s Marketplace cannot answer');
   await connectCard.getByText('Sessions: Add Remote Agent Host…', { exact: true }).waitFor();
   assert.equal(await page.locator('#vscode-connect-address').count(), 0, 'no token is minted or shown before the click');
   await page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); });
