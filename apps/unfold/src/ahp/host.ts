@@ -18,7 +18,7 @@ import { IdleSessions, RememberedClients, ServerSequence, maxProvisionalSessions
 import { AnnouncedCustomizations, customizationRefusal, gatewayToolCall, rootConfigRefusal, sessionCustomizations, type GatewaySubject } from './customizations.ts';
 import { outcomeMarkdown, sessionProgress, stopReason } from '../../public/core/progress.js';
 import { money } from '../../public/core/format.js';
-import { CandidateReview, parseAnnotationsChannel, reviewOperationIds, reviewOperations } from './review.ts';
+import { CandidateReview, changesetOperations, parseAnnotationsChannel, reviewOperationIds, reviewOperations } from './review.ts';
 import { Declines, declineEvents, declinedAnswers, stoppingRefusal, yesNoOptions } from './questions.ts';
 import { SpendNotices, observeSpend, runEndSpend } from './spend.ts';
 import { resumable, resumeRefusal, runAgainReply, turnResumedEvent } from './try-again.ts';
@@ -290,6 +290,8 @@ export class AgentHost {
   private readonly projections = new Map<string, Projection>();
   private readonly pending = new Map<string, PendingSession>();
   private readonly summaries = new Map<string, string>();
+  private readonly publishing = new Set<string>();
+  private readonly publishFailures = new Map<string, Json>();
   private readonly announcedCustomizations = new AnnouncedCustomizations();
   private readonly activeClients: Map<string, Map<string, Json>>;
   private readonly knownClients: RememberedClients<SessionScheme>;
@@ -885,7 +887,38 @@ export class AgentHost {
 
   private reviewOperations(session: Session): Json[] { const gated = this.gated(session); return reviewOperations(session, gated, gated ? this.delivery?.readiness(session) : undefined); }
 
-  private operations(session: Session): Json[] { return this.reviewOperations(session); }
+  private operations(session: Session): Json[] {
+    const gated = this.gated(session);
+    const readiness = gated ? this.delivery?.readiness(session) : undefined;
+    const repository = this.config.repositories.find(repo => repo.id === session.repositoryId);
+    const target = repository ? { repository: repository.name, baseBranch: repository.baseBranch, ...(readiness?.publication?.branch ? { branch: readiness.publication.branch } : {}) } : undefined;
+    return changesetOperations(session, gated, readiness, target).map(item => item.id !== reviewOperationIds.publish || item.status === 'disabled' ? item
+      : this.publishing.has(session.id) ? { ...item, status: 'running' }
+        : this.publishFailures.has(session.id) ? { ...item, status: 'error', error: this.publishFailures.get(session.id) } : item);
+  }
+
+  private async publishCandidate(client: Client, session: Session, operation: Json): Promise<Json> {
+    if (client.user.role === 'viewer' || !this.mayView(client.user, session.ownerId)) throw new RpcError(codes.permissionDenied, 'Viewers cannot review a candidate');
+    if (operation.status === 'disabled') throw new RpcError(codes.conflict, `${operation.label} is not available: ${operation.description}`);
+    if (operation.status === 'running') throw new RpcError(codes.conflict, `${operation.label} is already running for this candidate. Wait for it to finish.`);
+    const changeset = this.changesetUri(session);
+    this.publishing.add(session.id);
+    this.publishFailures.delete(session.id);
+    this.broadcast(changeset, { type: 'changeset/operationStatusChanged', operationId: operation.id, status: 'running' });
+    let message: string;
+    try { message = await this.review.publish(client.user, session); } catch (error) {
+      const failure = asRpcError(error);
+      const info = { errorType: 'publish_failed', message: failure.message };
+      this.publishing.delete(session.id);
+      this.publishFailures.set(session.id, info);
+      this.broadcast(changeset, { type: 'changeset/operationStatusChanged', operationId: operation.id, status: 'error', error: info });
+      throw failure;
+    }
+    this.publishing.delete(session.id);
+    this.broadcast(changeset, { type: 'changeset/operationStatusChanged', operationId: operation.id, status: 'idle' });
+    this.broadcast(changeset, { type: 'changeset/operationsChanged', operations: this.operations(session) });
+    return { message };
+  }
 
   private async invokeOperation(client: Client, params: Json): Promise<Json> {
     const channel = String(params.channel ?? '');
@@ -895,13 +928,7 @@ export class AgentHost {
     const operation = this.operations(session).find(item => item.id === params.operationId);
     if (!operation) throw new RpcError(codes.invalidParams, `This changeset offers no operation ${JSON.stringify(params.operationId)}`);
     if (params.target !== undefined) throw new RpcError(codes.invalidParams, `${operation.label} applies to the whole candidate, not to a file or range`);
-    if (operation.id === reviewOperationIds.publish) {
-      if (client.user.role === 'viewer' || !this.mayView(client.user, session.ownerId)) throw new RpcError(codes.permissionDenied, 'Viewers cannot review a candidate');
-      let message: string;
-      try { message = await this.review.publish(client.user, session); } catch (error) { throw asRpcError(error); }
-      this.broadcast(this.changesetUri(session), { type: 'changeset/operationsChanged', operations: this.operations(session) });
-      return { message };
-    }
+    if (operation.id === reviewOperationIds.publish) return this.publishCandidate(client, session, operation);
     if (operation.id !== reviewOperationIds.accept) { if (client.user.role === 'viewer' || !this.mayView(client.user, session.ownerId)) throw new RpcError(codes.permissionDenied, 'Viewers cannot review a candidate'); return this.review.ask(client.user, session, operation.id); }
     let reviewed: Session;
     try { reviewed = this.engine.review(session.id, { decision: 'accepted' }, client.user); } catch (error) { throw asRpcError(error); }
