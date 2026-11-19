@@ -7,6 +7,8 @@ import { ploegDemo } from '../src/ploeg-demo.ts';
 import { application } from './api-support.ts';
 import { AccessTokenVerifier, TokenRefused, mcpHttpSettings, metadataDocumentClientId, type McpHttpSettings } from '../src/mcp-auth.ts';
 import { createMcpHttp } from '../src/mcp-http.ts';
+import { createMcpServer } from '../src/mcp.ts';
+import { unfoldMcpIcons, type McpIcon } from '../src/mcp-icons.ts';
 import { entitledRole, subjectUserId } from '../src/oidc.ts';
 
 const resource = 'https://unfold.example.test/mcp';
@@ -211,6 +213,47 @@ test('a 2025-11-25 client initializes over HTTP and lists tools without a sessio
   const listed = await post(unfold.url, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { token: token(), version: '2025-11-25' });
   assert.equal(listed.json.result.tools.length, 23);
   assert.equal(listed.json.result.resultType, undefined);
+});
+
+const markIcons = [
+  { src: 'https://unfold.example.test/favicon-32x32.png', mimeType: 'image/png', sizes: ['32x32'], theme: 'light' },
+  { src: 'https://unfold.example.test/favicon-dark-32x32.png', mimeType: 'image/png', sizes: ['32x32'], theme: 'dark' },
+];
+
+test('the server and every tool carry Unfold\'s mark for light and dark themes, served by the MCP server\'s own origin', async t => {
+  const { unfold, token } = await served(t);
+  const init = await post(unfold.url, { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'vscode', version: '1.147' } } }, { token: token(), version: null });
+  assert.deepEqual(init.json.result.serverInfo.icons, markIcons);
+  const discovered = await post(unfold.url, { jsonrpc: '2.0', id: 'd', method: 'server/discover' }, { token: token() });
+  assert.deepEqual(discovered.json.result._meta['io.modelcontextprotocol/serverInfo'].icons, markIcons);
+  for (const version of ['2026-07-28', '2025-11-25']) {
+    const listed = await post(unfold.url, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { token: token(), version });
+    assert.equal(listed.json.result.tools.length, 23, version);
+    for (const tool of listed.json.result.tools) assert.deepEqual(tool.icons, markIcons, `${version} ${tool.name}`);
+  }
+  for (const icon of markIcons) {
+    assert.equal(new URL(icon.src).origin, new URL(resource).origin, 'VS Code fetches an http(s) icon only from the authority of the MCP server');
+    const served = await fetch(`${unfold.url}${new URL(icon.src).pathname}`);
+    assert.equal(served.status, 200, `${icon.src} is served without a sign-in`);
+    assert.equal(served.headers.get('content-type'), 'image/png');
+    const png = Buffer.from(await served.arrayBuffer());
+    assert.equal(png.subarray(1, 4).toString('latin1'), 'PNG');
+    assert.deepEqual([png.readUInt32BE(16), png.readUInt32BE(20)], [32, 32], `${icon.src} is 32 by 32`);
+  }
+});
+
+test('icons only add to tools/list: a client that ignores them gets the same answer, at less than 8 KB more', async () => {
+  const listing = async (icons?: typeof markIcons) => {
+    const server = createMcpServer({ url: 'https://unfold.example.test', version: 'test', ...(icons ? { icons: icons as McpIcon[] } : {}) });
+    return await server.handle({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: { _meta: meta() } }) as Record<string, any>;
+  };
+  const plain = await listing();
+  const marked = await listing(unfoldMcpIcons(new URL(resource).origin));
+  const withoutIcons = (value: any): any => Array.isArray(value) ? value.map(withoutIcons) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'icons').map(([key, item]) => [key, withoutIcons(item)])) : value;
+  assert.deepEqual(withoutIcons(marked), plain);
+  assert.equal(plain.result.tools.some((tool: Record<string, unknown>) => 'icons' in tool), false, 'without icons configured no tool carries any');
+  const growth = Buffer.byteLength(JSON.stringify(marked)) - Buffer.byteLength(JSON.stringify(plain));
+  assert.ok(growth > 0 && growth < 8 * 1024, `tools/list grows by ${growth} bytes`);
 });
 
 test('unfold_ask over HTTP refuses to spend when the client cannot confirm', async t => {
