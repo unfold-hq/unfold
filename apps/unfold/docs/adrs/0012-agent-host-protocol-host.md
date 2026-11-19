@@ -205,3 +205,17 @@ Two 1.147 changes are not tolerated as it stands, and neither was observed in a 
 - The client derives the annotations channel only for VS Code's own host and otherwise reads `annotations.resource` from the session summary or state. The host publishes that field only in the state, and only once a session has comments.
 
 Whether to replay missed actions on reconnect, and the fix for the annotations field, are recorded in the dossier's recommendations, not here. The host keeps provisional sessions without a limit or an expiry, and 1.147 creates one whenever the composer opens. AHP 1.1.0 was released on 2026-11-13; none of its renames touches what the host emits.
+
+## Update, 2026-11-19: maximal integration with VS Code 1.147
+
+Evidence: [the maximal-integration dossier](../research/2026-11-19-vscode-1-147-maximal-integration.md), read against the 1.147.0 source tag and `origin/development` `69f61645`.
+
+The owner decided on 2026-11-19 that Unfold integrates with VS Code 1.147 as far as it can. The host earns every surface the client offers a third-party host, unless that surface would spend or execute outside Ploeg. So the earlier refusals stand: no shell, no resource writes, no truncation of a transcript, no automation created in VS Code that Ploeg has not authorized, and no merge from VS Code. What the stance adds is mostly reading: VS Code 1.147 already reads a session's pull request, issue and CI state from `_meta['agentHost/sessionArtifacts']`, `_meta.githubData` and `_meta['copilot.githubReferences']`, for any host, and the host publishes its pull request only under `_meta.git.pullRequest`, which the client ignores. The dossier ranks 25 builds in two waves, six spikes and decisions, and five upstream drafts.
+
+Three decisions for automations, refining the 2026-10-10 automations update:
+
+* **Pause and delete.** Anyone who may see a Team route may pause it from VS Code. Only the route's manager may delete or clean one up, and only after a confirmation. Neither is built: VS Code makes an automation with a host-defined trigger read-only, and Ploeg has no route write contract that Unfold could call. The catalogue stays read-only until both exist.
+* **No TCP relay.** A `tcpConnections` spike limited to a Work Item's preview URL was considered and dropped. Neither Unfold nor Ploeg has a preview concept, and a relay into the network Unfold runs on is a high SSRF risk.
+* **Upstream issues.** The agent drafts issues against `microsoft/vscode` for the client gates that keep a remote host out, and the owner files them. None is filed yet.
+
+Correction to the 2026-11-18 update. It said the host publishes `annotations.resource` only in the state, and only once a session has comments. Since [#122](https://github.com/unfold-hq/unfold/pull/122) (2026-11-19), every Unfold session's summary and state carry `annotations` with zero counts before the first comment, and a change of either count reaches the people who may see the session as `root/sessionSummaryChanged`. Work Item, chat-only and provisional sessions take no review comments and name no channel. The same update said the host keeps provisional sessions without a limit or an expiry. Since [#134](https://github.com/unfold-hq/unfold/pull/134) (2026-11-19), a provisional session that no connected client subscribes to expires after 24 hours unused, and a person's 21st removes their oldest such one. Not yet exercised against a desktop VS Code.
