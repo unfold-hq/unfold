@@ -6,6 +6,7 @@ import { trackerDisplay } from './tracker-display.ts';
 import { Onboarding, pinnedRelease, ploegSteps } from './onboarding.ts';
 import { GithubConnections, invalidStatePage, manifestPage } from './forge-connections.ts';
 import { ClickUpOnboarding } from './clickup-onboarding.ts';
+import { GitlabConnections } from './gitlab-connections.ts';
 import { ClaudeRoutines } from './claude-routines.ts';
 import { clickUpRoute, isClickUpRoute } from './clickup-onboarding-http.ts';
 import { HttpPloegConnectionApi } from './ploeg-connection-api.ts';
@@ -377,8 +378,13 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
     baseUrl: config.baseUrl, pinned: pinnedRelease(), plan: ploegSteps,
   });
+  const gitlab = new GitlabConnections({
+    db: store.db, store, ploeg, steps: onboarding, repositories: trackerConnections.repositories, stored: storedRepositories,
+    audit: (user, fact) => audit.record({ actor: auditActor(user), tenants: [defaultTenant], fact: { kind: 'entity', action: fact.action, entity: { type: fact.type, uid: fact.uid, name: fact.name, ...(fact.data ? { data: fact.data } : {}) }, outcome: 'success' } }),
+    gitlabUrl: config.links?.gitlab?.baseUrl ?? 'https://gitlab.com', pinned: pinnedRelease(), plan: ploegSteps,
+  });
   const claudeRoutines = new ClaudeRoutines({ ploeg, steps: onboarding, store });
-  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...github.lines(manage, context), 'connect-claude': claudeRoutines.line(context.user) }));
+  onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...gitlab.lines(github.lines(manage, context), manage), 'connect-claude': claudeRoutines.line(context.user) }));
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
@@ -817,6 +823,30 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
         if (path === '/api/onboarding/github/targets') {
           if (method !== 'POST') fault(405, 'method', 'Check or register a repository with POST.');
           const outcome = await github.register(user, await body(req));
+          if (outcome.repository) { await storedRepositories(); trackerConnections.sync(); }
+          return json(res, outcome.repository ? 201 : 200, sanitize(outcome));
+        }
+        if (path === '/api/onboarding/gitlab') {
+          if (method === 'GET') return json(res, 200, sanitize(await gitlab.overview(user)));
+          fault(405, 'method', 'Read the Connect GitLab state with GET.');
+        }
+        if (path === '/api/onboarding/gitlab/connections') {
+          if (method === 'POST') return json(res, 201, sanitize(await gitlab.connect(user, await body(req))));
+          fault(405, 'method', 'Connect GitLab with POST.');
+        }
+        const gitlabConnection = path.match(/^\/api\/onboarding\/gitlab\/connections\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})$/);
+        if (gitlabConnection) {
+          if (method === 'DELETE') return json(res, 200, sanitize(await gitlab.remove(user, gitlabConnection[1])));
+          fault(405, 'method', 'Remove a GitLab connection with DELETE.');
+        }
+        const gitlabGranted = path.match(/^\/api\/onboarding\/gitlab\/connections\/([A-Za-z0-9][A-Za-z0-9_.:-]{0,127})\/repositories$/);
+        if (gitlabGranted) {
+          if (method === 'GET') return json(res, 200, sanitize(await gitlab.granted(user, gitlabGranted[1])));
+          fault(405, 'method', 'List the projects a GitLab connection reaches with GET.');
+        }
+        if (path === '/api/onboarding/gitlab/targets') {
+          if (method !== 'POST') fault(405, 'method', 'Check or register a GitLab project with POST.');
+          const outcome = await gitlab.register(user, await body(req));
           if (outcome.repository) { await storedRepositories(); trackerConnections.sync(); }
           return json(res, outcome.repository ? 201 : 200, sanitize(outcome));
         }
