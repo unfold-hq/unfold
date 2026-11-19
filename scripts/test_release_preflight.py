@@ -17,6 +17,13 @@ class GitHubHome(unittest.TestCase):
             with self.subTest(state=state):
                 self.assertEqual(release_preflight.former_home_returned(lambda url: state), returned)
 
+    def test_a_missing_marketplace_publisher_is_reported(self):
+        urls = []
+        for page, exists in [(b'<html>', True), (None, False)]:
+            with self.subTest(page=page):
+                self.assertEqual(release_preflight.marketplace_publisher_exists('unfold-hq', lambda url, missing: urls.append((url, missing)) or (page, {})), exists)
+        self.assertEqual(urls[0], ('https://marketplace.visualstudio.com/publishers/unfold-hq', True))
+
     def run_main(self, home, former=None):
         def api(url, token, method='GET', data=None, missing=False):
             if url == release_preflight.HOME:

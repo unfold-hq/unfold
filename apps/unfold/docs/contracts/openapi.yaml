@@ -4775,6 +4775,176 @@ paths:
         '422': { $ref: '#/components/responses/UnprocessableContent' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/gitlab:
+    get:
+      tags: [Ploeg]
+      operationId: getConnectGitlab
+      summary: 'What the Connect GitLab page shows'
+      description: 'The GitLab address (`links.gitlab.baseUrl`, else https://gitlab.com) and GitLab''s new-token page filled in with a name, a description and the `api` scope; whether this Ploeg serves the connect and register steps (from its `forge-connections` and `targets` read routes) and each method: `gitlab_service_account` is served only once the pinned Ploeg bundle records it in `src/ploeg-steps.json`, and a method Ploeg''s configuration refused the last time carries `refused` with `method_not_allowed`. Also the GitLab connections Ploeg holds (never a secret), the second-forge state and the Integration Accounts Unfold stored with the state Ploeg reports now. It asks Ploeg only reads and writes nothing.'
+      x-unfold-role: viewer
+      responses:
+        '200':
+          description: '`{demo, manage, gitlabUrl, instance, tokenPage, serviceAccountDocs, served, methods, secondForge, refused, connections, accounts}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [demo, manage, gitlabUrl, instance, tokenPage, serviceAccountDocs, served, methods, secondForge, refused, connections, accounts]
+                properties:
+                  demo: { type: boolean }
+                  manage: { type: boolean }
+                  gitlabUrl: { type: string }
+                  instance: { type: string, description: 'The Ploeg instance name Unfold starts GitLab flows on.' }
+                  tokenPage: { type: string }
+                  serviceAccountDocs: { type: string }
+                  served: { type: object, required: [connect, register], properties: { connect: { type: [boolean, 'null'] }, register: { type: [boolean, 'null'] } } }
+                  methods: { type: array, items: { type: object, required: [method, served, text, waitsFor, refused], properties: { method: { type: string, enum: [gitlab_service_account, token] }, served: { type: [boolean, 'null'] }, text: { type: [string, 'null'] }, waitsFor: { type: [object, 'null'], properties: { record: { type: string }, release: { type: [string, 'null'] } } }, refused: { type: [object, 'null'], properties: { code: { type: string }, instance: { type: string }, at: { type: string } } } } } }
+                  secondForge: { type: [object, 'null'], properties: { forges: { type: array, items: { type: string } }, unread: { type: boolean }, waitsFor: { type: object, properties: { record: { type: string }, release: { type: [string, 'null'] } } } } }
+                  refused: { type: [object, 'null'], properties: { code: { type: string }, message: { type: string }, install: { type: [string, 'null'] } } }
+                  connections: { type: array, items: { type: object, required: [id, kind, instance, method, source, state, invalidReason, account], properties: { id: { type: string }, kind: { type: string }, instance: { type: string }, method: { type: string }, source: { type: string, enum: [runtime, static] }, state: { type: string }, invalidReason: { type: [string, 'null'] }, account: { type: [string, 'null'] } } } }
+                  accounts: { type: array, items: { type: object, required: [id, connection, account, state, createdAt, createdBy], properties: { id: { type: string }, connection: { type: string }, account: { type: [string, 'null'] }, state: { type: string }, createdAt: { type: string }, createdBy: { type: string } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/gitlab/connections:
+    post:
+      tags: [Ploeg]
+      operationId: connectGitlab
+      summary: 'Connect GitLab through Ploeg with a pasted token'
+      description: 'Starts a Ploeg connection flow (`port: forge, kind: gitlab`, Ploeg ADR-0195) and completes it with the token in the request body, once. `{method: "service_account", token, group}` hands Ploeg a temporary personal access token of a top-level group Owner and the group path: Ploeg creates a service account, makes it Maintainer on the group, keeps only that account''s token and revokes the pasted one (ploeg-hq/ploeg#464), and the answer names the service account. `{method: "token", token}` hands Ploeg the token of a service account the Admin made. Unfold stores, logs, audits and answers no token; it keeps the Ploeg connection id as an Integration Account. Refused before anything is sent: 403 for someone who does not manage the Tenant, 400 `connection_token_invalid` or `invalid_input`, 503 `ploeg_step_unavailable` for a method the pinned Ploeg does not serve (`service_account` until its release), 409 `second_forge_unsupported` on an installation that already pushes to another forge. Ploeg''s refusals come back as 409 `method_not_allowed` (the installation''s `connections.allow` does not list the method), 422 `connections_not_accepted`, 403 `permission_required` or `person_claim_required`, 409 `gitlab_flow_refused` and 503 `connection_unavailable`. `warnings` carries Ploeg''s warnings: `owner_token_not_revoked` means the person must revoke the Owner token in GitLab by hand.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [method, token]
+              properties:
+                method: { type: string, enum: [service_account, token] }
+                token: { type: string, writeOnly: true, maxLength: 4096 }
+                group: { type: string, maxLength: 255 }
+                instance: { type: string, maxLength: 128 }
+      responses:
+        '201':
+          description: '`{connection, serviceAccount, account, warnings}`; the response carries no token and no `state`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection, serviceAccount, account, warnings]
+                properties:
+                  connection: { type: object, required: [id, account, state, method, canMint], properties: { id: { type: string }, account: { type: [string, 'null'] }, state: { type: string }, method: { type: string, enum: [gitlab_service_account, token] }, canMint: { type: [boolean, 'null'], description: 'Whether Ploeg can mint a Run''s GitLab credential through the connection; null when Ploeg does not say.' } } }
+                  serviceAccount: { type: [object, 'null'], description: 'The service account Ploeg created, for `service_account`.', properties: { username: { type: string }, group: { type: string }, topGroup: { type: string }, created: { type: boolean }, tokenExpiresAt: { type: [string, 'null'] } } }
+                  account: { type: string }
+                  warnings: { type: array, items: { type: object, required: [code, message], properties: { code: { type: string }, message: { type: string } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '502': { $ref: '#/components/responses/BadGateway' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/gitlab/connections/{connection}:
+    parameters:
+      - { name: connection, in: path, required: true, example: gitlab-acme, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' } }
+    delete:
+      tags: [Ploeg]
+      operationId: removeGitlabConnection
+      summary: 'Remove a GitLab connection in Ploeg'
+      description: 'Ploeg''s `DELETE /api/v1/operator/forge-connections/{connection}`, then Unfold forgets the Integration Account, audited as deleted. `leftAtVendor` is what Ploeg left at GitLab, such as the `service_account` it created, or a `token` it could not revoke, for the person to remove by hand. A connection Ploeg no longer holds is forgotten as removed; 409 `connection_in_use` while a registered repository uses it. 403 for someone who does not manage the Tenant.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{removed, leftAtVendor}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed, leftAtVendor]
+                properties:
+                  removed: { type: string }
+                  leftAtVendor: { type: array, items: { type: object, required: [kind, id, url], properties: { kind: { type: string }, id: { type: string }, url: { type: [string, 'null'] } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/gitlab/connections/{connection}/repositories:
+    parameters:
+      - { name: connection, in: path, required: true, example: gitlab-acme, schema: { type: string, pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' } }
+    get:
+      tags: [Ploeg]
+      operationId: listGitlabGrantedProjects
+      summary: 'The projects a GitLab connection reaches'
+      description: 'As for GitHub: Ploeg''s `GET /api/v1/operator/forge-connections/{connection}/repositories`, with paths such as `group/subgroup/project`. 403 for someone who does not manage the Tenant.'
+      x-unfold-role: admin
+      responses:
+        '200':
+          description: '`{connection, repositories}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connection, repositories]
+                properties:
+                  connection: { type: string }
+                  repositories: { type: array, items: { type: object, required: [repository, private, canWrite, registered, key, stored], properties: { repository: { type: string }, private: { type: boolean }, canWrite: { type: boolean }, registered: { type: boolean }, key: { type: [string, 'null'] }, stored: { type: boolean } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/onboarding/gitlab/targets:
+    post:
+      tags: [Ploeg]
+      operationId: registerGitlabProject
+      summary: 'Check, then register, a GitLab project through Ploeg'
+      description: 'The same dry run and registration as `/api/onboarding/github/targets`, with `repository` as `group/subgroup/project`. A Ploeg that cannot mint a Run''s GitLab credential yet answers the dry run `capability_missing`; the outcome is then refused with that reason, its plain explanation and `waitsFor`, the record and release that lift it.'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+        - { editorBearer: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [connection, repository, key]
+              properties:
+                connection: { type: string, maxLength: 128 }
+                repository: { type: string, description: '`group/subgroup/project`.' }
+                key: { type: string, pattern: '^[a-z0-9][a-z0-9_.:-]{0,127}$' }
+                branch: { type: string, maxLength: 255 }
+                dryRun: { type: boolean }
+      responses:
+        '200':
+          description: 'The dry run, or a refused dry run before registering.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/GithubTargetOutcome' } } }
+        '201':
+          description: 'Registered and stored.'
+          content: { application/json: { schema: { $ref: '#/components/schemas/GithubTargetOutcome' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/UnprocessableContent' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/claude-routines:
     get:
       tags: [Ploeg]
@@ -8762,6 +8932,7 @@ components:
         reasons: { type: array, items: { type: string } }
         prepareAvailable: { type: boolean }
         repository: { type: object, description: 'The stored repository, after a registration.' }
+        waitsFor: { type: object, description: 'For a refusal a later Ploeg release lifts, such as GitLab''s `capability_missing`: the record and the release that adds it, null while unreleased.', properties: { record: { type: string }, release: { type: [string, 'null'] } } }
     SpendCapConfirmation:
       type: object
       description: 'An Admin''s confirmation of a Team''s spend cap: the cap in US dollars per UTC period as Ploeg reported it, who confirmed it and when.'

@@ -318,13 +318,27 @@ test('a confirmation is single-use, sealed, and bound to the person and question
   assert.equal(ploeg.ledger.admitted.length, before + 1, 'a replayed confirmation spends nothing');
 });
 
-test('a 2025 client over HTTP can never spend, even when it declares elicitation', async () => {
+test('a 2025 client over HTTP spends only after the person confirms on the stream of its call, and never without elicitation', async () => {
   const before = ploeg.ledger.admitted.length;
-  const alice = await mcpAs('alice', { elicit: async () => ({ action: 'accept', content: { confirm: true } }) });
-  const refused = await call(alice, 'unfold_ask', { id: ploeg.itemsOf('delivery')[0], question: 'Why did this stop?', use_model: true });
+  const workItem = ploeg.itemsOf('delivery')[0];
+  const silent = await mcpAs('frank');
+  const refused = await call(silent, 'unfold_ask', { id: workItem, question: 'Why did this stop?', use_model: true });
   assert.equal(refused.isError, true);
   assert.match(refused.content[0].text, /cannot ask you to confirm a spend/);
-  assert.equal(ploeg.ledger.admitted.length, before);
+  assert.equal(ploeg.ledger.admitted.length, before, 'a 2025 client that declares no elicitation can never spend');
+
+  const prompts: string[] = [];
+  let answer: 'accept' | 'decline' = 'decline';
+  const alice = await mcpAs('alice', { elicit: async request => { prompts.push(String(request.params.message)); return answer === 'accept' ? { action: 'accept', content: { confirm: true } } : { action: 'decline' }; } });
+  const declined = await call(alice, 'unfold_ask', { id: workItem, question: 'What did it cost?', use_model: true });
+  assert.equal(declined.structuredContent.asked, false, declined.content[0]?.text);
+  assert.equal(prompts.length, 1);
+  assert.equal(ploeg.ledger.admitted.length, before, 'a declined confirmation spends nothing');
+  answer = 'accept';
+  const asked = await call(alice, 'unfold_ask', { id: workItem, question: 'Why did this stop?', use_model: true });
+  assert.equal(asked.structuredContent.asked, true, asked.content[0]?.text);
+  assert.match(prompts[1], /spends up to \$0\.02 from the Team's Ask Allowance/);
+  assert.equal(ploeg.ledger.admitted.length, before + 1, 'one confirmation spends once');
 });
 
 test('the groups in the token cap the role: a demoted admin acts as a viewer, a removed member is refused', async () => {

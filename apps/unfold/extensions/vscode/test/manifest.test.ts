@@ -75,3 +75,34 @@ test('the extension declares that it runs in the Agents window, and stays quiet 
   assert.match(source, /private async registerEditorWindow[^]*?if \(this\.inAgentsWindow \|\|/, 'the Agents window never claims the editor-window links');
   assert.match(source, /if \(!this\.inAgentsWindow\) \{\s*await this\.announceNeedsYou/, 'notifications come from the editor window only');
 });
+
+const editorWindowOnly = ['unfold.refresh', 'unfold.refreshTasks', 'unfold.refreshPloeg', 'unfold.openAgentsWindow', 'unfold.attachSelection', 'unfold.attachFile', 'unfold.followHandOffsInTerminal'];
+const palette: Array<{ command: string; when?: string }> = manifest.contributes.menus.commandPalette;
+
+test('the Agents window palette hides exactly the commands that need a view, the status bar or a checkout, by VS Code\'s own window flag', () => {
+  const hidden = palette.filter(entry => /\bisSessionsWindow\b/.test(entry.when ?? '')).map(entry => entry.command);
+  assert.deepEqual(hidden.sort(), [...editorWindowOnly].sort());
+  for (const command of editorWindowOnly) {
+    assert.ok(contributed.has(command), `${command} is contributed`);
+    assert.deepEqual(palette.filter(entry => entry.command === command).map(entry => entry.when), ['!isSessionsWindow'], `${command} is offered in every editor window, as before`);
+  }
+  assert.equal(manifest.contributes.menus['editor/context'].find((item: { command: string }) => item.command === 'unfold.attachSelection').when, 'editorHasSelection && isWorkspaceTrusted && !isSessionsWindow');
+  for (const [menu, entries] of Object.entries(manifest.contributes.menus as Record<string, Array<{ when?: string }>>)) {
+    for (const entry of entries) assert.doesNotMatch(entry.when ?? '', /(^|[^!])\bisSessionsWindow\b/, `${menu} never offers a command only in the Agents window`);
+  }
+});
+
+test('every command names itself under the Unfold category, and every setting and chat tool has a description', () => {
+  for (const command of manifest.contributes.commands as Array<{ command: string; title?: string; category?: string }>) {
+    assert.ok(command.title?.trim(), `${command.command} has a title`);
+    assert.equal(command.category, 'Unfold', `${command.command} is in the Unfold category`);
+  }
+  for (const [name, setting] of Object.entries(manifest.contributes.configuration.properties as Record<string, { description?: string; markdownDescription?: string; enum?: unknown[]; enumDescriptions?: string[] }>)) {
+    assert.ok((setting.description ?? setting.markdownDescription ?? '').trim(), `${name} has a description`);
+    if (setting.enum) assert.equal(setting.enumDescriptions?.length, setting.enum.length, `${name} describes each value`);
+  }
+  for (const tool of tools) {
+    assert.ok(tool.userDescription?.trim() && tool.modelDescription?.trim(), `${tool.name} describes itself to the person and the model`);
+    for (const [property, schema] of Object.entries((tool.inputSchema?.properties ?? {}) as Record<string, { description?: string }>)) assert.ok(schema.description?.trim(), `${tool.name}.${property} has a description`);
+  }
+});

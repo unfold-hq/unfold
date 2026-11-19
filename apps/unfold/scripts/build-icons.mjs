@@ -10,6 +10,9 @@ const sized = (svg, width, height = width) => svg.replace(/width="[\d.]+" height
 const ink = '#141A1D';
 const paper = '#F4F6F2';
 const grafiet = '#5E6B66';
+const baken = '#D23A4E';
+const bakenNacht = '#D65162';
+const nightFavicon = svg => svg.replace(`fill="${ink}"`, `fill="${paper}"`).replace(`fill="${baken}"`, `fill="${bakenNacht}"`);
 const tagline = 'Define work, follow it and review it. Ploeg runs it.';
 
 const markPaths = [...art('mark-mono.svg').matchAll(/<path d="([^"]+)"/g)].map(match => match[1]).join('');
@@ -76,6 +79,7 @@ if (process.argv.includes('--png')) {
   const tile = art('tile.svg');
   write('public/favicon-16x16.png', await shoot(sized(favicon, 16), 16, 16));
   write('public/favicon-32x32.png', await shoot(sized(favicon, 32), 32, 32));
+  write('public/favicon-dark-32x32.png', await shoot(sized(nightFavicon(favicon), 32), 32, 32));
   write('public/apple-touch-icon.png', await shoot(sized(tile.replace(/ rx="[\d.]+"/, ''), 180), 180, 180));
   write('public/android-chrome-192x192.png', await shoot(sized(tile, 192), 192, 192));
   write('public/android-chrome-512x512.png', await shoot(sized(tile, 512), 512, 512));

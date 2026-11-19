@@ -3,7 +3,7 @@ type: how-to
 audience: [owner, operator]
 owner: unfold
 last_verified: 2026-11-19
-verified_by: "Copilot session parts added on 2026-11-19, read in microsoft/vscode at tag 1.147.0 (pluginParsers.ts, hookTypes.ts, AGENTS_PLUGINS.md, extensions/copilot chatHookService.ts) and run as test/agent-plugin.test.ts and test/claude-code-plugin.test.ts; not run in VS Code. Section 'In a managed VS Code' added on 2026-11-19: read against code.visualstudio.com/docs/enterprise/policies, /docs/enterprise/manage-ai-settings, /docs/agent-customization/agent-plugins, the 1.145, 1.146 and 1.147 release notes and docs.github.com enterprise-managed-settings reference, all fetched that day; the (source) statements read in microsoft/vscode at tag 1.147.0 (languageModelToolsService.ts against 1.146.0, copilotManagedSettings.ts, agentHostStarter.config.contribution.ts, pluginUrlHandler.ts). No policy was deployed, no allow-list tried and neither install link clicked. Earlier: read apps/unfold/extensions/claude-code against the Agent Plugins 1.0.0 specification and schemas at agentplugins/agent-plugins-spec ff8ab5e; ran test/agent-plugin.test.ts. VS Code steps read in the VS Code 1.144.0 source (pluginUrlHandler.ts, marketplaceReference.ts, pluginMarketplaceService.ts, AGENTS_PLUGINS.md). Codex steps read in the openai/codex main branch source on 2026-10-30 (marketplace_cmd.rs, marketplace.rs, plugin_namespace.rs, agent_plugin_config.rs), not the 0.166.0 tag. Copilot CLI steps read in its plugin reference and changelog up to 1.0.105. Cursor and Kiro steps read in their documentation only. No install was run in any of these clients, and no client signed in to unfold-mcp from a plugin."
+verified_by: "Copilot session parts added on 2026-11-19, read in microsoft/vscode at tag 1.147.0 (pluginParsers.ts, hookTypes.ts, AGENTS_PLUGINS.md, extensions/copilot chatHookService.ts) and run as test/agent-plugin.test.ts and test/claude-code-plugin.test.ts; not run in VS Code. On 2026-11-19 'An install link' was re-read against pluginUrlHandler.ts at microsoft/vscode tag 1.147.0, 'Turn the plugin on for a repository' read in copilotRepositoryPluginSettings.ts and copilotAgent.ts at 1.147.0, and the private marketplace row, 'Tell people where to ask', 'Open Unfold links in the integrated browser' and 'Behind a proxy' read against the 1.146 and 1.147 release notes, code.visualstudio.com/docs/enterprise/extensions and /docs/setup/network, docs.github.com enterprise-managed-settings, microsoft/vscode#341049 and #347494, and configuration.ts and browserTabManagementFeatures.ts at 1.147.0; every link was fetched that day. Nothing was run in a VS Code, no repository settings file or proxy was tried. Section 'In a managed VS Code' added on 2026-11-19: read against code.visualstudio.com/docs/enterprise/policies, /docs/enterprise/manage-ai-settings, /docs/agent-customization/agent-plugins, the 1.145, 1.146 and 1.147 release notes and docs.github.com enterprise-managed-settings reference, all fetched that day; the (source) statements read in microsoft/vscode at tag 1.147.0 (languageModelToolsService.ts against 1.146.0, copilotManagedSettings.ts, agentHostStarter.config.contribution.ts, pluginUrlHandler.ts). No policy was deployed, no allow-list tried and neither install link clicked. Earlier: read apps/unfold/extensions/claude-code against the Agent Plugins 1.0.0 specification and schemas at agentplugins/agent-plugins-spec ff8ab5e; ran test/agent-plugin.test.ts. VS Code steps read in the VS Code 1.144.0 source (pluginUrlHandler.ts, marketplaceReference.ts, pluginMarketplaceService.ts, AGENTS_PLUGINS.md). Codex steps read in the openai/codex main branch source on 2026-10-30 (marketplace_cmd.rs, marketplace.rs, plugin_namespace.rs, agent_plugin_config.rs), not the 0.166.0 tag. Copilot CLI steps read in its plugin reference and changelog up to 1.0.105. Cursor and Kiro steps read in their documentation only. No install was run in any of these clients, and no client signed in to unfold-mcp from a plugin."
 ---
 
 # Install the Unfold plugin in Codex, Cursor, Copilot and VS Code
@@ -80,20 +80,41 @@ Source: VS Code accepts an HTTPS URL as a marketplace, with or without `.git`, a
 
 ### An install link
 
-VS Code 1.144 opens `vscode://chat-plugin/install?source=<marketplace>&plugin=<name>`. Put it behind a button on your own page:
+VS Code 1.147 opens `vscode://chat-plugin/install?source=<marketplace>&plugin=<name>`, with an optional `&harness=copilot` or `&harness=vscode`. Put it behind a button on your own page:
 
 ```html
 <a href="vscode://chat-plugin/install?source=https%3A%2F%2Fgithub.com%2Funfold-hq%2Funfold.git&plugin=unfold">Install the Unfold plugin in VS Code</a>
 ```
 
-Source:
+Source, read in [`pluginUrlHandler.ts`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts) at tag 1.147.0:
 
-* The `source` value may be `owner/repo`, an HTTPS or SSH git URL, or either one base64-encoded. Percent-encode a URL, as above.
-* VS Code refuses a `file://` source and a plugin name with `@`.
-* It asks you to confirm, and needs `chat.plugins.enabled`.
-* The link works only through a Copilot agent host session, and offers to create one. The Copilot agent host adds the marketplace and installs the plugin, not VS Code itself.
+* The `source` value may be `owner/repo`, an HTTPS or SSH git URL, or either one base64-encoded ([`:325-333`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L325-L333)). Percent-encode a URL, as above.
+* VS Code refuses a `file://` source, a plugin name with `@`, and any `harness` other than `copilot` or `vscode` ([`:84-94`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L84-L94)). It also refuses the link in a remote or web window ([`:95-97`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L95-L97)), and needs chat on and `chat.plugins.enabled` ([`:231-236`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L231-L236)).
+* Without `harness` it asks where to install: **Copilot**, its own plugins on this machine, which needs no chat session, or **VS Code**, the shared installation compatible harnesses use ([`:238-258`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L238-L258)). Then it asks you to confirm the source ([`:107-122`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L107-L122)).
+* For **Copilot**, the Copilot agent host adds the marketplace when it is missing and installs `<plugin>@<marketplace>` ([`:260-302`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L260-L302)). For **VS Code**, VS Code installs it from the source itself ([`:304-323`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/chat/browser/pluginUrlHandler.ts#L304-L323)).
 
-Not checked: whether the Copilot agent host clones a non-GitHub URL from a link. Use the setting above when the link fails.
+Not checked: whether either installer clones a non-GitHub URL from a link. Use the setting above when the link fails.
+
+### Turn the plugin on for a repository
+
+A repository can turn an installed plugin on or off for Copilot sessions that work in it, in `.github/copilot/settings.json`:
+
+```json
+{
+  "enabledPlugins": {
+    "unfold@unfold": true,
+    "unfold-mcp@unfold": true
+  }
+}
+```
+
+Source, read in VS Code at tag 1.147.0:
+
+* The Copilot agent host reads `enabledPlugins` from `.github/copilot/settings.json` in the session's working directory; each value must be `true` or `false`, and a file it cannot parse is an error ([`copilotRepositoryPluginSettings.ts:18-45`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/platform/agentHost/node/copilot/copilotRepositoryPluginSettings.ts#L18-L45)).
+* A key is `<plugin>@<marketplace>`, as in [Require the plugin](#require-the-plugin), and covers only a plugin installed from a marketplace ([`copilotAgent.ts:3262`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/platform/agentHost/node/copilot/copilotAgent.ts#L3262), [`:3289`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/platform/agentHost/node/copilot/copilotAgent.ts#L3289), [`:3689-3696`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/platform/agentHost/node/copilot/copilotAgent.ts#L3689-L3696)).
+* The file turns a plugin on; it does not install one. Each person still installs `unfold` and `unfold-mcp`. Turning a plugin on for a repository from VS Code writes the same file, refuses a plugin that is not installed, and refuses a plugin the organisation manages ([`copilotAgent.ts:3676-3696`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/platform/agentHost/node/copilot/copilotAgent.ts#L3676-L3696)).
+
+Commit the file so everyone who opens a Copilot session in the repository gets the plugin turned on. Not checked: that a Copilot session in a running VS Code then loads the plugin's skills and MCP server.
 
 ## Cursor
 
@@ -149,6 +170,7 @@ Statements marked **(source)** were read in VS Code's source at tag 1.147.0, bec
 | The extension's three chat tools (`unfold_now`, `unfold_get_work`, `unfold_find_work`) | `ChatAgentExtensionTools` (`chat.extensionTools.enabled`) set to `false`, or MCP turned off with `ChatMCP` (`chat.mcp.access`) set to `none`. The second applies from VS Code 1.147 **(source)**: 1.146 checked only the first. | [Enable or disable extension language tools](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_enable-or-disable-extension-language-tools); the [policy reference](https://code.visualstudio.com/docs/enterprise/policies#_vs-code-enterprise-policy-reference) entry for `ChatAgentExtensionTools`: "These tools are also disabled when your organization disables MCP" |
 | `unfold-mcp`, Unfold's MCP server, and the extension's **Ploeg** server | `allowedMcpServers` that no entry of theirs matches, a `deniedMcpServers` entry that matches, or MCP turned off. Since VS Code 1.145 the allow-list decides on its own, and an empty list, `[]`, blocks every server. | [Configure managed MCP server access](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_configure-managed-mcp-server-access); [`allowedMcpServers`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#allowedmcpservers), [`deniedMcpServers`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#deniedmcpservers); [1.145 release note](https://code.visualstudio.com/updates/v1_145#_managed-mcp-allowlists-take-precedence-over-registry-only-access) |
 | The Agent Plugin, `unfold` and `unfold-mcp` | `ChatPluginsEnabled` set to `false`; `strictKnownMarketplaces` or the `ChatStrictMarketplaces` policy without your marketplace (both an empty list and a list that names other marketplaces leave it out); `enabledPlugins` or `ChatEnabledPlugins` set to `false` for the plugin. `ChatExtraMarketplaces` and `extraKnownMarketplaces` add a marketplace; they never remove one. | [Manage agent plugins and marketplaces](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_manage-agent-plugins-and-marketplaces); [`strictKnownMarketplaces`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#strictknownmarketplaces), [`enabledPlugins`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#enabledplugins) |
+| The Unfold extension, `unfold-hq.unfold` | A [private extension marketplace](https://code.visualstudio.com/docs/enterprise/extensions#_host-a-private-extension-marketplace) whose allow list leaves it out. Since VS Code 1.146 an extension it blocks cannot be installed, updated or auto-updated from the gallery, is left out of chat's extension search, and its page says the policy or the marketplace blocks it. Not checked: whether installing the release's VSIX is refused too. | [Host a private extension marketplace](https://code.visualstudio.com/docs/enterprise/extensions#_host-a-private-extension-marketplace); [microsoft/vscode#341049](https://github.com/microsoft/vscode/pull/341049), listed in the [1.146 release notes](https://code.visualstudio.com/updates/v1_146) |
 
 ### What does not block Unfold's agent host
 
@@ -165,6 +187,43 @@ Give these to the administrator:
    Add the URL of the extension's **Ploeg** server the same way when your people use it. Make sure no `deniedMcpServers` entry matches either one, because a deny rule wins over the allow-list.
 2. **The plugin marketplace.** When the organisation sets `strictKnownMarketplaces` (or the `ChatStrictMarketplaces` policy), add the repository of your [operator marketplace](#for-operators-publish-a-marketplace-for-your-installation), for example `{ "source": "git", "url": "https://git.example.com/your-agent-plugins.git" }` ([`strictKnownMarketplaces`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#strictknownmarketplaces)). `extraKnownMarketplaces` or `ChatExtraMarketplaces` then offers it to everyone without a setting of their own.
 3. **The chat tools.** Leave `ChatAgentExtensionTools` on and MCP access above `none`.
+4. **The extension.** When people install extensions from a private marketplace, add `unfold-hq.unfold` to its allow list ([Host a private extension marketplace](https://code.visualstudio.com/docs/enterprise/extensions#_host-a-private-extension-marketplace)).
+
+### Tell people where to ask
+
+Set `communication.support.url` in Copilot enterprise-managed settings to an absolute HTTP or HTTPS address of your own help page, for example the page that explains how your organisation runs Unfold. Since VS Code 1.146, a developer who meets a supported policy restriction, such as a disabled Agents window or a model the organisation turned off, sees a **Contact Admin** link to that page ([1.146 release note](https://code.visualstudio.com/updates/v1_146#_organization-help-links-for-policy-restrictions)). The setting is informational only and changes no access ([supported keys](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#supported-keys)):
+
+```json
+{
+  "communication": {
+    "support": {
+      "url": "https://intranet.example.com/unfold"
+    }
+  }
+}
+```
+
+Not checked: which of the restrictions in [What can be switched off](#what-can-be-switched-off) show the link.
+
+### Open Unfold links in the integrated browser
+
+From VS Code 1.147, `workbench.externalUriOpeners` can send links to the integrated browser instead of the default browser ([1.147 release note](https://code.visualstudio.com/updates/v1_147#_open-non-localhost-links-in-the-integrated-browser)). Map your Unfold's address to it in your user settings:
+
+```json
+"workbench.externalUriOpeners": {
+  "https://unfold.example.com": "workbench.integratedBrowser"
+}
+```
+
+A pattern of `https://` and a host matches that host on HTTPS and every path under it ([`configuration.ts:27-37`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/externalUriOpener/common/configuration.ts#L27-L37) at 1.147.0). The integrated browser registers this opener only in the desktop app ([`browserTabManagementFeatures.ts:630`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts#L630), [`:650`](https://github.com/microsoft/vscode/blob/1.147.0/src/vs/workbench/contrib/browserView/electron-browser/features/browserTabManagementFeatures.ts#L650), in `electron-browser`). Not checked: which of Unfold's links take this route, such as **Open in the browser ↗** in the Agents window and links in chat, and whether the integrated browser needs its own Unfold sign-in.
+
+### Behind a proxy
+
+Three kinds of connection carry Unfold in VS Code, and only the first has a documented proxy behaviour:
+
+* **Copilot sessions**, which reach `unfold-mcp` when the plugin carries it. Since VS Code 1.146 they follow VS Code's [proxy configuration](https://code.visualstudio.com/docs/setup/network#_proxy-server-support), including proxy auto-configuration (PAC) and Kerberos, when they run locally, in WSL or in a local Dev Container ([1.146 release note](https://code.visualstudio.com/updates/v1_146#_copilot-sessions-behind-enterprise-proxies)). Proxies that need Basic authentication are [microsoft/vscode#347494](https://github.com/microsoft/vscode/issues/347494), closed as completed in the 1.147.0 milestone. Not verified: that the session's MCP connection to `unfold-mcp` takes the same route, and Basic authentication in a running VS Code.
+* **The Agents window's WebSocket** to Unfold's agent host. VS Code says it has the same proxy support as Chromium ([Proxy server support](https://code.visualstudio.com/docs/setup/network#_proxy-server-support)). Not verified: whether this WebSocket follows a PAC file, Kerberos or an authenticated proxy. The proxy must pass WebSocket upgrades, as in [Troubleshooting the Agents window](../../apps/unfold/docs/operations/live.md#troubleshooting-the-agents-window).
+* **The extension's own requests** to the workbench, and VS Code's MCP client when it reaches `unfold-mcp` from the editor's chat. Not verified.
 
 ### Require the plugin
 

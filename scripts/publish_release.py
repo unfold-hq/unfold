@@ -7,6 +7,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
+from marketplace_version import marketplace_version
 from release_floors import refuse_occupied
 from release_registry import GITHUB_SOURCE, Registry, command, digest, request, require_same, verify_image, verify_keyless, verify_keyless_signature
 
@@ -19,6 +20,12 @@ HOME_NAMESPACE = 'unfold-hq'
 EXTENSION_MANIFEST = ROOT / 'apps/unfold/extensions/vscode/package.json'
 OPEN_VSX_SCAN_DEADLINE = 1200
 OPEN_VSX_POLL_INTERVAL = 30
+MARKETPLACE_QUERY = 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery'
+MARKETPLACE_VSIX = 'Microsoft.VisualStudio.Services.VSIXPackage'
+MARKETPLACE_PRERELEASE = 'Microsoft.VisualStudio.Code.PreRelease'
+MARKETPLACE_INCLUDE_VERSIONS_FILES_PROPERTIES = 0x1 | 0x2 | 0x10
+MARKETPLACE_VALIDATION_DEADLINE = 1200
+MARKETPLACE_POLL_INTERVAL = 30
 RETIRED_PUBLISHERS = {
     'ploeg': 'Unfold no longer versions or publishes Ploeg: github.com/ploeg-hq/ploeg releases it from 0.1.0, and Unfold pins that source (system ADR-0019)',
 }
@@ -64,6 +71,38 @@ def open_vsx_extension(version):
             raise RuntimeError(f'Open VSX still does not serve {namespace}.{name} {version} after {OPEN_VSX_SCAN_DEADLINE} seconds; check its publish scan at https://open-vsx.org/extension/{namespace}/{name}')
         print(f'Open VSX does not serve {namespace}.{name} {version} yet; it is still scanning the published VSIX', file=sys.stderr)
         time.sleep(OPEN_VSX_POLL_INTERVAL)
+
+
+def marketplace_versions():
+    query = {'filters': [{'criteria': [{'filterType': 7, 'value': '.'.join(extension_identity())}]}], 'flags': MARKETPLACE_INCLUDE_VERSIONS_FILES_PROPERTIES}
+    body, _ = request(MARKETPLACE_QUERY, method='POST', data=json.dumps(query).encode(), headers={'Content-Type': 'application/json', 'Accept': 'application/json;api-version=7.2-preview.1'})
+    extensions = json.loads(body)['results'][0]['extensions']
+    return extensions[0]['versions'] if extensions else []
+
+
+def marketplace_extension(version):
+    namespace, name = extension_identity()
+    wanted = marketplace_version(version)
+    deadline = time.monotonic() + MARKETPLACE_VALIDATION_DEADLINE
+    while True:
+        listed = next((v for v in marketplace_versions() if v['version'] == wanted and not v.get('targetPlatform')), None)
+        if listed is not None and listed.get('flags') == 'validated':
+            return listed
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f'The Visual Studio Marketplace still does not serve a validated {namespace}.{name} {wanted} for {version} after {MARKETPLACE_VALIDATION_DEADLINE} seconds; check https://marketplace.visualstudio.com/manage/publishers/{namespace}')
+        print(f'The Visual Studio Marketplace does not serve a validated {namespace}.{name} {wanted} yet; it is still validating the published VSIX', file=sys.stderr)
+        time.sleep(MARKETPLACE_POLL_INTERVAL)
+
+
+def marketplace_download(listed):
+    url = next(f['source'] for f in listed['files'] if f['assetType'] == MARKETPLACE_VSIX)
+    if urllib.parse.urlsplit(url).scheme != 'https':
+        raise RuntimeError('Unexpected Marketplace download URL')
+    return url
+
+
+def marketplace_prerelease(listed):
+    return any(p['key'] == MARKETPLACE_PRERELEASE and p['value'] == 'true' for p in listed.get('properties', []))
 
 
 def fetch_asset(asset):
@@ -132,6 +171,16 @@ def publish(application, version):
     data, _ = request(extension['files']['download'])
     require_same(digest(data), digest(fetch_github_asset(vsix, token, release['draft'], HOME)), 'Open VSX VSIX')
     evidence['extension'] = {'id': '.'.join(extension_identity()), 'version': version, 'sha256': hashlib.sha256(data).hexdigest(), 'url': extension['files']['download']}
+    listed = marketplace_extension(version)
+    require_same(marketplace_prerelease(listed), listed['version'] != version, 'Marketplace pre-release flag')
+    name = f'unfold-{version}.vsix' if listed['version'] == version else f'unfold-marketplace-{listed["version"]}.vsix'
+    asset = next((a for a in release['assets'] if a['name'] == name), None)
+    if asset is None:
+        raise RuntimeError(f'{tag} has no {name}; the extension job attaches it before the Marketplace gets it')
+    url = marketplace_download(listed)
+    data, _ = request(url)
+    require_same(digest(data), digest(fetch_github_asset(asset, token, release['draft'], HOME)), 'Marketplace VSIX')
+    evidence['marketplace'] = {'id': '.'.join(extension_identity()), 'version': listed['version'], 'pre_release': marketplace_prerelease(listed), 'sha256': hashlib.sha256(data).hexdigest(), 'url': url}
     attach_github(release, f'release-artifacts-{application}.json', (json.dumps(evidence, indent=2) + '\n').encode(), token, HOME)
     if release['draft']:
         release = api(f'{HOME}/releases/{release["id"]}', token, 'PATCH', {'draft': False, 'make_latest': 'false'})

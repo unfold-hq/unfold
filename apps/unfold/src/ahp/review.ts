@@ -46,16 +46,40 @@ export function awaitingReview(session: Session, gated: boolean, readiness?: Pub
   return session.status === 'completed' && !session.review && (!gated || publishable(readiness));
 }
 
+const operation = (id: string, label: string, description: string, icon: string) => ({ id, label, description, scopes: ['changeset'], icon, status: 'idle' });
+const publishLabel = 'Accept and open pull request';
+
 /** The candidate's review operations. Request changes needs a follow-up session, which a task imported from a tracker cannot get here. A gated candidate offers only Accept and open pull request. */
 export function reviewOperations(session: Session, gated: boolean, readiness?: PublicationReadiness): Json[] {
   if (!awaitingReview(session, gated, readiness)) return [];
-  const operation = (id: string, label: string, description: string, icon: string) => ({ id, label, description, scopes: ['changeset'], icon, status: 'idle' });
-  if (gated) return [operation(reviewOperationIds.publish, 'Accept and open pull request', 'Approves this verified commit if you have not yet, then Unfold\'s publisher pushes it to its own branch and opens one pull request on the forge. Merging it stays with you.', 'git-pull-request')];
+  if (gated) return [operation(reviewOperationIds.publish, publishLabel, 'Approves this verified commit if you have not yet, then Unfold\'s publisher pushes it to its own branch and opens one pull request on the forge. Merging it stays with you.', 'git-pull-request')];
   return [
     operation(reviewOperationIds.accept, 'Accept', 'Records your acceptance in the session history, as Accept in the workbench does. Nothing is pushed or merged.', 'check'),
     ...(session.sourceTask ? [] : [operation(reviewOperationIds.requestChanges, 'Request changes…', 'Asks in the session\'s chat what should change. Your answer and your comments on the candidate become the instructions of a new session with the same brief, which waits for you to start it.', 'comment-discussion')]),
     operation(reviewOperationIds.reject, 'Reject…', 'Asks in the session\'s chat why, then records your rejection with that reason, as Reject in the workbench does. Nothing else happens.', 'close'),
   ];
+}
+
+/** Where Accept and open pull request publishes: the repository's name, the base branch the pull request targets and, once the publisher reserved it, the branch it pushes. */
+export type PublishTarget = { repository: string; baseBranch: string; branch?: string };
+
+/** The confirmation VS Code shows before it invokes Accept and open pull request, naming the repository and branches when the host knows them. */
+export function publishConfirmation(target?: PublishTarget): string {
+  const where = target ? `${target.branch ? `the branch ${target.branch}` : 'a new branch of its own'} of ${target.repository} and opens one pull request into ${target.baseBranch}` : 'its own branch and opens one pull request on the forge';
+  return `Accept this candidate and open its pull request? Unfold's publisher pushes the verified commit to ${where}. This cannot be undone from VS Code: closing the pull request or deleting the branch happens on the forge.`;
+}
+
+function unpublishableReason(readiness: PublicationReadiness | undefined): string {
+  if (readiness?.publication?.phase === 'refused') return 'The publisher refused this candidate. Its session page in Unfold says why.';
+  if (!readiness?.enabled) return 'This workbench has no publisher for the repository\'s delivery policy, so it cannot open a pull request.';
+  return 'Unfold opens a pull request only for a verified candidate, and this one has no passing verification receipt under the repository\'s delivery policy yet. Verify it from its session page in Unfold.';
+}
+
+/** The operations a candidate's changeset lists: its review operations, with a confirmation on Accept and open pull request, and for a completed, unreviewed gated candidate that is not publishable, that operation disabled with the reason. */
+export function changesetOperations(session: Session, gated: boolean, readiness?: PublicationReadiness, target?: PublishTarget): Json[] {
+  const offered = reviewOperations(session, gated, readiness).map(item => item.id === reviewOperationIds.publish ? { ...item, confirmation: publishConfirmation(target) } : item);
+  if (offered.length || !gated || session.status !== 'completed' || session.review || readiness?.publication?.phase === 'published') return offered;
+  return [{ ...operation(reviewOperationIds.publish, publishLabel, unpublishableReason(readiness), 'git-pull-request'), status: 'disabled' }];
 }
 
 const textOf = (value: unknown): string => typeof value === 'string' ? value : value && typeof value === 'object' && typeof (value as Json).markdown === 'string' ? (value as Json).markdown : '';

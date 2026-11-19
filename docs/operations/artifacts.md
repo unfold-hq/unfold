@@ -2,8 +2,8 @@
 type: reference
 audience: [operator, contributor]
 owner: unfold
-last_verified: 2026-11-16
-verified_by: "Rewritten on 2026-11-16 for the move to GitHub against .github/workflows/on_release_published.yml, scripts/publish_release.py, scripts/publish_chart.py, scripts/release_registry.py and scripts/release_preflight.py. Pre-move identities are from the 2026-10-03 audit record; no artifact was published from GitHub yet, so the GitHub identities are what the workflow publishes, not what a registry was seen to serve."
+last_verified: 2026-11-19
+verified_by: "Visual Studio Marketplace parts updated on 2026-11-19 against .github/workflows/on_release_published.yml, scripts/marketplace_version.py, scripts/publish_release.py and scripts/release_preflight.py; no Marketplace publication observed yet. Rewritten on 2026-11-16 for the move to GitHub against .github/workflows/on_release_published.yml, scripts/publish_release.py, scripts/publish_chart.py, scripts/release_registry.py and scripts/release_preflight.py. Pre-move identities are from the 2026-10-03 audit record; no artifact was published from GitHub yet, so the GitHub identities are what the workflow publishes, not what a registry was seen to serve."
 ---
 
 # Source mirrors and release artifacts
@@ -19,7 +19,7 @@ Unfold releases under `unfold-v0.x.y-rc.N` tags ([ADR-0019](../adr/adr-0019-unfo
 | Unfold application | `ghcr.io/unfold-hq/unfold` | keyless cosign, with a CycloneDX SBOM and the CVE-budget verdict attested to the index, a CycloneDX SBOM attested to each platform image, and BuildKit provenance attached |
 | Unfold workspace image | `ghcr.io/unfold-hq/unfold-agent` | as above |
 | Unfold chart | `oci://ghcr.io/unfold-hq/charts/unfold` | keyless cosign |
-| Editor extension | [Open VSX `unfold-hq.unfold`](https://open-vsx.org/extension/unfold-hq/unfold); VSIX, SHA-256 file and sigstore bundle on the [GitHub release](https://github.com/unfold-hq/unfold/releases) | keyless `cosign sign-blob`, plus a GitHub build-provenance attestation |
+| Editor extension | [Open VSX `unfold-hq.unfold`](https://open-vsx.org/extension/unfold-hq/unfold); [Visual Studio Marketplace `unfold-hq.unfold`](https://marketplace.visualstudio.com/items?itemName=unfold-hq.unfold), a candidate as a pre-release; each VSIX, SHA-256 file and sigstore bundle on the [GitHub release](https://github.com/unfold-hq/unfold/releases) | keyless `cosign sign-blob`, plus a GitHub build-provenance attestation |
 
 Use the bare application version as the image or chart tag. Prereleases never move `latest`. The chart defaults each image to the digest its job pushed and names `ghcr.io/unfold-hq` as their registry. The separate unattended `agent-runner` image is maintained outside Unfold.
 
@@ -36,7 +36,7 @@ cosign verify-blob --bundle unfold-<version>.vsix.sigstore.json \
 gh attestation verify unfold-<version>.vsix --repo unfold-hq/unfold
 ```
 
-There are currently no publishable npm or Composer packages: the application npm manifests are private, and no Composer package exists. A future library needs its own manifest, public API, version policy and consumer installation check. The Visual Studio Marketplace remains excluded for `rc.N` versions under the [extension distribution decision](../../apps/unfold/docs/adrs/0021-the-extension-ships-through-open-vsx-first.md).
+There are currently no publishable npm or Composer packages: the application npm manifests are private, and no Composer package exists. A future library needs its own manifest, public API, version policy and consumer installation check. The Visual Studio Marketplace carries each `rc.N` version as a pre-release under a derived `major.minor.patch` ([application ADR 0075](../../apps/unfold/docs/adrs/0075-the-extension-reaches-the-marketplace-through-trusted-publishing-with-release-candidates-as-pre-releases.md)).
 
 ## Versions published before the move
 
@@ -52,7 +52,7 @@ The 2026-10-03 history rewrite changed the bytes behind 14 published versions of
 
 ## Integrity and retries
 
-[`scripts/publish_release.py`](../../scripts/publish_release.py) verifies every artifact anonymously before it publishes the release: both images' AMD64 and ARM64 labels against the version, the Unfold commit and the source `https://github.com/unfold-hq/unfold` ([`scripts/release_registry.py`](../../scripts/release_registry.py)), their keyless signatures and CycloneDX attestations, the chart's keyless signature, and that Open VSX serves the same VSIX bytes as the release. It then attaches `release-artifacts-unfold.json`, schema version 2, which lists each artifact by digest, and takes the GitHub release out of draft without marking it latest. Releases up to `unfold-v0.4.0-rc.35` also carry `release-artifacts-ploeg.json`.
+[`scripts/publish_release.py`](../../scripts/publish_release.py) verifies every artifact anonymously before it publishes the release: both images' AMD64 and ARM64 labels against the version, the Unfold commit and the source `https://github.com/unfold-hq/unfold` ([`scripts/release_registry.py`](../../scripts/release_registry.py)), their keyless signatures and CycloneDX attestations, the chart's keyless signature, and that Open VSX and the Visual Studio Marketplace serve the same VSIX bytes as the release. It then attaches `release-artifacts-unfold.json`, schema version 2, which lists each artifact by digest, and takes the GitHub release out of draft without marking it latest. Releases up to `unfold-v0.4.0-rc.35` also carry `release-artifacts-ploeg.json`.
 
 An existing version must have the expected digest; a mismatch fails without replacing it, and a rerun skips what already verifies. GitHub package visibility is independent of repository visibility: new GHCR packages start private, and the anonymous pull check fails until each package (`unfold`, `unfold-agent`, `charts/unfold`) is made public; rerun the distribute job after that. See [GitHub package permissions](https://docs.github.com/en/packages/learn-github-packages/about-permissions-for-github-packages). A GitHub release takes assets only while it is a draft, so never publish an Unfold release by hand.
 
