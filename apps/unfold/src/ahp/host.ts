@@ -14,7 +14,7 @@ import type { PloegAttribution } from '../ploeg-attribution.ts';
 import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfig, composerModel, resolveSessionConfig, sessionConfigCompletions, sessionConfigSchema, sessionConfigState, startedConfigChange } from './session-config.ts';
 import { TrackerAutomations, automationsChannel, autonomousAutomationsMeta, isAutomationsChannel } from './automations.ts';
 import { WebSocketConnection, connectionToken, isWebSocketUpgrade, rejectUpgrade, upgradeToWebSocket } from './websocket.ts';
-import { IdleSessions, RememberedClients, ServerSequence, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
+import { Heartbeats, IdleSessions, RememberedClients, ServerSequence, heartbeatCheckMs, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
 import { AnnouncedCustomizations, customizationRefusal, gatewayToolCall, rootConfigRefusal, sessionCustomizations, type GatewaySubject } from './customizations.ts';
 import { outcomeMarkdown, sessionProgress, stopReason } from '../../public/core/progress.js';
 import { money } from '../../public/core/format.js';
@@ -295,6 +295,8 @@ export class AgentHost {
   private readonly knownClients: RememberedClients<SessionScheme>;
   private readonly idleSessions = new IdleSessions();
   private readonly sweeper: ReturnType<typeof setInterval>;
+  private readonly heartbeats = new Heartbeats<Client>();
+  private readonly heartbeat: ReturnType<typeof setInterval>;
   private readonly departing = new Map<string, ReturnType<typeof setTimeout>>();
   /** How long an active client whose last connection closed keeps its place, waiting for its reconnect: 30 seconds, as in VS Code's own host. */
   activeClientGraceMs = 30_000;
@@ -339,6 +341,8 @@ export class AgentHost {
     for (const clientId of new Set([...this.activeClients.values()].flatMap(clients => [...clients.keys()]))) this.awaitReturn(clientId);
     this.sweeper = setInterval(() => this.evictIdleSessions(), Math.min(60_000, this.idleSessions.idleMs));
     this.sweeper.unref();
+    this.heartbeat = setInterval(() => this.checkHeartbeats(), heartbeatCheckMs);
+    this.heartbeat.unref();
     this.chatAsks = new ChatAsks(store);
     this.review = new CandidateReview({
       config, store, engine, choiceEvents,
@@ -620,7 +624,14 @@ export class AgentHost {
   /** Whether a dropped active client is inside its grace period, waiting to reconnect; the signal a caller waits on instead of the wall clock. */
   isDeparting(clientId: string): boolean { return this.departing.has(clientId); }
 
-  close(): void { this.closed = true; this.stopPolling(); clearInterval(this.sweeper); this.automations.close(); this.workItems.close(); this.runLive.close(); for (const timer of this.departing.values()) clearTimeout(timer); this.departing.clear(); for (const client of this.clients) client.connection.close(1001, 'Server shutting down'); this.clients.clear(); }
+  /** Pings each initialized client that is due and closes, as if it had closed itself, each one that left a `ping` unanswered too long. */
+  checkHeartbeats(now = this.clock()): void {
+    const { ping, silent } = this.heartbeats.check([...this.clients].filter(client => client.initialized), now);
+    for (const client of silent) client.connection.close(1001, 'Client stopped answering ping');
+    for (const { peer, id } of ping) this.send(peer, { jsonrpc: '2.0', id, method: 'ping', params: {} });
+  }
+
+  close(): void { this.closed = true; this.stopPolling(); clearInterval(this.sweeper); clearInterval(this.heartbeat); this.automations.close(); this.workItems.close(); this.runLive.close(); for (const timer of this.departing.values()) clearTimeout(timer); this.departing.clear(); for (const client of this.clients) client.connection.close(1001, 'Server shutting down'); this.clients.clear(); }
 
   private startPolling(): void { if (!this.timer) this.timer = setInterval(() => void this.poll(), pollMs); }
   private stopPolling(): void { if (this.timer) { clearInterval(this.timer); this.timer = undefined; } }
@@ -1358,9 +1369,11 @@ export class AgentHost {
   }
 
   private async receive(client: Client, text: string): Promise<void> {
-    if (!this.current(client, true)) return;
-    let message: Json;
-    try { message = JSON.parse(text); } catch { this.send(client, { jsonrpc: '2.0', id: null, error: { code: codes.parse, message: 'Parse error' } }); return; }
+    let message: Json | undefined;
+    try { message = JSON.parse(text); } catch { message = undefined; }
+    const pong = message !== undefined && this.answersPing(client, message);
+    if (!this.current(client, !pong) || pong) return;
+    if (message === undefined) { this.send(client, { jsonrpc: '2.0', id: null, error: { code: codes.parse, message: 'Parse error' } }); return; }
     if (!message || message.jsonrpc !== '2.0' || typeof message.method !== 'string') { this.send(client, { jsonrpc: '2.0', id: message?.id ?? null, error: { code: codes.invalidRequest, message: 'Invalid request' } }); return; }
     const params = (message.params ?? {}) as Json;
     if (message.id === undefined) { try { await this.notification(client, message.method, params); } catch {} return; }
@@ -1372,6 +1385,10 @@ export class AgentHost {
       this.send(client, { jsonrpc: '2.0', id: message.id, error: { code: rpc.code, message: rpc.message, ...(rpc.data !== undefined ? { data: rpc.data } : {}) } });
       if (rpc.code === codes.unsupportedVersion) { this.clients.delete(client); client.connection.close(1000, 'Unsupported protocol version'); }
     }
+  }
+
+  private answersPing(client: Client, message: Json): boolean {
+    return typeof message === 'object' && message !== null && typeof message.method !== 'string' && ('result' in message || 'error' in message) && this.heartbeats.answered(client, message.id);
   }
 
   /**
