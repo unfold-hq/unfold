@@ -3373,7 +3373,7 @@ standards:
     url: https://datatracker.ietf.org/doc/draft-niyikiza-oauth-attenuating-agent-tokens/
   watch:
   - {kind: ietf-draft, ref: draft-niyikiza-oauth-attenuating-agent-tokens, current: "02"}
-  - {kind: github-releases, ref: tenuo-ai/tenuo, current: "v0.3.5"}
+  - {kind: github-releases, ref: tenuo-ai/tenuo, current: "v0.3.7"}
   adoption:
   - 'Tenuo: task-scoped warrants for agents (105 stars, pushed 2026-11-04): https://github.com/tenuo-ai/tenuo'
   relations:
