@@ -365,17 +365,31 @@ export function sheetMarkup({ task, source, repository = '', status, statusError
   return `<form data-form="start-handoff" class="sheet" novalidate aria-labelledby="sheet-title"><input type="hidden" name="source" value="${escape(source.id)}"><input type="hidden" name="task" value="${escape(task.id)}"><header class="dialog-header sheet-header"><div class="sheet-heading"><p class="sheet-eyebrow">Hand off · ${escape(ref)}${source.name ? ` · ${escape(source.name)}` : ''}</p><h2 id="sheet-title">${escape(task.title || `Task ${task.id}`)}</h2></div><button type="button" class="button ghost icon-only" data-action="close-dialog" aria-label="Close" title="Close">${icon('x')}</button></header><div class="dialog-body sheet-body">${demo}<section class="sheet-section" aria-labelledby="sheet-ready"><h3 class="sheet-label" id="sheet-ready">Ready? ${readyBadge(state)}</h3>${facts}${task.url ? `<p class="sheet-open"><a href="${escape(task.url)}" target="_blank" rel="noopener noreferrer" data-link-out="tracker">${escape(`${openTaskLabel(source.provider)} to edit the brief`)}${icon('external')}<span class="sr-only"> (opens in a new tab)</span></a></p>` : ''}</section><section class="sheet-section" aria-labelledby="sheet-team"><h3 class="sheet-label" id="sheet-team">Team</h3>${teamBody}${refusal}</section><section class="sheet-section" aria-labelledby="sheet-terms"><h3 class="sheet-label" id="sheet-terms">What happens</h3><dl class="sheet-terms">${terms}</dl></section>${roomWarn}${failure}</div><footer class="dialog-footer">${button({ label: 'Cancel', action: 'close-dialog', variant: 'ghost' })}${submit}</footer></form>`;
 }
 
+const retryForms = { 'loop-retry': '<form data-form="loop-retry"', 'work-retry': '<form data-form="work-retry"' };
+
 /**
  * The Try again dialog of a stopped Work Item: what it costs, an optional note for the next Runs and one button.
- * Ploeg restarts it from Round 1 on the same Team; nothing in the tracker changes.
- * @param {object} entry A waiting Work Item of the Now response.
- * @param {{ demo?: boolean, busy?: boolean, error?: string }} [options]
+ * Ploeg restarts it from Round 1 on the same Team; nothing in the tracker changes. Now and the Work Item page share it:
+ * `form` names the submit handler of the page that opens it (`loop-retry` on Now, `work-retry` on the Work Item page),
+ * and `caution` is one more sentence for a restart that is likely to end the same way (`retryCaution`).
+ * @param {object} entry A waiting Work Item of the Now response, or a Work Item detail's item with its latest Shift.
+ * @param {{ demo?: boolean, busy?: boolean, error?: string, form?: 'loop-retry' | 'work-retry', caution?: string }} [options]
  * @returns {string}
  */
-export function retryMarkup(entry, { demo = false, busy = false, error = '' } = {}) {
+export function retryMarkup(entry, { demo = false, busy = false, error = '', form = 'loop-retry', caution = '' } = {}) {
   const title = entry.title || `Work Item ${entry.id}`;
   const budget = entry.latestShift?.budgetUsd;
   const cost = demo ? 'This is the demo: nothing restarts and nothing is spent.' : `A new attempt spends from Team ${entry.team}’s budget${typeof budget === 'number' ? `, up to ${money(budget)} like the last one` : ''}.`;
-  const failure = error ? callout({ tone: 'danger', title: 'Ploeg did not restart it', body: `<p>${escape(error)}</p>` }) : '';
-  return `<form data-form="loop-retry" novalidate aria-labelledby="confirm-title"><input type="hidden" name="id" value="${escape(entry.id)}"><header class="dialog-header"><h2 id="confirm-title">Try “${escape(title)}” again?</h2><button type="button" class="button ghost icon-only" data-action="close-dialog" aria-label="Close" title="Close">${icon('x')}</button></header><div class="dialog-body"><p>Ploeg starts it over from Round 1 with Team ${escape(entry.team)}. ${escape(cost)}</p><div class="field"><label class="field-label" for="loop-retry-note">What should the next attempt know? <span class="subtle">Optional</span></label><textarea id="loop-retry-note" name="note" maxlength="4096" rows="4" placeholder="For example: the file moved to docs/operate/observability.md"></textarea></div>${failure}</div><footer class="dialog-footer">${button({ label: 'Cancel', action: 'close-dialog', variant: 'ghost' })}${button({ type: 'submit', variant: 'primary', icon: 'refresh', label: busy ? 'Starting…' : 'Try again', busy, disabled: busy, id: 'loop-retry-submit' })}</footer></form>`;
+  const failure = error ? `<div role="alert">${callout({ tone: 'danger', title: 'Ploeg did not restart it', body: `<p>${escape(error)}</p>` })}</div>` : '';
+  return `${retryForms[form] || retryForms['loop-retry']} novalidate aria-labelledby="confirm-title"><input type="hidden" name="id" value="${escape(entry.id)}"><header class="dialog-header"><h2 id="confirm-title">Try “${escape(title)}” again?</h2><button type="button" class="button ghost icon-only" data-action="close-dialog" aria-label="Close" title="Close">${icon('x')}</button></header><div class="dialog-body"><p>Ploeg starts it over from Round 1 with Team ${escape(entry.team)}, as a new attempt of the same Work Item. Its history stays. ${escape(cost)}</p>${caution && !demo ? `<p>${escape(caution)}</p>` : ''}<div class="field"><label class="field-label" for="loop-retry-note">What should the next attempt know? <span class="subtle">Optional</span></label><textarea id="loop-retry-note" name="note" maxlength="4096" rows="4" placeholder="For example: the file moved to docs/operate/observability.md"></textarea></div>${failure}</div><footer class="dialog-footer">${button({ label: 'Cancel', action: 'close-dialog', variant: 'ghost' })}${button({ type: 'submit', variant: 'primary', icon: 'refresh', label: busy ? 'Starting…' : 'Try again', busy, disabled: busy, id: 'loop-retry-submit' })}</footer></form>`;
+}
+
+/**
+ * What the toast says once Ploeg answered a Try again: the Round it restarts from, or that the demo restarted nothing.
+ * @param {object} entry The Work Item the dialog was opened for.
+ * @param {{ demo?: boolean, fromRound?: number | null }} result The requeue answer.
+ * @returns {string}
+ */
+export function retryNotice(entry, result) {
+  return result?.demo ? 'This is the demo: nothing restarted and nothing was spent.' : `Started “${entry.title || `Work Item ${entry.id}`}” again from Round ${result?.fromRound ?? 1}.`;
 }
