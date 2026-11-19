@@ -1550,5 +1550,5 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   server.headersTimeout = 10000;
   server.on('close', () => notifications.stop());
   server.keepAliveTimeout = keepAliveTimeoutMs;
-  return { server, cards, tripwire, closeStreams: () => { for (const stream of streams) stream.end(); streams.clear(); }, stopInsight: () => { jobs.stop(); audit.stop(); insight.stop(); reports.stop(); flags.close(); tripwire.stop(); outbound.stop(); mcpEvents.stop(); billing.stop(); }, reports };
+  return { server, cards, tripwire, closeStreams: () => { for (const stream of streams) stream.end(); streams.clear(); mcp?.close(); }, stopInsight: () => { jobs.stop(); audit.stop(); insight.stop(); reports.stop(); flags.close(); tripwire.stop(); outbound.stop(); mcpEvents.stop(); billing.stop(); }, reports };
 }
