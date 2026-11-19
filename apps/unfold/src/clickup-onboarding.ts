@@ -345,6 +345,19 @@ export class ClickUpOnboarding {
     return { removed: id };
   }
 
+  /** Whether `user` connects ClickUp, binds Lists and removes a binding: a Tenant admin. */
+  manages(user: User): boolean { return this.options.steps.manages(user); }
+
+  /** The Lists bound to a Team through this Tenant's Ploeg-held ClickUp connections, for the agent host's automation catalogue. A binding Ploeg no longer holds is left out. */
+  boundLists(): { id: string; name: string; list: string; repositoryId: string; team: string; state: string; account: string }[] {
+    const held = new Map(this.held().map(connection => [connection.id, connection]));
+    return this.connections.sources().flatMap(source => {
+      const connection = held.get(source.connection);
+      if (!connection || !source.binding || source.binding.state === 'removed') return [];
+      return [{ id: source.id, name: source.name, list: source.project, repositoryId: source.repositoryId, team: source.binding.team, state: source.binding.state, account: connection.account ?? '' }];
+    });
+  }
+
   /** Admits a step that only reads or undoes, without the spend-cap gate: `503 ploeg_step_unavailable` while this Ploeg does not serve it. */
   private async serving(user: User, id: StepId): Promise<void> {
     const { step, served } = await this.options.steps.available(user, id, true);

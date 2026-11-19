@@ -339,6 +339,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
     personal: user => { try { const login = links?.describe(user.id, 'clickup').login; return { ids: [], names: login ? [user.name, login] : [user.name] }; } catch { return { ids: [], names: [user.name] }; } },
     audit: change => audit.record({ actor: auditActor(change.user), tenants: [change.tenant], fact: { kind: 'entity', action: change.action, entity: { type: change.entity, uid: change.uid, name: change.name, data: change.data }, outcome: 'success' } }),
   });
+  agentHost?.automations.useBoundLists(clickup);
   const readinessPrepare = new ReadinessPrepare({ store, ploeg, onboarding });
   onboarding.useReadiness(readinessPrepare);
   const reports = new ReportService(store, config, applicationVersion, undefined, { jobs });

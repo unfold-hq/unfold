@@ -6,15 +6,25 @@ import { hashPassword } from '../src/auth.ts';
 import { application, login, request } from './api-support.ts';
 import { action, connect, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
+import { defaultTenant } from '../src/tenancy.ts';
+import type { SourceBinding } from '../src/tracker-connections.ts';
+import type { User } from '../src/types.ts';
 
 const password = 'automation-password-271828';
 const catalogue = 'ahp-automations://';
 
-async function ploegServer(t: TestContext, bearer: string, state: { teams: Json[] }): Promise<string> {
+type PloegState = { teams: Json[]; bindings: Json[]; deletes: string[] };
+
+async function ploegServer(t: TestContext, bearer: string, state: PloegState): Promise<string> {
   const server = createServer((req, res) => {
     const send = (value: unknown, status = 200) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...value as object }));
-    if (req.headers.authorization !== `Bearer ${bearer}` || req.method !== 'GET') return send({}, 401);
-    if (new URL(req.url!, 'http://fixture.invalid').pathname === '/api/v1/operator/teams') return send({ teams: state.teams });
+    const path = new URL(req.url!, 'http://fixture.invalid').pathname;
+    if (req.headers.authorization !== `Bearer ${bearer}`) return send({}, 401);
+    const binding = /^\/api\/v1\/operator\/teams\/([^/]+)\/tracker-bindings\/([^/]+)$/.exec(path);
+    if (req.method === 'DELETE' && binding) { state.deletes.push(`${binding[1]}/${binding[2]}`); state.bindings = state.bindings.filter(entry => entry.id !== binding[2]); return res.writeHead(204).end(); }
+    if (req.method !== 'GET') return send({}, 401);
+    if (path === '/api/v1/operator/teams') return send({ teams: state.teams });
+    if (path === '/api/v1/operator/tracker-bindings') return send({ bindings: state.bindings });
     return send({}, 404);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -30,7 +40,7 @@ async function fixture(t: TestContext) {
   const bearer = randomBytes(24).toString('hex');
   process.env[env] = bearer;
   t.after(() => { delete process.env[env]; });
-  const state = { teams: [team('silver', ['silver']), team('bronze', ['bronze']), team('unfold', []), team('gold', ['gold'], ['77'])] };
+  const state: PloegState = { teams: [team('silver', ['silver']), team('bronze', ['bronze']), team('unfold', []), team('gold', ['gold'], ['77'])], bindings: [], deletes: [] };
   const ploeg = await ploegServer(t, bearer, state);
   const server = await application('live', config => {
     const tracker = { provider: 'vikunja' as const, baseUrl: 'http://tracker.invalid/api/v1', repositoryId: 'order-service', token: randomBytes(12).toString('hex') };
@@ -191,4 +201,99 @@ test('a demo workbench advertises no automations and serves VS Code an empty cat
   const resumed = await attach();
   const reconnected = await resumed.rpc('reconnect', { channel: 'ahp-root://', clientId: 'demo', lastSeenServerSeq: initialized.serverSeq, subscriptions });
   assert.deepEqual(reconnected.snapshots.map((snapshot: Json) => snapshot.resource), subscriptions);
+});
+
+const bootstrapAdmin: User = { id: 'admin', name: 'admin', role: 'admin' };
+
+/** A ClickUp List bound to Ploeg team silver in Connect ClickUp, as its onboarding stores it, and the binding Ploeg holds. */
+function bindList(f: Awaited<ReturnType<typeof fixture>>, state: SourceBinding['state'] = 'active') {
+  const connections = f.server.app.connections;
+  const connection = connections.recordPloegConnection(bootstrapAdmin, { provider: 'clickup', baseUrl: 'https://api.clickup.com/api/v2', tenant: defaultTenant, account: 'unfold', ploeg: { connection: 'clickup-unfold', method: 'token', accountId: '42' } });
+  const source = connections.addSource(bootstrapAdmin, connection.id, { project: '777', name: 'Sprint 12', repositoryId: 'order-service', executionOwner: 'ploeg' });
+  connections.setBinding(source.id, { id: 'b-1', team: 'silver', state, reason: null, default: 'order-service', allow: [], target: { forge: 'github', owner: 'acme', repo: 'order-service', baseBranch: 'main' }, checkedAt: '2026-11-19T10:00:00.000Z' });
+  f.state.bindings = [{ id: 'b-1', team: 'silver', connection: 'clickup-unfold', scope: { id: '777', name: 'Sprint 12' }, default: 'order-service', allow: [], state, source: 'runtime', revision: 1 }];
+  return { source, resource: `ahp-automation:/binding.${encodeURIComponent(source.id)}` };
+}
+
+test('a List bound in Connect ClickUp is a binding-driven route that only a Tenant admin may remove', { timeout: testTimeout(60_000) }, async t => {
+  const f = await fixture(t);
+  const { source, resource } = bindList(f);
+  const admin = await f.attach('admin');
+  const adminEntries: Json[] = (await admin.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries;
+  const bound = adminEntries.find(entry => entry.resource === resource)!;
+  assert.ok(bound, 'the bound List is in the catalogue');
+  assert.deepEqual(bound.operations, ['remove'], 'a Tenant admin may remove it');
+  assert.equal(bound.definition.title, 'Sprint 12 → silver');
+  assert.equal(bound.definition.enabled, true);
+  assert.match(bound.definition.message.text, /binding drives this intake, not an assignment event, because ClickUp sends none/);
+  assert.match(bound.definition.message.text, /assigned to unfold/);
+  assert.match(bound.definition.message.text, /nothing here starts work/);
+  assert.deepEqual(bound.definition.triggers.map((trigger: Json) => [trigger.kind, trigger.type]), [['event', 'unfold.tracker-binding']]);
+  assert.deepEqual(bound.definition.triggers[0].config, { source: source.id, list: '777', team: 'silver' });
+  assert.deepEqual(bound.definition._meta['dev.unfoldhq.unfold'], { kind: 'trackerBinding', source: source.id, list: '777', team: 'silver', state: 'active' });
+  assert.ok(adminEntries.filter(entry => entry.resource !== resource).every(entry => entry.operations.length === 0), 'a tracker route stays without operations');
+
+  const operator = await f.attach('op-1');
+  const seen: Json[] = (await operator.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries;
+  assert.deepEqual(seen.find(entry => entry.resource === resource)?.operations, [], 'someone with access to the team sees the route and no operation');
+  const stranger = await f.attach('op-2');
+  assert.ok(!(await stranger.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries.some((entry: Json) => entry.resource === resource), 'someone without access to the team does not see it');
+
+  const triggers = await admin.client.rpc('listAutomationTriggerDefinitions', { channel: 'ahp-root://' });
+  assert.deepEqual(triggers.items.map((item: Json) => item.type), ['unfold.tracker-assignment', 'unfold.tracker-binding']);
+});
+
+test('removing a bound List from an agent host client is rejected for anyone but a Tenant admin and changes nothing', { timeout: testTimeout(60_000) }, async t => {
+  const f = await fixture(t);
+  const { source, resource } = bindList(f);
+  const operator = await f.attach('op-1');
+  await operator.client.rpc('subscribe', { channel: catalogue });
+  operator.client.notify('dispatchAction', { channel: catalogue, clientSeq: 1, action: { type: 'automation/removed', resource } });
+  const rejected = await operator.client.until(message => message.method === 'action' && message.params.origin?.clientSeq === 1);
+  assert.match(rejected.params.rejectionReason, /Only a Tenant admin removes a List's binding/);
+  assert.deepEqual(f.state.deletes, [], 'Ploeg was asked to delete nothing');
+  assert.equal(f.server.app.connections.sources().find(entry => entry.id === source.id)?.binding?.id, 'b-1', 'the binding is still stored');
+  assert.ok((await operator.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries.some((entry: Json) => entry.resource === resource), 'the route is still listed');
+
+  const stranger = await f.attach('op-2');
+  await stranger.client.rpc('subscribe', { channel: catalogue });
+  stranger.client.notify('dispatchAction', { channel: catalogue, clientSeq: 1, action: { type: 'automation/removed', resource } });
+  assert.match((await stranger.client.until(message => message.method === 'action' && message.params.origin?.clientSeq === 1)).params.rejectionReason, /No tracker route of yours/);
+  assert.deepEqual(f.state.deletes, []);
+});
+
+test('a Tenant admin removes a bound List through Connect ClickUp\'s removal, and it disappears from every connected catalogue', { timeout: testTimeout(60_000) }, async t => {
+  const f = await fixture(t);
+  const { source, resource } = bindList(f);
+  const admin = await f.attach('admin');
+  const second = await f.attach('admin', 'admin-second-window');
+  const operator = await f.attach('op-1');
+  for (const client of [admin.client, second.client, operator.client]) await client.rpc('subscribe', { channel: catalogue });
+
+  admin.client.notify('dispatchAction', { channel: catalogue, clientSeq: 7, action: { type: 'automation/removed', resource } });
+  const echoed = await admin.client.until(message => action(message, catalogue, 'automation/removed') && message.params.origin?.clientSeq === 7);
+  assert.equal(echoed.params.rejectionReason, undefined, 'accepted');
+  assert.equal(echoed.params.action.resource, resource);
+  assert.deepEqual(f.state.deletes, ['silver/b-1'], 'Ploeg deleted the tracker binding once');
+  assert.equal(f.server.app.connections.sources().find(entry => entry.id === source.id)?.binding, undefined, 'the saved source lost its binding');
+  assert.equal((await second.client.until(message => action(message, catalogue, 'automation/removed'))).params.action.resource, resource, 'the admin\'s other window drops it');
+  assert.equal((await operator.client.until(message => action(message, catalogue, 'automation/removed'))).params.action.resource, resource, 'another person watching drops it');
+  assert.equal(admin.client.inbox.filter(message => action(message, catalogue, 'automation/removed')).length, 1, 'the remover hears of it once');
+  assert.ok(!(await admin.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries.some((entry: Json) => entry.resource === resource));
+
+  admin.client.notify('dispatchAction', { channel: catalogue, clientSeq: 8, action: { type: 'automation/removed', resource } });
+  assert.match((await admin.client.until(message => message.method === 'action' && message.params.origin?.clientSeq === 8)).params.rejectionReason, /No tracker route of yours/, 'a second removal finds nothing to remove');
+  assert.deepEqual(f.state.deletes, ['silver/b-1']);
+});
+
+test('a bound List whose binding waits for its webhook says so, and one Ploeg no longer holds leaves the catalogue', { timeout: testTimeout(60_000) }, async t => {
+  const f = await fixture(t);
+  const { source, resource } = bindList(f, 'awaiting_webhook');
+  const admin = await f.attach('admin');
+  const entry = (await admin.client.rpc('subscribe', { channel: catalogue })).snapshot.state.entries.find((candidate: Json) => candidate.resource === resource);
+  assert.match(entry.definition.message.text, /reports the binding awaiting webhook, so tasks may not arrive yet/);
+  const stored = f.server.app.connections.sources().find(candidate => candidate.id === source.id)!;
+  f.server.app.connections.setBinding(source.id, { ...stored.binding!, state: 'removed' });
+  await f.server.app.agentHost.automations.refresh();
+  assert.equal((await admin.client.until(message => action(message, catalogue, 'automation/removed'))).params.action.resource, resource);
 });
