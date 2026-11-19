@@ -158,7 +158,7 @@ Decided in [ADR-0061](../adr/adr-0061-development-merges-through-a-merge-queue-w
 | Ruleset target | `development` |
 | Require a pull request before merging | on, with no required approvals and the merge method **Merge commit** |
 | Require status checks to pass | `gate`, from GitHub Actions |
-| Require merge queue | on, merge method **Merge commit**, so a Ploeg pin keeps its `fix(ploeg)` commit and the release ranges keep their merges; every required check green (`ALLGREEN`), merging from 1 entry after a 1-minute wait, up to 5 entries built at once, and a 60-minute timeout per check |
+| Require merge queue | on, merge method **Merge commit**, so a Ploeg pin keeps its `fix(ploeg)` commit and the release ranges keep their merges; every required check green (`ALLGREEN`), merging from 1 entry after a 1-minute wait, up to 3 entries built and merged at once, and a 60-minute timeout per check |
 | Bypass list | empty, administrators included |
 | Block force pushes and deletion | on |
 | Allow auto-merge | on, so [`on_ploeg_pin.yml`](../../.github/workflows/on_ploeg_pin.yml) can queue a pin that is not green yet |
