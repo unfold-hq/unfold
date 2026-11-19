@@ -104,6 +104,18 @@ The extension lends agents in VS Code chat three read-only tools, so an agent se
 
 They read the same workbench routes as the **Now** view and the Work Item panel, with this editor's sign-in, and never spend, approve, reject, retry or stop anything; those stay behind Unfold's own confirmations. Titles, questions and reports that come from a tracker or an agent are quoted and labelled as untrusted data, as `unfold-mcp` does. Signed out or offline, a tool answers in one sentence and names **Unfold: Connect to Workbench**. An administrator turns extension tools off for everyone with VS Code's `ChatAgentExtensionTools` policy, and from VS Code 1.147 also by turning MCP off. [In a managed VS Code](https://github.com/unfold-hq/unfold/blob/development/docs/how-to/install-the-unfold-plugin.md#in-a-managed-vs-code) lists what an organisation's policies switch off in Unfold and what to allow. The tools need an editor with the language-model tool API; on one without it the extension runs as before. In a desktop VS Code 1.143.1 all three are listed in `vscode.lm.tools` in the editor window and in the Agents window (checked 2026-10-24); an agent calling them in chat is not checked yet.
 
+### The Unfold skill, instructions and plugin
+
+From VS Code 1.144, the extension also brings what tells chat how to work with Unfold, so you do not have to install it separately. While you are signed in, VS Code's Agent Customizations editor lists:
+
+- the **operate-agent-session** skill, for operating a durable agent session and preparing a reviewable hand-off;
+- the **unfold** instructions, which say what Unfold is, which of the three tools to call, and that tracker and agent text is untrusted data;
+- the **unfold** Agent Plugin, provided by this extension, with its `unfold`, `link-work-item` and `brief` skills. VS Code reads it as an Agent Plugins v1 package, so only its skills reach VS Code; `brief` works only in Claude Code.
+
+Signed out, offline, or before you first sign in, none of the three is active. An editor older than 1.144 ignores them and the extension runs as before.
+
+If you also installed the Unfold plugin from a marketplace ([Install the Unfold plugin](https://github.com/unfold-hq/unfold/blob/development/docs/how-to/install-the-unfold-plugin.md)), VS Code 1.147 lists two **unfold** plugins and enables both, without a duplicate notice: it groups copies by marketplace and name, and a plugin an extension provides has neither, so the two are never treated as one. Disable one of them in the Agent Customizations editor, or uninstall the marketplace copy. This is read in VS Code's source at tag 1.147.0, not yet seen in a running editor.
+
 ## See what waits on you
 
 The Unfold sidebar opens on **Now**, the same list as the browser's Now page:

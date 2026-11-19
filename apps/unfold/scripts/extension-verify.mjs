@@ -116,6 +116,23 @@ else {
     }
   }
   if (entries.length && manifest.icon && !entries.includes(manifest.icon)) fail(`${relative(root, target)} does not contain the icon ${manifest.icon}`);
+  if (entries.length) {
+    for (const name of chatFiles(manifest)) {
+      if (!entries.includes(name)) fail(`${relative(root, target)} does not contain ${name}, which package.json contributes to chat; run npm run extension:build`);
+    }
+  }
+}
+
+function chatFiles(contributions) {
+  const relativePath = path => path.replace(/^\.\//, '').replace(/\/$/, '');
+  const files = [...(contributions.contributes?.chatSkills ?? []), ...(contributions.contributes?.chatInstructions ?? [])].map(entry => relativePath(entry.path));
+  for (const plugin of contributions.contributes?.chatPlugins ?? []) {
+    const pluginRoot = relativePath(plugin.path);
+    files.push(`${pluginRoot}/plugin.json`);
+    const skills = resolve(root, 'extensions/claude-code/skills');
+    for (const skill of existsSync(skills) ? readdirSync(skills) : []) files.push(`${pluginRoot}/skills/${skill}/SKILL.md`);
+  }
+  return files;
 }
 
 process.stdout.write(`Extension ${manifest.publisher}.${manifest.name} ${version}\n`);
