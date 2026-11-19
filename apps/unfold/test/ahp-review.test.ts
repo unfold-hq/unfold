@@ -2,7 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { application, request } from './api-support.ts';
+import { Store } from '../src/store.ts';
 import { action, connect, defaultChatOf, vscodeAgentsWindow, type AgentHostClient, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
 import { annotationsChannel, changesInstruction, feedbackComments, openComments, parseAnnotationsChannel, reduceAnnotations, reviewOperations } from '../src/ahp/review.ts';
@@ -308,5 +312,82 @@ test('a task imported from a tracker is offered Accept and Reject but not Reques
   const session = { status: 'completed', sourceTask: { key: 'x' } } as unknown as Session;
   assert.deepEqual(reviewOperations(session, false).map(operation => operation.id), ['accept', 'reject']);
   assert.deepEqual(reviewOperations({ ...session, sourceTask: undefined } as Session, true), [], 'a delivery policy hands the review to the forge');
+});
+
+test('reviewed-file ticks are kept for the person who ticked them across a restart, a reconnect and a new window, and never reach another person', { timeout: testTimeout(90_000) }, async t => {
+  const { server, client, address, changeset, stored } = await reviewable(t);
+  const reviewedIds = (state: Json) => (state.files as Json[]).filter(file => file.reviewed === true).map(file => file.id);
+  const files = (await client.rpc('subscribe', { channel: changeset })).snapshot.state.files as Json[];
+  assert.ok(files.length > 0, 'the candidate has files to tick');
+  assert.deepEqual(reviewedIds({ files }), [], 'nothing is ticked before anyone ticks it');
+  const ticked = files[0].id;
+
+  const window = connect(address);
+  t.after(() => window.close());
+  await window.open;
+  await window.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'review-window', clientInfo: vscodeAgentsWindow, _meta: { 'vscode.ahpSessionUris': true } });
+  await window.rpc('subscribe', { channel: changeset });
+  server.app.store.addUser({ id: 'carol-review', name: 'carol-review', role: 'admin', passwordHash: 'unused' });
+  const carol = connect(`${address.split('?')[0]}?tkn=${server.app.agentHost.issueToken({ id: 'carol-review', name: 'carol-review', role: 'admin' })}`);
+  t.after(() => carol.close());
+  await carol.open;
+  await carol.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'carol-review' });
+  await carol.rpc('subscribe', { channel: changeset });
+
+  client.notify('dispatchAction', { channel: changeset, clientSeq: 2, action: { type: 'changeset/filesReviewChanged', files: [ticked, 'not-a-file'], reviewed: true } });
+  const echoed = await client.until(message => action(message, changeset, 'changeset/filesReviewChanged'));
+  assert.equal(echoed.params.rejectionReason, undefined);
+  await window.until(message => action(message, changeset, 'changeset/filesReviewChanged'));
+  await carol.rpc('ping', {});
+  assert.ok(!carol.inbox.some(message => action(message, changeset, 'changeset/filesReviewChanged')), 'another person is not sent the tick');
+  assert.deepEqual(reviewedIds((await window.rpc('subscribe', { channel: changeset })).snapshot.state), [ticked], 'a window of the same person reads the tick back');
+  assert.deepEqual(reviewedIds((await carol.rpc('subscribe', { channel: changeset })).snapshot.state), [], 'another person who may see the session sees none of the ticks');
+
+  const lastSeen = server.app.agentHost.serverSeq;
+  for (const open of [client, window, carol]) open.close();
+  await server.restart();
+  const restarted = `${server.url.replace(/^http/, 'ws')}/?${address.split('?')[1]}`;
+  const resumed = connect(restarted);
+  t.after(() => resumed.close());
+  await resumed.open;
+  const result = await resumed.rpc('reconnect', { channel: 'ahp-root://', clientId: 'review', lastSeenServerSeq: lastSeen, subscriptions: ['ahp-root://', changeset], _meta: { 'vscode.ahpSessionUris': true } });
+  assert.deepEqual(reviewedIds(result.snapshots.find((snapshot: Json) => snapshot.resource === changeset).state), [ticked], 'the tick survives a restart and a reconnect');
+  const fresh = connect(restarted);
+  t.after(() => fresh.close());
+  await fresh.open;
+  await fresh.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'review-new-window', clientInfo: vscodeAgentsWindow, _meta: { 'vscode.ahpSessionUris': true } });
+  assert.deepEqual(reviewedIds((await fresh.rpc('subscribe', { channel: changeset })).snapshot.state), [ticked], 'a new window of the same person shows the tick');
+
+  resumed.notify('dispatchAction', { channel: changeset, clientSeq: 3, action: { type: 'changeset/filesReviewChanged', files: [ticked], reviewed: false } });
+  await resumed.until(message => action(message, changeset, 'changeset/filesReviewChanged') && message.params.origin?.clientSeq === 3);
+  assert.deepEqual(reviewedIds((await fresh.rpc('subscribe', { channel: changeset })).snapshot.state), [], 'clearing the tick is kept too');
+
+  resumed.notify('dispatchAction', { channel: changeset, clientSeq: 4, action: { type: 'changeset/filesReviewChanged', files: [ticked], reviewed: true } });
+  await resumed.until(message => action(message, changeset, 'changeset/filesReviewChanged') && message.params.origin?.clientSeq === 4);
+  assert.deepEqual(reviewedIds((await fresh.rpc('subscribe', { channel: changeset })).snapshot.state), [ticked]);
+  server.app.store.db.prepare('UPDATE changeset_reviews SET digest=? WHERE session_id=?').run('content-before-it-changed', stored().id);
+  assert.deepEqual(reviewedIds((await fresh.rpc('subscribe', { channel: changeset })).snapshot.state), [], 'a tick on content that changed since is dropped');
+  assert.equal((server.app.store.db.prepare('SELECT COUNT(*) AS count FROM changeset_reviews WHERE session_id=?').get(stored().id) as { count: number }).count, 0, 'and is not kept');
+});
+
+test('a database written before reviewed-file ticks were kept opens with its data intact and keeps ticks per person from then on', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'unfold-ticks-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const path = join(dir, 'unfold.sqlite');
+  const before = new Store(path);
+  before.setAgentHostView('alice', 's1', { session: 32, chat: 32 }, '2026-11-01T00:00:00.000Z');
+  before.db.exec('DROP TABLE changeset_reviews');
+  before.close();
+
+  const after = new Store(path);
+  t.after(() => after.close());
+  assert.deepEqual(after.agentHostView('alice', 's1'), { session: 32, chat: 32 }, 'what was stored before is still there');
+  const current = new Map([['a.ts', 'one'], ['b.ts', 'two']]);
+  assert.deepEqual([...after.reviewedFiles('alice', 's1', current)], []);
+  after.setReviewedFiles('alice', 's1', current, true, '2026-11-02T00:00:00.000Z');
+  assert.deepEqual([...after.reviewedFiles('alice', 's1', current)].sort(), ['a.ts', 'b.ts']);
+  assert.deepEqual([...after.reviewedFiles('bob', 's1', current)], [], 'another person has none of them');
+  assert.deepEqual([...after.reviewedFiles('alice', 's1', new Map([['a.ts', 'one'], ['b.ts', 'changed']]))], ['a.ts'], 'a file whose content changed loses its tick');
+  assert.deepEqual([...after.reviewedFiles('alice', 's1', current)], ['a.ts'], 'and does not get it back when the content returns');
 });
 

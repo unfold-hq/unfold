@@ -77,6 +77,7 @@ export const tableEntities: readonly TableEntity[] = [
   { entity: 'flag-choices', table: 'flag_choices', scope: person('user_id'), description: 'Labs choices each person made.' },
   { entity: 'now-snoozes', table: 'now_snoozes', scope: person('user_id'), description: 'Rows each person snoozed on Now.' },
   { entity: 'agent-host-views', table: 'agent_host_views', scope: person('user_id'), description: 'What each person has seen of an editor agent host session.' },
+  { entity: 'changeset-reviews', table: 'changeset_reviews', scope: person('user_id'), description: 'The files each person marked as reviewed in an editor agent host changeset.' },
   { entity: 'status-notes', table: 'status_notes', scope: installation, description: 'Notes administrators posted on the Status page.' },
   { entity: 'card-themes', table: 'card_themes', scope: installation, json: ['body'], description: 'Run card themes (card-theme.v1).' },
   { entity: 'card-theme-versions', table: 'card_theme_versions', scope: installation, json: ['body'], description: 'Every saved version of each card theme.' },

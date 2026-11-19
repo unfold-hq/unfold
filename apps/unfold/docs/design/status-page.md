@@ -122,4 +122,4 @@ The section answers a second question for a person deciding whether to trust the
 
 ## Validation status
 
-Exercised: unit and API tests for the report and the answer logic, the state renders above, keyboard refresh with focus and open disclosures kept, the motion contract in both motion preferences, the live announcement, measured text contrast, the product-ux and expressive-design source scans (no findings), and three independent heuristic passes on screenshots. Not exercised: real users, a screen reader, Firefox or Safari, forced colours, and the page against the live homelab cluster.
+Exercised: unit and API tests for the report and the answer logic, the state renders above, keyboard refresh with focus and open disclosures kept, the motion contract in both motion preferences, the live announcement, measured text contrast, the product-ux and expressive-design source scans (no findings), and three independent heuristic passes on screenshots. Not exercised: real users, a screen reader, Firefox or Safari, forced colours, and the page against a live installation.
