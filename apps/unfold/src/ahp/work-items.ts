@@ -235,10 +235,12 @@ const failureText = (run: PloegRun, fallback: string) => {
 };
 const failed = (run: PloegRun) => ['failed', 'stuck'].includes(run.outcome ?? '') || Boolean(run.failureReason);
 
+const runEnding = (run: PloegRun) => run.verdict ? verdictText(run.verdict) : !failed(run) ? `finished${run.outcome ? ` (${run.outcome.replaceAll('_', ' ')})` : ''}` : `stopped (${(run.outcome ?? 'failed').replaceAll('_', ' ')})`;
+
 function runResult(run: PloegRun, spawned: Json): Json {
   const role = roleName(run.role);
   const success = !failed(run);
-  const pastTenseMessage = run.verdict ? `${role} ${verdictText(run.verdict)}` : success ? `${role} finished${run.outcome ? ` (${run.outcome.replaceAll('_', ' ')})` : ''}` : `${role} stopped (${(run.outcome ?? 'failed').replaceAll('_', ' ')})`;
+  const pastTenseMessage = `${role} ${runEnding(run)}`;
   const summary = run.summary.trim();
   return { success, pastTenseMessage, content: [spawned, ...(summary ? [{ type: 'text', text: summary }] : [])], ...(!success ? { error: { message: failureHeadline(failureText(run, pastTenseMessage)) } } : {}) };
 }
@@ -275,8 +277,26 @@ export function verdictParts(run: PloegRun, item: PloegItem): Json[] {
   return [{ kind: 'markdown', id: `${runToolCallId(run)}-verdict`, content: `**${headline}.**${gist ? ` ${gist}` : ''} Open ${role} above for the full report.` }];
 }
 
+/** The most Runs a Round's diagram draws before it ends in a node that counts the rest. */
+export const roundDiagramRuns = 12;
+
+/** Text from Ploeg as a quoted Mermaid label: every character but a letter, digit or space becomes an entity code, so it can neither close the label nor start a directive. */
+export const mermaidLabel = (text: string) => `"${[...text].map(char => /^[\p{L}\p{N} ]$/u.test(char) ? char : `#${char.codePointAt(0)};`).join('')}"`;
+
+/** A finished Round as a Mermaid flowchart that VS Code draws in the chat: its Runs in order, each with its Role and how it ended. */
+export function roundDiagram(runs: readonly PloegRun[]): string {
+  const shown = runs.slice(0, roundDiagramRuns);
+  const nodes = shown.map((run, index) => `  r${index + 1}[${mermaidLabel(`${roleName(run.role)}: ${run.state === 'finished' ? runEnding(run) : 'not finished'}`)}]`);
+  const rest = runs.length - shown.length;
+  if (rest > 0) nodes.push(`  more[${mermaidLabel(`${rest} more Run${rest === 1 ? '' : 's'}`)}]`);
+  const ids = [...shown.map((_, index) => `r${index + 1}`), ...(rest > 0 ? ['more'] : [])];
+  return ['```mermaid', 'flowchart LR', ...nodes, ...(ids.length > 1 ? [`  ${ids.join(' --> ')}`] : []), '```'].join('\n');
+}
+
+const diagramParts = (round: Round): Json[] => round.open ? [] : [{ kind: 'markdown', id: `${round.turnId}-diagram`, content: roundDiagram(round.runs) }];
+
 function turnOf(round: Round, index: number, spelling: Spelling, item: PloegItem): Json {
-  const turn = { id: round.turnId, startedAt: round.startedAt, message: turnMessage(round), responseParts: [...noticePart(round, index), ...round.runs.flatMap(run => [runPart(run, spelling), ...verdictParts(run, item)])] };
+  const turn = { id: round.turnId, startedAt: round.startedAt, message: turnMessage(round), responseParts: [...noticePart(round, index), ...round.runs.flatMap(run => [runPart(run, spelling), ...verdictParts(run, item)]), ...diagramParts(round)] };
   return round.open ? turn : { ...turn, duration: duration(round.startedAt, round.finishedAt), state: 'complete' };
 }
 
@@ -421,6 +441,7 @@ export function workItemTranscriptActions(before: PloegDetail, after: PloegDetai
         if (!known.has(run.id)) actions.push(...spawnActions(turn.id, part), ...verdicts);
         else if (part.toolCall.status === 'completed' && previousRuns.get(run.id)?.state !== 'finished') actions.push(completeAction(turn.id, part.toolCall), ...verdicts);
       }
+      for (const part of diagramParts(round)) actions.push({ to: 'chat', action: { type: 'chat/responsePart', turnId: turn.id, part } });
     }
     if (!round.open) actions.push({ to: 'chat', action: { type: 'chat/turnComplete', turnId: turn.id, duration: turn.duration } });
   });
