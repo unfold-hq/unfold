@@ -146,7 +146,10 @@ export function workItemActivity(item: PloegItem, runs: readonly PloegRun[] = []
 /** Whether an Operator Execution owns the Work Item: an Unfold session bound to it, which the Agents window already lists as that session. Ploeg opens such a Shift on the branch `operator/<session>`. */
 
 /** One Work Item as the host knows it for a viewer: Ploeg's record, the Runs behind its activity, and whether Ploeg could not be read since. */
-export type WorkItemRecord = { workItemId: string; publicId: string; item: PloegItem; activity: WorkItemActivity; stale: boolean };
+export type WorkItemRecord = { workItemId: string; publicId: string; item: PloegItem; activity: WorkItemActivity; stale: boolean; modifiedAt?: string };
+
+/** The modification time VS Code reads for a Work Item session: the one kept while nothing the person acts on changed, otherwise Ploeg's update time. */
+const modifiedAtOf = (entry: WorkItemRecord) => entry.modifiedAt ?? entry.item.updatedAt;
 
 function record(item: PloegItem, runs: readonly PloegRun[] = [], stale = false, facts: WorkItemReviewFacts = {}): WorkItemRecord {
   return { workItemId: item.id, publicId: workItemSessionId(item.id), item, activity: workItemActivity(item, runs, facts), stale };
@@ -198,14 +201,14 @@ function meta(entry: WorkItemRecord): Json {
  * cannot take it. `by` names, for this viewer, the person who handed it off; a queued Work Item's activity says so.
  */
 export function workItemChatSummary(entry: WorkItemRecord, spelling: Spelling, flags: ViewFlags, by?: string): Json {
-  return { resource: spelling.chat, title: `#${entry.item.id} ${entry.item.title}`, status: workItemStatus(entry) | flags.chat, activity: activityText(entry, by), modifiedAt: entry.item.updatedAt, origin: { kind: 'user' }, interactivity: 'full' };
+  return { resource: spelling.chat, title: `#${entry.item.id} ${entry.item.title}`, status: workItemStatus(entry) | flags.chat, activity: activityText(entry, by), modifiedAt: modifiedAtOf(entry), origin: { kind: 'user' }, interactivity: 'full' };
 }
 
 /** A Work Item session in `listSessions` and the root channel: `#<id> <title>`, its state, the viewer's own flags and, while it is queued, who handed it off. */
 export function workItemSummary(entry: WorkItemRecord, spelling: Spelling, flags: ViewFlags, protocolVersion: string, by?: string): Json {
   return {
     resource: spelling.session, provider: 'unfold', title: `#${entry.item.id} ${entry.item.title}`, status: workItemStatus(entry) | flags.session, activity: activityText(entry, by),
-    createdAt: entry.item.createdAt, modifiedAt: entry.item.updatedAt,
+    createdAt: entry.item.createdAt, modifiedAt: modifiedAtOf(entry),
     ...sessionChatCatalog(protocolVersion, workItemChatSummary(entry, spelling, flags, by)),
     _meta: meta(entry),
   };
@@ -461,6 +464,7 @@ export class WorkItemSessions {
   private readonly finished = new Map<string, PloegItem>();
   private readonly recent = new Map<string, { team: string; at: string }>();
   private readonly admitters = new Map<string, string>();
+  private readonly shown = new Map<string, { at: string; facts: string; question?: string }>();
   private cursor: string | undefined;
   private seeding: Promise<void> | undefined;
   private timer?: ReturnType<typeof setInterval>;
@@ -537,7 +541,7 @@ export class WorkItemSessions {
     }
     if (sessionDriven(detail.item)) return undefined;
     this.keep(workItemId, detail);
-    const entry = record(detail.item, detail.runs, this.stale, await this.reviewFacts(detail.item));
+    const entry = this.stamped(record(detail.item, detail.runs, this.stale, await this.reviewFacts(detail.item)), detail);
     const seen = this.seen.get(user.id) ?? new Map();
     seen.set(entry.publicId, { entry, fingerprint: fingerprint(entry) });
     this.seen.set(user.id, seen);
@@ -611,7 +615,7 @@ export class WorkItemSessions {
     try { detail = await this.ploeg.detail(allowed[0], workItemId, true); }
     catch (error) { if (!(error instanceof PloegError) || ![403, 404].includes(error.status)) throw error; }
     if (!detail) { for (const user of allowed) if (this.seen.get(user.id)?.has(publicId)) this.publishList(user, [], [], [publicId]); return; }
-    const entry = record(detail.item, detail.runs, false, await this.reviewFacts(detail.item));
+    const entry = this.stamped(record(detail.item, detail.runs, false, await this.reviewFacts(detail.item)), detail);
     const listed = !sessionDriven(detail.item) && this.inWindow(detail.item);
     const before = this.details.get(workItemId);
     this.keep(workItemId, detail);
@@ -697,7 +701,25 @@ export class WorkItemSessions {
     const runs = new Map(await Promise.all(open.filter(item => item.state === 'leased').map(async item => [item.id, (await this.ploeg.detail(user, item.id).catch(() => undefined))?.runs ?? []] as const)));
     const read = (kind: 'ci' | 'approved') => open.filter(item => reviewRead(nowItem(item)) === kind).slice(0, reviewRowsRead);
     const facts = new Map(await Promise.all([...read('ci'), ...read('approved')].map(async item => [item.id, await this.reviewFacts(item)] as const)));
-    return [...open, ...finished].slice(0, this.cap).map(item => record(item, runs.get(item.id) ?? [], false, facts.get(item.id)));
+    return [...open, ...finished].slice(0, this.cap).map(item => this.stamped(record(item, runs.get(item.id) ?? [], false, facts.get(item.id))));
+  }
+
+  /**
+   * The record with the modification time VS Code 1.147's Inbox compares to bring an acknowledged session back: the time
+   * last shown while the Work Item's state, reason, pull request and waiting questions stay the same, otherwise Ploeg's
+   * update time. A read without the detail leaves the waiting questions as last seen.
+   */
+  private stamped(entry: WorkItemRecord, detail?: PloegDetail): WorkItemRecord {
+    const { item } = entry;
+    const facts = JSON.stringify([item.state, entry.activity.reason?.code ?? null, item.pullRequest?.number ?? null]);
+    const question = detail ? (workItemQuestions(detail)?.questions.map(asked => asked.id).join(' ') ?? '') : undefined;
+    const prior = this.shown.get(item.id);
+    const same = prior !== undefined && prior.facts === facts && (question === undefined || prior.question === undefined || prior.question === question);
+    const at = same ? prior.at : item.updatedAt;
+    this.shown.delete(item.id);
+    this.shown.set(item.id, { at, facts, question: question ?? (same ? prior.question : undefined) });
+    if (this.shown.size > 5000) this.shown.delete(this.shown.keys().next().value!);
+    return { ...entry, modifiedAt: at };
   }
 
   private async reviewFacts(item: PloegItem): Promise<WorkItemReviewFacts> {
