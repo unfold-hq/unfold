@@ -3,7 +3,7 @@ type: explanation
 audience: [owner, operator]
 owner: unfold
 last_verified: 2026-11-19
-verified_by: "Read docs/concepts/who-unfold-is-for.md, system ADRs 0005, 0006, 0009, 0059 (rule 4) and 0060, and Ploeg ADR-0184 at the pinned 0.2.0-rc.130 bundle. No code implements the hosted service, so nothing was run. The public GitHub App is the owner's stated direction; no ADR records it yet."
+verified_by: "Read docs/concepts/who-unfold-is-for.md, system ADRs 0005, 0006, 0009, 0059 (rule 4), 0060 and 0062, and Ploeg ADR-0184 at the pinned 0.2.0-rc.130 bundle. No code implements the hosted service, so nothing was run."
 ---
 
 # Hosted Unfold for agencies
@@ -24,8 +24,8 @@ The Agency would still own its forge, its tracker and its repositories. It would
 
 | System | What the Agency would do | Where it is decided |
 | --- | --- | --- |
-| GitHub | Install the hosted service's public GitHub App on the repositories agents may work on | Not recorded in an ADR yet |
-| Forgejo or GitLab | Create a bot user and hand its token over once. Ploeg would store it in its own secret store, and no person would handle it again | [Ploeg ADR-0184](../../apps/ploeg/docs/adrs/0184-tracker-and-forge-connection-secrets-live-in-a-secret-store-ploeg-writes-itself-and-no-person-handles-them.md) (proposed) |
+| GitHub | Install the hosted service's public GitHub App on the repositories agents may work on | [ADR-0062](../adr/adr-0062-hosted-unfold-reaches-github-through-one-public-app-the-customer-installs-and-other-forges-through-a-bot-account-the-customer-creates.md), rules 1 to 4 (proposed) |
+| Forgejo or GitLab | Create a bot user, or on GitLab a project or group access token, and hand it over once. Ploeg would store it in its own secret store, and no person would handle it again. GitLab waits for a Ploeg change first | [ADR-0062](../adr/adr-0062-hosted-unfold-reaches-github-through-one-public-app-the-customer-installs-and-other-forges-through-a-bot-account-the-customer-creates.md), rules 5 and 6, and [Ploeg ADR-0184](../../apps/ploeg/docs/adrs/0184-tracker-and-forge-connection-secrets-live-in-a-secret-store-ploeg-writes-itself-and-no-person-handles-them.md) (both proposed) |
 | ClickUp | Invite a dedicated member for Unfold and consent to Unfold's ClickUp app as that member | [ADR-0059](../adr/adr-0059-an-organisation-connects-its-forge-and-tracker-from-unfold-and-ploeg-learns-its-repositories-and-boards-at-runtime.md), rule 4 (proposed) |
 
 Ploeg would hold every tracker and forge credential, and the Unfold application none ([ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)).
