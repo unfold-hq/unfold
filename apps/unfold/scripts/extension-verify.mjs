@@ -120,7 +120,7 @@ else {
 
 process.stdout.write(`Extension ${manifest.publisher}.${manifest.name} ${version}\n`);
 process.stdout.write(`  Open VSX            publishable${marketplaceVersion ? '' : ' as a pre-release'}\n`);
-process.stdout.write(`  Visual Studio Marketplace  ${marketplaceVersion ? 'publishable' : `skipped — it accepts only major.minor.patch, never ${version}`}\n`);
+process.stdout.write(`  Visual Studio Marketplace  publishable${marketplaceVersion ? '' : ` as a pre-release under the major.minor.patch scripts/marketplace_version.py derives from ${version}`}\n`);
 for (const note of notes) process.stdout.write(`  note: ${note}\n`);
 
 if (failures.length) {

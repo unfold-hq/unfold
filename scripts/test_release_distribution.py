@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import publish_chart
+import marketplace_version
 import publish_release
 import release_registry
 from release_registry import GITHUB_SOURCE, SafeRedirect, digest, verify_image
@@ -235,7 +236,8 @@ class GitHubHomeTests(unittest.TestCase):
 
     def test_publication_attaches_the_evidence_to_the_draft_and_then_publishes_it_without_moving_latest(self):
         draft = {'id': 11, 'tag_name': 'unfold-v0.4.0-rc.9', 'draft': True, 'html_url': 'draft', 'upload_url': 'https://uploads.github.com/repos/unfold-hq/unfold/releases/11/assets{?name,label}',
-                 'assets': [{'name': 'unfold-0.4.0-rc.9.vsix', 'url': publish_release.HOME + '/releases/assets/1'}]}
+                 'assets': [{'name': 'unfold-0.4.0-rc.9.vsix', 'url': publish_release.HOME + '/releases/assets/1'},
+                            {'name': 'unfold-marketplace-0.4.10009.vsix', 'url': publish_release.HOME + '/releases/assets/2'}]}
         calls, attached = [], []
 
         def api(url, token, method='GET', data=None, missing=False):
@@ -256,6 +258,7 @@ class GitHubHomeTests(unittest.TestCase):
                 patch.object(publish_release, 'digest', lambda data: 'sha256:' + 'd' * 64), \
                 patch.object(MemoryRegistry, 'manifest', lambda self, repository, reference, missing=False: b'chart'), \
                 patch.object(publish_release, 'open_vsx_extension', lambda version: {'version': version, 'files': {'download': 'https://open-vsx.org/vsix'}}), \
+                patch.object(publish_release, 'marketplace_extension', lambda version: marketplace_listing('0.4.10009', prerelease=True)), \
                 patch.object(publish_release, 'request', lambda url, **k: (b'vsix', {})), \
                 patch.object(publish_release, 'fetch_github_asset', lambda asset, token, draft, repository: b'vsix'), \
                 patch.object(publish_release, 'attach_github', lambda release, name, content, token, repository: attached.append((name, json.loads(content)))):
@@ -264,7 +267,60 @@ class GitHubHomeTests(unittest.TestCase):
         self.assertEqual([name for name, _ in attached], ['release-artifacts-unfold.json'])
         evidence = attached[0][1]
         self.assertEqual((evidence['source'], evidence['extension']['id']), ('https://github.com/unfold-hq/unfold', 'unfold-hq.unfold'))
+        self.assertEqual({k: evidence['marketplace'][k] for k in ('id', 'version', 'pre_release', 'url')}, {'id': 'unfold-hq.unfold', 'version': '0.4.10009', 'pre_release': True, 'url': 'https://unfold-hq.gallerycdn.vsassets.io/vsix'})
         self.assertEqual(calls[-1], ('PATCH', '/releases/11', {'draft': False, 'make_latest': 'false'}))
+
+def marketplace_listing(version, prerelease, flags='validated', target=None):
+    listing = {'version': version, 'flags': flags, 'files': [{'assetType': 'Microsoft.VisualStudio.Services.VsixManifest', 'source': 'https://unfold-hq.gallerycdn.vsassets.io/manifest'}, {'assetType': 'Microsoft.VisualStudio.Services.VSIXPackage', 'source': 'https://unfold-hq.gallerycdn.vsassets.io/vsix'}],
+               'properties': [{'key': 'Microsoft.VisualStudio.Code.PreRelease', 'value': 'true'}] if prerelease else []}
+    if target:
+        listing['targetPlatform'] = target
+    return listing
+
+
+class MarketplaceTests(unittest.TestCase):
+    def test_a_release_candidate_gets_a_unique_rising_marketplace_version_that_never_meets_a_stable_one(self):
+        self.assertEqual(marketplace_version.marketplace_version('0.4.0-rc.152'), '0.4.10152')
+        self.assertEqual(marketplace_version.marketplace_version('0.4.1-rc.3'), '0.4.20003')
+        self.assertEqual(marketplace_version.marketplace_version('0.4.0'), '0.4.0')
+        candidates = [f'0.{minor}.{patch}-rc.{number}' for minor in (4, 5) for patch in (0, 1, 2) for number in (1, 2, 151, 9999)]
+        derived = [marketplace_version.marketplace_version(version) for version in candidates]
+        as_tuple = lambda version: tuple(int(part) for part in version.split('.'))
+        self.assertEqual(derived, sorted(derived, key=as_tuple), 'every later candidate sorts higher')
+        self.assertEqual(len(set(derived)), len(derived))
+        stable = {f'0.{minor}.{patch}' for minor in (4, 5) for patch in range(10000)}
+        self.assertFalse(stable & set(derived), 'no candidate takes a version a stable release could need')
+
+    def test_a_version_the_rule_cannot_place_is_refused(self):
+        for version in ['0.4.0-rc.10000', '0.4.0-beta.1', '0.4.0-rc.0', '0.04.0-rc.1', '0.4', '0.4.0-rc.1;echo']:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                marketplace_version.marketplace_version(version)
+
+    def test_the_marketplace_is_awaited_until_it_has_validated_the_derived_version(self):
+        answers = [[], [marketplace_listing('0.4.10041', True, flags='none')], [marketplace_listing('0.4.10041', True, target='linux-x64'), marketplace_listing('0.4.10041', True)]]
+        with patch.object(publish_release, 'marketplace_versions', lambda: answers.pop(0)), patch.object(publish_release.time, 'sleep') as sleep, patch('sys.stderr'):
+            self.assertEqual(publish_release.marketplace_extension('0.4.0-rc.41'), marketplace_listing('0.4.10041', True))
+        self.assertEqual(sleep.call_count, 2)
+
+    def test_a_marketplace_that_never_lists_the_version_fails_after_the_deadline(self):
+        with patch.object(publish_release, 'marketplace_versions', lambda: []), patch.object(publish_release, 'MARKETPLACE_VALIDATION_DEADLINE', 0), patch.object(publish_release.time, 'sleep') as sleep:
+            with self.assertRaisesRegex(RuntimeError, 'still does not serve a validated unfold-hq.unfold 0.4.10041 for 0.4.0-rc.41'):
+                publish_release.marketplace_extension('0.4.0-rc.41')
+        sleep.assert_not_called()
+
+    def test_the_marketplace_is_asked_for_the_extension_the_manifest_names(self):
+        sent = []
+        with patch.object(publish_release, 'request', lambda url, **k: sent.append((url, json.loads(k['data']))) or (json.dumps({'results': [{'extensions': []}]}).encode(), {})):
+            self.assertEqual(publish_release.marketplace_versions(), [])
+        url, query = sent[0]
+        self.assertEqual(url, 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery')
+        self.assertEqual(query['filters'][0]['criteria'], [{'filterType': 7, 'value': 'unfold-hq.unfold'}])
+
+    def test_the_download_is_the_vsix_package_and_the_flag_reads_the_pre_release_property(self):
+        self.assertEqual(publish_release.marketplace_download(marketplace_listing('0.4.10041', True)), 'https://unfold-hq.gallerycdn.vsassets.io/vsix')
+        self.assertTrue(publish_release.marketplace_prerelease(marketplace_listing('0.4.10041', True)))
+        self.assertFalse(publish_release.marketplace_prerelease(marketplace_listing('0.4.0', False)))
+
 
 class FlakyOpener:
     def __init__(self, *outcomes):
