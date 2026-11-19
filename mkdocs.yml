@@ -74,6 +74,7 @@ nav:
       - Open questions: landscape/questions.md
   - Contribute:
       - How work on Unfold is done: contributing/way-of-working.md
+      - How the backlog is structured: contributing/backlog-structure.md
       - Set up a worktree: contributing/set-up-a-worktree.md
       - Open a pull request: contributing/open-a-pull-request.md
       - Review guide: contributing/review.md

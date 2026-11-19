@@ -41,6 +41,8 @@ Work is pulled, not pushed. Take the top task of **Ready**, never one from Backl
 
 To give a task to agents, assign the ClickUp member **Unfold**, the user Unfold hands tasks off as, or choose **Hand to** on Unfold's Now page, which does the same. Ploeg's Team silver picks it up, works on a branch named after the task, and moves the card. Unassigning **Unfold** before a worker starts takes it back. Only that member starts work: assigning yourself or a colleague starts nothing. [Working with Unfold from ClickUp](../../apps/unfold/docs/operations/working-from-clickup.md) covers following, reviewing and stopping the work.
 
+Which Domain, outcome epic and tags a ticket gets is in [How the backlog is structured](backlog-structure.md).
+
 When the agents need a person, Ploeg moves the card to **Needs you** and comments the question or reason; Unfold's Now page lists it under **Needs you** too. A premise question is answered by editing the description. Then unassign **Unfold** and assign it again: a new assignment starts the task over.
 
 A task tagged with another repository is worked in that repository instead of this one. Tasks in the Ploeg Space are not picked up by agents, because its repository is on GitHub; change Ploeg by hand in `ploeg-hq/ploeg`.
