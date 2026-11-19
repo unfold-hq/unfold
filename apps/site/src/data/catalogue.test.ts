@@ -11,6 +11,7 @@ import {
   DEVELOPER_SURFACES,
   FEATURES,
   featuresFor,
+  STATUSES,
 } from './catalogue.ts';
 import { PORTS, STANDARDS } from './integrations.ts';
 
@@ -60,23 +61,36 @@ describe('feature catalogue', () => {
 });
 
 describe('port board', () => {
-  test('every port has copy in both languages and at least one adapter', () => {
+  const statuses: readonly string[] = STATUSES;
+
+  test('the catalogue and the copy name the same ports, each with an adapter', () => {
+    const ids = PORTS.map((port) => port.id);
+    assert.deepEqual([...ids].sort(), Object.keys(en.integrationsPage.ports).sort());
+    assert.deepEqual([...ids].sort(), Object.keys(nl.integrationsPage.ports).sort());
     for (const port of PORTS) {
-      assert.ok(en.integrationsPage.ports[port.id], port.id);
-      assert.ok(nl.integrationsPage.ports[port.id], port.id);
       assert.ok(port.adapters.length > 0, port.id);
+      assert.ok(['registry', 'standard', 'contract'].includes(port.kind), port.id);
     }
   });
 
-  test('every adapter note and standard has copy', () => {
+  test('every adapter has a status the site knows, and its note and label have copy in both languages', () => {
     for (const port of PORTS) {
       for (const adapter of port.adapters) {
-        if (adapter.note) assert.ok(en.integrationsPage.notes[adapter.note], adapter.note);
-        if (adapter.label) assert.ok(en.integrationsPage.notes[adapter.label], adapter.label);
+        assert.ok(statuses.includes(adapter.status), `${port.id}: ${adapter.status}`);
+        for (const key of [adapter.note, adapter.label]) {
+          if (!key) continue;
+          assert.ok(en.integrationsPage.notes[key], key);
+          assert.ok(nl.integrationsPage.notes[key], key);
+        }
         assert.ok(adapter.name || adapter.label, 'an adapter has a name or a label');
       }
     }
-    for (const standard of STANDARDS) assert.ok(en.integrationsPage.standards[standard.id]);
+  });
+
+  test('the catalogue and the copy name the same standards', () => {
+    const ids = STANDARDS.map((standard) => standard.id).sort();
+    assert.deepEqual(ids, Object.keys(en.integrationsPage.standards).sort());
+    assert.deepEqual(ids, Object.keys(nl.integrationsPage.standards).sort());
   });
 
   test('the standards on the page are only the ones that are built', () => {

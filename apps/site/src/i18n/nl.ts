@@ -520,7 +520,7 @@ export const nl: Dictionary = {
       },
       intHarnessOthers: {
         title: 'OpenCode, Qwen Code, Goose, Claude Code, Codex en Gemini CLI',
-        text: 'De adapters zitten in de broncode van Ploeg en draaien mee in de geplande aanvalsoefening, maar vallen buiten het ondersteunde profiel.',
+        text: 'De adapters zitten in de broncode van Ploeg en draaien mee in de geplande aanvalsoefening, maar Ploeg weigert hun Runs tot elk ervan gekwalificeerd is met de credentials buiten bereik.',
       },
       intChat: {
         title: 'Slack, Microsoft Teams, ntfy en Web Push',
@@ -1331,7 +1331,6 @@ export const nl: Dictionary = {
     ports: {
       trackers: { name: 'Trackers', job: 'Waar werk vandaan komt en waar je het overdraagt.' },
       forges: { name: 'Forges', job: 'Waar het pull request terechtkomt.' },
-      links: { name: 'Gekoppelde accounts', job: 'Iemands eigen token voor een tracker of forge.' },
       agents: { name: 'Agenttools', job: 'De agent die een Run aanstuurt, binnen Ploeg.' },
       gateway: { name: 'Modelgateway', job: 'Waar elke modelaanroep en elke sleutel langskomt.' },
       editors: { name: 'Editors en AI-apps', job: 'Waar mensen het werk volgen en bijsturen.' },
@@ -1358,6 +1357,7 @@ export const nl: Dictionary = {
       ocsf: 'OCSF-audittrail',
       events: 'CloudEvents-webhooks',
       reporting: 'meldt zich',
+      notQualified: 'geweigerd tot gekwalificeerd',
     },
     standardsKicker: 'Op de lijn',
     standardsTitle: 'Open standaarden, zodat één implementatie elke tool bereikt.',
@@ -1386,7 +1386,7 @@ export const nl: Dictionary = {
     extendSteps: [
       {
         title: 'Kies de poort.',
-        text: 'Trackers, forges, gekoppelde accounts, meldingskanalen, factuurpakketten en verzoeken hebben elk een register in Unfold. Agenttools en de eigen tracker-intake van Ploeg zijn poorten in Ploeg.',
+        text: 'Trackers, forges, meldingskanalen, factuurpakketten en verzoeken hebben elk een register in Unfold. Agenttools en de eigen tracker-intake van Ploeg zijn poorten in Ploeg.',
       },
       {
         title: 'Schrijf de adapter en registreer hem.',
@@ -1427,7 +1427,7 @@ export const nl: Dictionary = {
           'Een gedeelde conformiteitskern, plus een geplande oefening tegen een vijandige repository.',
       },
       others: {
-        port: 'Meldingen, factuurpakketten, verzoeken, gekoppelde accounts',
+        port: 'Meldingen, factuurpakketten, verzoeken',
         how: 'Een adapter die onder een naam in het register van die poort staat.',
         tests: 'Nog geen gedeelde suite.',
       },

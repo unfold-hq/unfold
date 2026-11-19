@@ -186,42 +186,129 @@ class Staleness(unittest.TestCase):
         self.assertEqual(rules.stale(pages, TODAY, days=1000), [])
 
 
-INTEGRATIONS = {'categories': [{
-    'id': 'tracker', 'label': 'Issue tracker',
-    'fields': {'name': {'label': 'Name', 'any': 'your issue tracker'}, 'branch': {'label': 'Agent branch', 'code': True, 'any': 'agent/<tracker>-<id>'}},
-    'choices': [{'id': 'vikunja', 'name': 'Vikunja', 'branch': 'agent/vik-<id>'}, {'id': 'clickup', 'name': 'ClickUp', 'branch': 'agent/clickup-<id>'}],
+VOCABULARY = {
+    'statuses': {'available': 'Available', 'planned': 'Planned'},
+    'owners': {'ploeg': 'Ploeg', 'unfold': 'Unfold'},
+    'kinds': {'registry': 'Adapter registry'},
+    'methods': {'token': 'pasted token', 'oauth': 'OAuth', 'service_account': 'service account'},
+    'mechanisms': {'webhooks': 'webhooks', 'rest': 'REST API'},
+    'does': {'intake': 'intake', 'read': 'read tasks'},
+}
+INTEGRATIONS = {'vocabulary': VOCABULARY, 'standards': [{'id': 'mcp', 'name': 'MCP', 'status': 'available'}], 'ports': [{
+    'id': 'trackers', 'label': 'Trackers', 'kind': 'registry', 'openSocket': True, 'description': 'Where work comes from.',
+    'placeholder': {'id': 'tracker', 'label': 'Issue tracker', 'fields': {'name': {'label': 'Name', 'any': 'your issue tracker'}, 'branch': {'label': 'Agent branch', 'code': True, 'any': 'agent/<tracker>-<id>'}}},
+    'adapters': [
+        {'id': 'vikunja', 'name': 'Vikunja', 'status': 'available', 'owner': 'ploeg', 'provider': 'vikunja', 'static': '`PLOEG_VIKUNJA_URL`', 'mechanisms': ['webhooks'], 'does': ['intake'], 'branch': 'agent/vik-<id>'},
+        {'id': 'clickup', 'name': 'ClickUp', 'status': 'available', 'owner': 'ploeg', 'provider': 'clickup', 'runtime': ['token'], 'planned': ['service_account'], 'mechanisms': ['webhooks', 'rest'], 'does': ['intake'], 'docs': ['docs/how-to/connect-clickup.md'], 'branch': 'agent/CU-<id>'},
+        {'id': 'jira', 'name': 'Jira Cloud', 'label': 'jiraLabel', 'note': 'read', 'status': 'available', 'owner': 'unfold', 'mechanisms': ['rest'], 'does': ['read']},
+    ],
 }]}
+PLOEG = {'providers': {'vikunja', 'clickup'}, 'methods': {'token', 'oauth'}, 'connectors': {'clickup': {'token', 'oauth'}}, 'references': {'clickup': 'CU-'}}
+
+
+def with_adapter(index, **changes):
+    port = INTEGRATIONS['ports'][0]
+    adapters = [dict(adapter, **changes) if position == index else adapter for position, adapter in enumerate(port['adapters'])]
+    return dict(INTEGRATIONS, ports=[dict(port, adapters=adapters)])
 
 
 class IntegrationPlaceholders(unittest.TestCase):
-    def expand(self, markdown):
-        return rules.expand_integrations(markdown, INTEGRATIONS, '../reference/integrations.md')
+    def expand(self, markdown, data=INTEGRATIONS):
+        return rules.expand_integrations(markdown, data, '../reference/integrations.md', lambda path: f'[{path}](../{path})')
 
     def test_a_placeholder_shows_the_neutral_text_and_every_integration_on_hover(self):
         markdown, problems = self.expand('Push to {{ tracker.branch }}.')
         self.assertEqual(problems, [])
-        self.assertEqual(markdown, 'Push to [`agent/<tracker>-<id>`](../reference/integrations.md#tracker "Vikunja: agent/vik-<id> · ClickUp: agent/clickup-<id>"){ .unfold-choice data-choice="tracker.branch" }.')
+        self.assertEqual(markdown, 'Push to [`agent/<tracker>-<id>`](../reference/integrations.md#tracker "Vikunja: agent/vik-<id> · ClickUp: agent/CU-<id>"){ .unfold-choice data-choice="tracker.branch" }.')
 
     def test_a_bare_category_means_its_name(self):
         markdown, _ = self.expand('Open {{ tracker }}.')
         self.assertIn('[your issue tracker](', markdown)
         self.assertIn('data-choice="tracker.name"', markdown)
 
-    def test_a_table_lists_every_integration(self):
+    def test_a_table_lists_every_adapter_that_carries_the_fields(self):
         markdown, _ = self.expand('{{ tracker.table }}')
-        self.assertEqual(markdown.splitlines(), ['| Name | Agent branch |', '| --- | --- |', '| Vikunja | `agent/vik-<id>` |', '| ClickUp | `agent/clickup-<id>` |'])
+        self.assertEqual(markdown.splitlines(), ['| Name | Agent branch |', '| --- | --- |', '| Vikunja | `agent/vik-<id>` |', '| ClickUp | `agent/CU-<id>` |'])
+
+    def test_the_catalogue_gives_each_port_a_section_with_how_each_adapter_connects(self):
+        markdown, problems = self.expand('{{ catalogue.ports }}')
+        self.assertEqual(problems, [])
+        lines = markdown.splitlines()
+        self.assertEqual(lines[0], '### Trackers { #port-trackers }')
+        self.assertEqual(lines[2], 'Adapter registry. Where work comes from.')
+        self.assertIn('| Vikunja | Available | Ploeg | intake | configuration: `PLOEG_VIKUNJA_URL` | webhooks | - |', lines)
+        self.assertIn('| ClickUp | Available | Ploeg | intake | at runtime: pasted token; planned: service account | webhooks, REST API | [docs/how-to/connect-clickup.md](../docs/how-to/connect-clickup.md) |', lines)
+        self.assertIn('| Jira Cloud | Available | Unfold | read tasks | - | REST API | - |', lines)
 
     def test_code_is_left_alone(self):
-        for markdown in ['`{{ tracker }}`', '```yaml\nname: {{ tracker }}\n```']:
+        for markdown in ['`{{ tracker }}`', '```yaml\nname: {{ tracker }}\n```', '`{{ catalogue.ports }}`']:
             self.assertEqual(self.expand(markdown), (markdown, []))
 
     def test_an_unknown_placeholder_is_a_problem(self):
-        self.assertEqual(self.expand('{{ trackr }} {{ tracker.colour }}')[1], ['{{ trackr }}', '{{ tracker.colour }}'])
+        self.assertEqual(self.expand('{{ trackr }} {{ tracker.colour }} {{ catalogue.colour }}')[1], ['{{ trackr }}', '{{ tracker.colour }}', '{{ catalogue.colour }}'])
 
-    def test_the_data_must_match_ploeg(self):
-        self.assertEqual(rules.integration_problems(INTEGRATIONS, {'vikunja', 'clickup'}), [])
-        wrong = {'categories': [dict(INTEGRATIONS['categories'][0], choices=[{'id': 'jira', 'name': 'Jira', 'branch': 'agent/vik-<id>'}])]}
-        self.assertEqual(len(rules.integration_problems(wrong, {'vikunja'})), 2)
+
+class IntegrationCatalogue(unittest.TestCase):
+    def test_the_catalogue_matches_ploeg(self):
+        self.assertEqual(rules.integration_problems(INTEGRATIONS, PLOEG), [])
+
+    def test_a_provider_ploeg_lacks_is_a_problem(self):
+        self.assertEqual(rules.integration_problems(with_adapter(0, provider='jira'), PLOEG), [
+            'trackers.vikunja: Ploeg has no provider named jira',
+            "trackers.vikunja: Ploeg names the branch agent/jira-<id>, not agent/vik-<id>",
+            'Ploeg has a provider named vikunja, but no tracker or forge adapter names it',
+        ])
+
+    def test_a_branch_ploeg_does_not_derive_is_a_problem(self):
+        self.assertEqual(rules.integration_problems(with_adapter(1, branch='agent/clickup-<id>'), PLOEG), ['trackers.clickup: Ploeg names the branch agent/CU-<id>, not agent/clickup-<id>'])
+
+    def test_a_runtime_method_the_connector_does_not_serve_is_a_problem(self):
+        self.assertEqual(rules.integration_problems(with_adapter(1, runtime=['token', 'service_account']), PLOEG), ['trackers.clickup: Ploeg serves no connection method service_account; list it under planned'])
+        self.assertEqual(rules.integration_problems(with_adapter(0, runtime=['oauth']), PLOEG), ["trackers.vikunja: Ploeg's vikunja connector does not serve oauth"])
+
+    def test_a_planned_method_ploeg_now_serves_must_move(self):
+        self.assertEqual(rules.integration_problems(with_adapter(1, planned=['oauth']), PLOEG), ['trackers.clickup: Ploeg serves oauth now; move it from planned to runtime'])
+
+    def test_a_ploeg_connector_or_provider_the_catalogue_misses_is_a_problem(self):
+        wider = dict(PLOEG, providers=PLOEG['providers'] | {'gitlab'}, connectors=dict(PLOEG['connectors'], gitlab={'oauth'}))
+        self.assertEqual(rules.integration_problems(INTEGRATIONS, wider), [
+            'Ploeg connects gitlab at runtime, but no tracker or forge adapter lists its runtime methods',
+            'Ploeg has a provider named gitlab, but no tracker or forge adapter names it',
+        ])
+
+    def test_words_outside_the_vocabulary_are_problems(self):
+        self.assertEqual(rules.integration_problems(with_adapter(2, status='soon', mechanisms=['fax']), PLOEG), ['trackers.jira: unknown status soon', 'trackers.jira: unknown mechanisms entry fax'])
+
+    def test_ploeg_facts_come_from_its_go_sources(self):
+        connectors = 'func connectors() map[string]provider.Connector {\n\treturn map[string]provider.Connector{\n\t\t"clickup": {Authorizer: clickup.Connector{}, Prober: clickup.Connector{}},\n\t\t"github":  {Prober: github.Connector{}, Manifest: github.Connector{}},\n\t}\n}\n'
+        facts = rules.ploeg_integration_facts(
+            'func (p *Provider) Name() string { return "clickup" }\nconst Name = "github"\n',
+            'const (\n\tMethodOAuth = "oauth"\n\tMethodToken = "token"\n)\n',
+            connectors,
+            'work.RegisterReferenceNamer("clickup", clickup.Reference)\n',
+            {'clickup': 'func Reference(externalID string) string { return "CU-" + externalID }\n'},
+        )
+        self.assertEqual(facts, {
+            'providers': {'clickup', 'github'}, 'methods': {'oauth', 'token'},
+            'connectors': {'clickup': {'oauth', 'token'}, 'github': {'token', 'github_app_manifest', 'github_app_installation'}},
+            'references': {'clickup': 'CU-'},
+        })
+
+    def test_the_site_gets_names_or_translated_labels_notes_and_statuses_in_order(self):
+        self.assertEqual(rules.site_integrations(INTEGRATIONS), {
+            'ports': [{'id': 'trackers', 'kind': 'registry', 'openSocket': True, 'adapters': [
+                {'name': 'Vikunja', 'status': 'available'},
+                {'name': 'ClickUp', 'status': 'available'},
+                {'label': 'jiraLabel', 'note': 'read', 'status': 'available'},
+            ]}],
+            'standards': [{'id': 'mcp', 'name': 'MCP', 'status': 'available'}],
+        })
+
+    def test_the_placeholder_data_the_docs_page_script_reads_keeps_its_shape(self):
+        self.assertEqual(rules.placeholder_categories(INTEGRATIONS)[0]['choices'], [
+            {'id': 'vikunja', 'name': 'Vikunja', 'branch': 'agent/vik-<id>'},
+            {'id': 'clickup', 'name': 'ClickUp', 'branch': 'agent/CU-<id>'},
+        ])
 
 
 if __name__ == '__main__':

@@ -40,6 +40,7 @@ New here? [Get started](get-started/index.md) has one path each for evaluating U
 | Check an agent's pull request before merging | [Review an agent pull request](how-to/review-an-agent-pr.md) |
 | See everything you handed off from any app in one place, and get a phone notice when it needs you | [Follow the work you handed off](how-to/follow-handed-off-work.md) |
 | Let agents work in a repository | [Prepare a repository](how-to/prepare-a-repository.md) |
+| Connect your ClickUp Workspace or your GitLab group, and see what each integration does and how it connects | [Connect ClickUp](how-to/connect-clickup.md) · [Connect GitLab](how-to/connect-gitlab.md) (mostly planned) · [Integrations](reference/integrations.md) |
 | Run Unfold and Ploeg on your own Kubernetes cluster, from an empty cluster to backups and upgrades | [Self-host the whole stack in the EU](how-to/self-host-the-whole-stack.md) |
 | Run agent pods under Kata or gVisor, and pick between them and Firecracker | [Run agent code in a sandbox runtime](how-to/run-agent-code-in-a-sandbox-runtime.md) · [Sandbox runtimes](reference/sandbox-runtimes.md) |
 | Encrypt node disks, traffic and volumes on a self-hosted cluster | [Protect data at rest and in transit](how-to/protect-data-at-rest-and-in-transit.md) |

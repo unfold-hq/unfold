@@ -110,6 +110,10 @@ description = "Check generated models, links and agent instruction files, then b
 run = "uv run --frozen python scripts/docs.py --domain"
 description = "Regenerate the domain pages and the combined glossary from the model YAML files"
 
+[tasks.integrations]
+run = "uv run --frozen python scripts/docs.py --integrations"
+description = "Check docs/integrations.yml against the pinned Ploeg and regenerate the site's integrations data from it"
+
 [tasks.ploeg-words]
 run = "node apps/unfold/scripts/ploeg-words.mjs"
 description = "Regenerate the Ploeg words reference page from docs/domain/ploeg-words.json"

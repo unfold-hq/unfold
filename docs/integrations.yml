@@ -1,35 +1,321 @@
-categories:
-  - id: tracker
-    label: Issue tracker
-    fields:
-      name: {label: Name, any: your issue tracker}
-      branch: {label: Agent branch, code: true, any: "agent/<tracker>-<ticket id>"}
-      reference: {label: Commit reference, code: true, any: "<tracker>-<ticket id>"}
-    choices:
-      - id: vikunja
-        name: Vikunja
-        branch: "agent/vik-<ticket id>"
-        reference: "VIK-<ticket id>"
+vocabulary:
+  statuses:
+    available: Available
+    experimental: Experimental
+    labs: In Labs
+    planned: Planned
+  owners:
+    ploeg: Ploeg
+    unfold: Unfold
+  kinds:
+    registry: Adapter registry
+    standard: Open standards
+    contract: Contract planned
+  methods:
+    token: pasted token
+    oauth: OAuth
+    github_app_manifest: GitHub App created from a manifest
+    github_app_installation: install an existing GitHub App
+    gitlab_service_account: GitLab service account
+  mechanisms:
+    webhooks: webhooks
+    rest: REST API
+    git: git over HTTPS
+    mcp: MCP
+    acp: ACP
+    task-spec: Task Spec and Outcome Report files
+    plugin: editor plugin
+    oidc: OIDC
+    scim: SCIM 2.0
+    ssf: Shared Signals
+    otlp: OTLP
+    scrape: Prometheus scrape
+    files: files
+    email: email
+    web-push: Web Push
+    cloudevents: CloudEvents
+    in-app: the Unfold page
+    logs: JSON log lines
+  does:
+    intake: intake
+    write-back: write-back
+    hand-off: hand-off
+    read: read tasks
+    delivery: delivery
+    run: runs a Role
+    gateway: model calls and keys
+    follow: follow and steer
+    notify: notify
+    billing: billing lines
+    export: export
+    request: new Work Items
+    sign-in: sign-in
+    provision: provisioning
+    telemetry: telemetry and audit
+
+ports:
+  - id: trackers
+    label: Trackers
+    kind: registry
+    openSocket: true
+    description: >-
+      Where work comes from and where it is handed off. Ploeg owns intake and write-back for the trackers it has a provider
+      for. The read-only adapters owned by Unfold are legacy under ADR-0060 and go once Ploeg serves tracker reads.
+    docs: [docs/adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md]
+    placeholder:
+      id: tracker
+      label: Issue tracker
+      fields:
+        name: {label: Name, any: your issue tracker}
+        branch: {label: Agent branch, code: true, any: "agent/<tracker>-<ticket id>"}
+        reference: {label: Commit reference, code: true, any: "<tracker>-<ticket id>"}
+    adapters:
       - id: clickup
         name: ClickUp
-        branch: "agent/clickup-<ticket id>"
-        reference: "clickup-<ticket id>"
+        status: available
+        owner: ploeg
+        provider: clickup
+        note: handoff
+        static: "Ploeg's `trackers.clickup` (chart value `tracker.clickup`), with the Unfold member's token and the member in `trackers.clickup.agents`"
+        runtime: [token, oauth]
+        mechanisms: [webhooks, rest]
+        does: [intake, write-back, hand-off]
+        docs: [docs/how-to/connect-clickup.md, apps/ploeg/docs/how-to/let-operators-connect-trackers-and-forges.md]
+        branch: "agent/CU-<ticket id>"
+        reference: "CU-<ticket id>"
+      - id: vikunja
+        name: Vikunja
+        status: available
+        owner: ploeg
+        provider: vikunja
+        note: handoff
+        static: "Ploeg's `PLOEG_VIKUNJA_URL` and `PLOEG_VIKUNJA_TOKEN`"
+        mechanisms: [webhooks, rest]
+        does: [intake, write-back, hand-off]
+        docs: [apps/ploeg/docs/reference/configuration.md]
+        branch: "agent/vik-<ticket id>"
+        reference: "VIK-<ticket id>"
       - id: github
         name: GitHub Issues
+        status: available
+        owner: ploeg
+        provider: github
+        note: viaPloeg
+        static: "Ploeg's chart value `tracker.github`, a GitHub App"
+        runtime: [github_app_manifest, github_app_installation]
+        mechanisms: [webhooks, rest]
+        does: [intake, write-back]
+        docs: [apps/ploeg/docs/how-to/connect-github-issues.md]
         branch: "agent/github-<ticket id>"
         reference: "github-<ticket id>"
-  - id: forge
-    label: Forge
-    fields:
-      name: {label: Name, any: your forge}
-      change: {label: Change for review, any: pull request}
-    choices:
+      - id: jira-cloud
+        name: Jira Cloud
+        status: available
+        owner: unfold
+        note: read
+        static: "Unfold's `taskSources` configuration, with an API token"
+        mechanisms: [rest]
+        does: [read]
+        docs: [apps/unfold/docs/operations/task-connections.md]
+      - id: gitlab-issues
+        name: GitLab
+        status: available
+        owner: unfold
+        note: read
+        static: "Unfold's `taskSources` configuration, with a token that may read the project's issues"
+        mechanisms: [rest]
+        does: [read]
+        docs: [apps/unfold/docs/operations/task-connections.md]
+      - id: forgejo-issues
+        name: Forgejo
+        status: available
+        owner: unfold
+        note: read
+        static: "Unfold's `taskSources` configuration, with a token that may read the repository's issues"
+        mechanisms: [rest]
+        does: [read]
+        docs: [apps/unfold/docs/operations/task-connections.md]
+      - id: jira-handoff
+        name: Jira
+        status: planned
+        owner: ploeg
+        note: handoff
+        mechanisms: [webhooks, rest]
+        does: [intake, write-back, hand-off]
+      - id: linear
+        name: Linear
+        status: planned
+        owner: ploeg
+        mechanisms: [webhooks, rest]
+        does: [intake, write-back]
+
+  - id: forges
+    label: Forges
+    kind: registry
+    openSocket: true
+    description: >-
+      Where the code lives and the pull request lands. Ploeg pushes each writer Run's branch and opens the change for review.
+    docs: [apps/ploeg/docs/reference/support-matrix.md]
+    placeholder:
+      id: forge
+      label: Forge
+      fields:
+        name: {label: Name, any: your forge}
+        change: {label: Change for review, any: pull request}
+    adapters:
       - id: forgejo
         name: Forgejo
+        status: available
+        owner: ploeg
+        provider: forgejo
+        static: "Ploeg's chart value `executor.forgejo`; `executor.forgejo.botPasswordSecret` gives each writer Run a token for its own repository"
+        runtime: [token, oauth]
+        mechanisms: [git, rest, webhooks]
+        does: [delivery]
+        docs: [apps/ploeg/docs/how-to/let-operators-connect-trackers-and-forges.md]
         change: pull request
       - id: github
         name: GitHub
+        status: available
+        owner: ploeg
+        provider: github
+        static: "Ploeg's chart value `executor.github`, a GitHub App that mints a token per writer Run"
+        runtime: [github_app_manifest, github_app_installation]
+        mechanisms: [git, rest, webhooks]
+        does: [delivery]
+        docs: [apps/ploeg/docs/how-to/connect-github-as-a-forge.md]
         change: pull request
       - id: gitlab
         name: GitLab
+        status: experimental
+        owner: ploeg
+        provider: gitlab
+        note: mergeRequest
+        static: "Ploeg's chart value `executor.gitlab`, one token with scope `api` that every writer Run shares"
+        runtime: [token, oauth]
+        planned: [gitlab_service_account]
+        mechanisms: [git, rest, webhooks]
+        does: [delivery]
+        docs: [docs/how-to/connect-gitlab.md]
         change: merge request
+
+  - id: agents
+    label: Agent tools
+    kind: registry
+    openSocket: true
+    description: >-
+      The agent a Run drives, inside Ploeg. Ploeg lets a worker claim a Run only on a harness qualified to run with its forge
+      token and model key kept out of its reach; the others are built but refused until they are qualified.
+    docs: [apps/ploeg/docs/reference/support-matrix.md]
+    adapters:
+      - {id: openhands, name: OpenHands, status: available, owner: ploeg, mechanisms: [acp], does: [run]}
+      - {id: exec, name: Any program that reads the Task Spec, label: anyProgram, status: available, owner: ploeg, mechanisms: [task-spec], does: [run]}
+      - {id: opencode, name: OpenCode, note: notQualified, status: experimental, owner: ploeg, mechanisms: [acp], does: [run]}
+      - {id: qwen-code, name: Qwen Code, note: notQualified, status: experimental, owner: ploeg, mechanisms: [acp], does: [run]}
+      - {id: goose, name: Goose, note: notQualified, status: experimental, owner: ploeg, mechanisms: [acp], does: [run]}
+      - {id: claude-code, name: Claude Code, note: notQualified, status: experimental, owner: ploeg, mechanisms: [acp], does: [run]}
+      - {id: codex, name: Codex, note: notQualified, status: experimental, owner: ploeg, mechanisms: [acp], does: [run]}
+      - {id: gemini-cli, name: Gemini CLI, note: notQualified, status: experimental, owner: ploeg, mechanisms: [acp], does: [run]}
+
+  - id: gateway
+    label: Model gateway
+    kind: contract
+    openSocket: false
+    description: Where every model call and every key goes. Ploeg mints, caps and revokes one key per Run.
+    docs: [apps/ploeg/docs/reference/support-matrix.md]
+    adapters:
+      - {id: litellm, name: LiteLLM, status: available, owner: ploeg, mechanisms: [rest], does: [gateway]}
+      - {id: envoy-ai-gateway, name: Envoy AI Gateway, status: planned, owner: ploeg, mechanisms: [rest], does: [gateway]}
+
+  - id: editors
+    label: Editors and AI apps
+    kind: standard
+    openSocket: false
+    description: Where people follow and steer the work.
+    adapters:
+      - {id: vscode, name: VS Code, status: available, owner: unfold, mechanisms: [plugin, mcp], does: [follow], docs: [docs/how-to/follow-handed-off-work.md]}
+      - {id: claude-code, name: Claude Code, status: available, owner: unfold, mechanisms: [plugin, mcp], does: [follow], docs: [docs/how-to/link-claude-code-sessions.md]}
+      - {id: agent-plugin, name: "Codex, Copilot, Cursor and Kiro, as an Agent Plugin", label: agentPlugin, status: available, owner: unfold, mechanisms: [plugin, mcp], does: [follow], docs: [docs/how-to/install-the-unfold-plugin.md]}
+      - {id: opencode, name: OpenCode 1.x, status: available, owner: unfold, mechanisms: [plugin], does: [follow], docs: [docs/how-to/link-opencode-and-codex-sessions.md]}
+      - {id: mcp-apps, name: "claude.ai, ChatGPT and Copilot over MCP", label: mcpApps, status: available, owner: unfold, mechanisms: [mcp], does: [follow], docs: [docs/how-to/serve-unfold-mcp-over-https.md]}
+      - {id: acp-editors, name: "JetBrains, Zed and Neovim over ACP", label: acpEditors, status: experimental, owner: unfold, mechanisms: [acp], does: [follow], docs: [docs/how-to/use-unfold-from-an-acp-editor.md]}
+      - {id: codex-cli, name: Codex CLI, note: reporting, status: experimental, owner: unfold, mechanisms: [plugin], does: [follow], docs: [docs/how-to/link-opencode-and-codex-sessions.md]}
+
+  - id: notify
+    label: Notifications
+    kind: registry
+    openSocket: true
+    description: How a person hears that work needs them.
+    docs: [apps/unfold/docs/operations/notifications.md]
+    adapters:
+      - {id: browser, name: Browser, label: browser, status: available, owner: unfold, mechanisms: [in-app], does: [notify]}
+      - {id: vscode, name: VS Code, status: available, owner: unfold, mechanisms: [plugin], does: [notify]}
+      - {id: slack, name: Slack, status: labs, owner: unfold, mechanisms: [rest], does: [notify]}
+      - {id: teams, name: Microsoft Teams, status: labs, owner: unfold, mechanisms: [webhooks], does: [notify]}
+      - {id: ntfy, name: ntfy, status: labs, owner: unfold, mechanisms: [rest], does: [notify]}
+      - {id: web-push, name: Web Push, status: labs, owner: unfold, mechanisms: [web-push], does: [notify]}
+
+  - id: billing
+    label: Billing tools
+    kind: registry
+    openSocket: true
+    description: Where accepted work becomes a billing line.
+    adapters:
+      - {id: simplicate, name: Simplicate, status: labs, owner: unfold, mechanisms: [rest], does: [billing], docs: [apps/unfold/docs/operations/billing-simplicate.md]}
+      - {id: files, name: CSV and UBL 2.1 files, label: files, status: labs, owner: unfold, mechanisms: [files], does: [billing]}
+      - {id: focus, name: FinOps FOCUS 1.4 export, label: focus, status: available, owner: unfold, mechanisms: [files], does: [export], docs: [apps/unfold/docs/operations/focus-cost-export.md]}
+      - {id: teamleader, name: Teamleader, status: planned, owner: unfold, mechanisms: [rest], does: [billing]}
+      - {id: moneybird, name: Moneybird, status: planned, owner: unfold, mechanisms: [rest], does: [billing]}
+      - {id: exact, name: Exact, status: planned, owner: unfold, mechanisms: [rest], does: [billing]}
+
+  - id: intake
+    label: Request intake
+    kind: registry
+    openSocket: true
+    description: How a client's request becomes a Work Item.
+    docs: [apps/unfold/docs/operations/request-intake.md]
+    adapters:
+      - {id: marker-io, name: Marker.io, status: labs, owner: unfold, mechanisms: [webhooks], does: [request]}
+      - {id: bugherd, name: BugHerd, status: labs, owner: unfold, mechanisms: [webhooks], does: [request]}
+      - {id: userback, name: Userback, status: labs, owner: unfold, mechanisms: [webhooks], does: [request]}
+      - {id: freshdesk, name: Freshdesk, status: labs, owner: unfold, mechanisms: [webhooks], does: [request]}
+      - {id: zendesk, name: Zendesk, status: labs, owner: unfold, mechanisms: [webhooks], does: [request]}
+      - {id: form, name: Web form, label: form, status: labs, owner: unfold, mechanisms: [webhooks], does: [request]}
+      - {id: email, name: Email, label: email, status: labs, owner: unfold, mechanisms: [email], does: [request]}
+
+  - id: identity
+    label: Identity
+    kind: standard
+    openSocket: false
+    description: Who someone is, and when they leave.
+    docs: [apps/unfold/docs/operations/provision-and-deprovision-people.md]
+    adapters:
+      - {id: oidc, name: OIDC, status: available, owner: unfold, mechanisms: [oidc], does: [sign-in]}
+      - {id: scim, name: SCIM 2.0, status: labs, owner: unfold, mechanisms: [scim], does: [provision]}
+      - {id: shared-signals, name: Shared Signals, status: labs, owner: unfold, mechanisms: [ssf], does: [provision]}
+
+  - id: telemetry
+    label: Telemetry and audit
+    kind: standard
+    openSocket: false
+    description: What leaves for your own monitoring.
+    adapters:
+      - {id: otlp, name: OTLP, status: available, owner: unfold, mechanisms: [otlp], does: [telemetry]}
+      - {id: prometheus, name: Prometheus, status: available, owner: unfold, mechanisms: [scrape], does: [telemetry]}
+      - {id: victorialogs, name: VictoriaLogs, status: available, owner: unfold, mechanisms: [logs], does: [telemetry]}
+      - {id: sentry, name: Sentry protocol, status: available, owner: unfold, mechanisms: [rest], does: [telemetry]}
+      - {id: ocsf, name: OCSF audit trail, label: ocsf, status: available, owner: unfold, mechanisms: [files, otlp], does: [telemetry], docs: [apps/unfold/docs/operations/audit-siem.md]}
+      - {id: events, name: CloudEvents webhooks, label: events, status: labs, owner: unfold, mechanisms: [cloudevents, webhooks], does: [telemetry], docs: [apps/unfold/docs/operations/outbound-events.md]}
+
+standards:
+  - {id: mcp, name: MCP, status: available}
+  - {id: acp, name: ACP, status: available}
+  - {id: openapi, name: OpenAPI 3.1, status: available}
+  - {id: oidc, name: OIDC, status: available}
+  - {id: ocsf, name: OCSF, status: available}
+  - {id: focus, name: FinOps FOCUS, status: available}
+  - {id: openfeature, name: "OpenFeature · OFREP", status: available}
+  - {id: otlp, name: OTLP, status: available}
+  - {id: intoto, name: "in-toto · Agent Trace", status: available}
+  - {id: cloudevents, name: "CloudEvents · Standard Webhooks", status: labs}
+  - {id: scim, name: SCIM 2.0, status: labs}
