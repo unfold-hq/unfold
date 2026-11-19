@@ -43,7 +43,7 @@ The extension job of the publication workflow reuses the VSIXes already attached
 | --- | --- |
 | GitHub release | Attach every VSIX, its checksum and its sigstore bundle while the release is a draft, before any registry publication |
 | Open VSX | Publish with Trusted Publishing (`ovsx publish --trusted-publishing`, ovsx 1.4.0 or newer); no token is stored |
-| Visual Studio Marketplace | Publish the Marketplace VSIX with Trusted Publishing (`vsce publish --oidc`), a candidate as a pre-release; no token is stored |
+| Visual Studio Marketplace | **Paused**: skipped with a notice while `PAUSED` in `scripts/marketplace_version.py` names a reason. Otherwise publish the Marketplace VSIX with Trusted Publishing (`vsce publish --oidc`), a candidate as a pre-release; no token is stored |
 
 [ADR 0021](../adrs/0021-the-extension-ships-through-open-vsx-first.md) records the Open VSX decision, [ADR 0075](../adrs/0075-the-extension-reaches-the-marketplace-through-trusted-publishing-with-release-candidates-as-pre-releases.md) the Marketplace one, and [ADR-0055](../../../../docs/adr/adr-0055-github-unfold-hq-is-the-project-home.md) moved the extension id to `unfold-hq.unfold`. Each registry step writes what it published to the job summary. Account ownership and external registry availability require a fresh check when publishing there.
 
@@ -69,6 +69,8 @@ Neither registry takes this signature. Open VSX signs every published version wi
 Open VSX publishes through Trusted Publishing, configured on open-vsx.org for `unfold-hq/unfold` and `on_release_published.yml`, so no Open VSX token exists. Trusted Publishing cannot create an extension, so `unfold-hq.unfold` must exist on Open VSX before the first publication from GitHub; until then the owner of the `unfold-hq` namespace publishes it once with a token.
 
 The Visual Studio Marketplace publishes through Trusted Publishing as well: the `unfold-hq` publisher needs a policy under **Trusted Publishing** for owner `unfold-hq`, repository `unfold` and workflow `on_release_published.yml`, without an environment, and the job's `id-token: write` lets `vsce publish --oidc` trade its OIDC token for a publish credential that lasts 15 minutes. No `VSCE_PAT` or Azure credential exists. The release preview fails when the Marketplace has no `unfold-hq` publisher. A person who wants release candidates in VS Code chooses **Switch to Pre-Release Version** on the extension's page; everyone else gets stable versions only.
+
+Marketplace publication is paused. Extension names on the Marketplace are unique across publishers, and `unfold` belongs to another publisher, so `vsce publish` refuses `unfold-hq.unfold` even with a valid Trusted Publishing credential. While `PAUSED` is set, the publish step and the distributor skip the Marketplace and the job summary says why; the extension job still packages and attaches the Marketplace VSIX. [ADR 0075](../adrs/0075-the-extension-reaches-the-marketplace-through-trusted-publishing-with-release-candidates-as-pre-releases.md) records the rename that ends the pause.
 
 For installation, download the matching VSIX and checksum from a completed [GitHub release](https://github.com/unfold-hq/unfold/releases), verify the checksum, then use the editor's **Install from VSIX** command. The [extension guide](../../extensions/vscode/README.md#install) gives the user-facing steps.
 

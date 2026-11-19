@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from marketplace_version import marketplace_version
+from marketplace_version import PAUSED as MARKETPLACE_PAUSED, marketplace_version
 from release_floors import refuse_occupied
 from release_registry import GITHUB_SOURCE, Registry, command, digest, request, require_same, verify_image, verify_keyless, verify_keyless_signature
 
@@ -144,6 +144,19 @@ def attach_github(release, name, content, token, repository=HOME):
     request(upload + '?' + urllib.parse.urlencode({'name': name}), method='POST', data=content, headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/octet-stream'})
 
 
+def verify_marketplace(version, tag, release, token, evidence):
+    listed = marketplace_extension(version)
+    require_same(marketplace_prerelease(listed), listed['version'] != version, 'Marketplace pre-release flag')
+    name = f'unfold-{version}.vsix' if listed['version'] == version else f'unfold-marketplace-{listed["version"]}.vsix'
+    asset = next((a for a in release['assets'] if a['name'] == name), None)
+    if asset is None:
+        raise RuntimeError(f'{tag} has no {name}; the extension job attaches it before the Marketplace gets it')
+    url = marketplace_download(listed)
+    data, _ = request(url)
+    require_same(digest(data), digest(fetch_github_asset(asset, token, release['draft'], HOME)), 'Marketplace VSIX')
+    evidence['marketplace'] = {'id': '.'.join(extension_identity()), 'version': listed['version'], 'pre_release': marketplace_prerelease(listed), 'sha256': hashlib.sha256(data).hexdigest(), 'url': url}
+
+
 def publish(application, version):
     tag = publishable_tag(application, version)
     revision = git('rev-parse', f'{tag}^{{commit}}')
@@ -171,16 +184,8 @@ def publish(application, version):
     data, _ = request(extension['files']['download'])
     require_same(digest(data), digest(fetch_github_asset(vsix, token, release['draft'], HOME)), 'Open VSX VSIX')
     evidence['extension'] = {'id': '.'.join(extension_identity()), 'version': version, 'sha256': hashlib.sha256(data).hexdigest(), 'url': extension['files']['download']}
-    listed = marketplace_extension(version)
-    require_same(marketplace_prerelease(listed), listed['version'] != version, 'Marketplace pre-release flag')
-    name = f'unfold-{version}.vsix' if listed['version'] == version else f'unfold-marketplace-{listed["version"]}.vsix'
-    asset = next((a for a in release['assets'] if a['name'] == name), None)
-    if asset is None:
-        raise RuntimeError(f'{tag} has no {name}; the extension job attaches it before the Marketplace gets it')
-    url = marketplace_download(listed)
-    data, _ = request(url)
-    require_same(digest(data), digest(fetch_github_asset(asset, token, release['draft'], HOME)), 'Marketplace VSIX')
-    evidence['marketplace'] = {'id': '.'.join(extension_identity()), 'version': listed['version'], 'pre_release': marketplace_prerelease(listed), 'sha256': hashlib.sha256(data).hexdigest(), 'url': url}
+    if not MARKETPLACE_PAUSED:
+        verify_marketplace(version, tag, release, token, evidence)
     attach_github(release, f'release-artifacts-{application}.json', (json.dumps(evidence, indent=2) + '\n').encode(), token, HOME)
     if release['draft']:
         release = api(f'{HOME}/releases/{release["id"]}', token, 'PATCH', {'draft': False, 'make_latest': 'false'})

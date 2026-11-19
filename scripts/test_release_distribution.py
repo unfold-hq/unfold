@@ -234,7 +234,7 @@ class GitHubHomeTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'immutable'):
             publish_release.attach_github(release, 'release-artifacts-unfold.json', b'{}', 'token', publish_release.HOME)
 
-    def test_publication_attaches_the_evidence_to_the_draft_and_then_publishes_it_without_moving_latest(self):
+    def run_publication(self, paused):
         draft = {'id': 11, 'tag_name': 'unfold-v0.4.0-rc.9', 'draft': True, 'html_url': 'draft', 'upload_url': 'https://uploads.github.com/repos/unfold-hq/unfold/releases/11/assets{?name,label}',
                  'assets': [{'name': 'unfold-0.4.0-rc.9.vsix', 'url': publish_release.HOME + '/releases/assets/1'},
                             {'name': 'unfold-marketplace-0.4.10009.vsix', 'url': publish_release.HOME + '/releases/assets/2'}]}
@@ -258,17 +258,28 @@ class GitHubHomeTests(unittest.TestCase):
                 patch.object(publish_release, 'digest', lambda data: 'sha256:' + 'd' * 64), \
                 patch.object(MemoryRegistry, 'manifest', lambda self, repository, reference, missing=False: b'chart'), \
                 patch.object(publish_release, 'open_vsx_extension', lambda version: {'version': version, 'files': {'download': 'https://open-vsx.org/vsix'}}), \
-                patch.object(publish_release, 'marketplace_extension', lambda version: marketplace_listing('0.4.10009', prerelease=True)), \
+                patch.object(publish_release, 'MARKETPLACE_PAUSED', paused), \
+                patch.object(publish_release, 'marketplace_extension', lambda version: self.fail('a paused Marketplace was asked') if paused else marketplace_listing('0.4.10009', prerelease=True)), \
                 patch.object(publish_release, 'request', lambda url, **k: (b'vsix', {})), \
                 patch.object(publish_release, 'fetch_github_asset', lambda asset, token, draft, repository: b'vsix'), \
                 patch.object(publish_release, 'attach_github', lambda release, name, content, token, repository: attached.append((name, json.loads(content)))):
             publish_release.publish('unfold', '0.4.0-rc.9')
+        return signed, attached, calls
+
+    def test_publication_attaches_the_evidence_to_the_draft_and_then_publishes_it_without_moving_latest(self):
+        signed, attached, calls = self.run_publication('')
         self.assertEqual(signed, ['ghcr.io/unfold-hq/unfold@sha256:' + 'c' * 64, 'ghcr.io/unfold-hq/unfold-agent@sha256:' + 'c' * 64, 'ghcr.io/unfold-hq/charts/unfold@sha256:' + 'd' * 64])
         self.assertEqual([name for name, _ in attached], ['release-artifacts-unfold.json'])
         evidence = attached[0][1]
         self.assertEqual((evidence['source'], evidence['extension']['id']), ('https://github.com/unfold-hq/unfold', 'unfold-hq.unfold'))
         self.assertEqual({k: evidence['marketplace'][k] for k in ('id', 'version', 'pre_release', 'url')}, {'id': 'unfold-hq.unfold', 'version': '0.4.10009', 'pre_release': True, 'url': 'https://unfold-hq.gallerycdn.vsassets.io/vsix'})
         self.assertEqual(calls[-1], ('PATCH', '/releases/11', {'draft': False, 'make_latest': 'false'}))
+
+    def test_a_paused_marketplace_is_neither_awaited_nor_recorded(self):
+        _, attached, calls = self.run_publication('the name is taken')
+        self.assertNotIn('marketplace', attached[0][1])
+        self.assertEqual(calls[-1][0], 'PATCH')
+
 
 def marketplace_listing(version, prerelease, flags='validated', target=None):
     listing = {'version': version, 'flags': flags, 'files': [{'assetType': 'Microsoft.VisualStudio.Services.VsixManifest', 'source': 'https://unfold-hq.gallerycdn.vsassets.io/manifest'}, {'assetType': 'Microsoft.VisualStudio.Services.VSIXPackage', 'source': 'https://unfold-hq.gallerycdn.vsassets.io/vsix'}],
