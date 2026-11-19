@@ -21,6 +21,7 @@ const train = workflows['on_release_train.yml'];
 const publisher = workflows['on_release_published.yml'];
 const home = { repository: 'unfold-hq/unfold' };
 const guard = "github.repository == 'unfold-hq/unfold'";
+const range = { BASE: '${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}', HEAD_SHA: '${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}' };
 const evaluate = (expression, context) => vm.runInNewContext(String(expression).replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([a-z-]+)/g, "needs['$1']"), { startsWith: (value, prefix) => String(value).startsWith(prefix), always: () => true, ...context, github: { ...home, ...(context.github ?? {}) } });
 const allJobs = () => Object.entries(workflows).flatMap(([file, workflow]) => Object.entries(workflow.jobs).map(([name, job]) => ({ file, name, job })));
 const text = relative => fs.readFileSync(path.join(root, relative), 'utf8');
@@ -124,7 +125,7 @@ test('the workflows use only the repository secrets the move names, and the Clou
 });
 
 test('a pull request runs the push\'s checks without write access or secrets, and builds and scans the image contexts from a fork too', () => {
-  assert.deepEqual(Object.keys(pr.on).sort(), ['pull_request', 'workflow_dispatch']);
+  assert.deepEqual(Object.keys(pr.on).sort(), ['merge_group', 'pull_request', 'workflow_dispatch']);
   assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-notes', 'release-policy', 'warnings']);
   for (const name of ['checks', 'checks-unfold', 'warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
   for (const [name, job] of Object.entries(pr.jobs)) {
@@ -157,12 +158,18 @@ test('a pull request scans only the commits it adds for secrets, with the reposi
   const job = pr.jobs.gitleaks;
   assert.equal(job.steps[0].with['fetch-depth'], 0, 'the base commit must be in the clone for the range to resolve');
   const scan = job.steps.at(-1);
-  assert.deepEqual(scan.env, { BASE: '${{ github.event.pull_request.base.sha }}', HEAD_SHA: '${{ github.event.pull_request.head.sha }}' });
+  assert.deepEqual(scan.env, range);
   assert.match(scan.run, /--network none/);
   assert.match(scan.run, / git \/repo --config \/repo\/\.gitleaks\.toml --log-opts="\$\{BASE:-origin\/development\}\.\.\$\{HEAD_SHA:-HEAD\}"/);
   const image = image => image.match(/ghcr\.io\/gitleaks\/gitleaks:\S+/)[0];
   assert.equal(image(scan.run), image(workflows['on_docs_change.yml'].jobs.build.steps.map(step => step.run ?? '').join('\n')), 'one gitleaks release scans the docs and the pull requests');
   assert.doesNotMatch(JSON.stringify(job), /gitleaks-action|GITLEAKS_LICENSE/);
+});
+
+test('a merge group runs the pull request checks against the queue\'s base and head, and the gate reports on it', () => {
+  assert.equal(pr.on.merge_group, null);
+  for (const name of ['agent-trace', 'release-notes', 'gitleaks']) assert.deepEqual(pr.jobs[name].steps.at(-1).env, range, name);
+  assert.doesNotMatch(pr.jobs.gate.if, /event_name|pull_request/, 'the gate reports on every event, the merge group included');
 });
 
 test('the pull request gate waits for every job except the advisory ones, and passes only when each succeeded', () => {
