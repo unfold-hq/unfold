@@ -2,8 +2,8 @@
 type: explanation
 audience: [contributor, agent]
 owner: unfold
-last_verified: 2026-11-16
-verified_by: "Board section read against the owner's Ploeg routing for the board and apps/unfold/docs/operations/working-from-clickup.md. Flow and branch rules updated on 2026-11-16 for the move to GitHub against .github/workflows/on_pull_request.yml and docs/operations/ci.md. Rest read against AGENTS.md, apps/*/AGENTS.md, scripts/verify.mjs, scripts/stage-explicit-paths.py, apps/.releaserc.cjs, the last 50 closed pull requests on Forgejo and Ploeg's writer and reviewer prompts in pkg/taskprompt/prompt.go of the pinned Ploeg release. The GitHub ruleset itself was not read."
+last_verified: 2026-11-19
+verified_by: "Board section read against the owner's Ploeg routing for the board and apps/unfold/docs/operations/working-from-clickup.md. Flow and branch rules updated on 2026-11-16 for the move to GitHub against .github/workflows/on_pull_request.yml and docs/operations/ci.md. Rest read against AGENTS.md, apps/*/AGENTS.md, scripts/verify.mjs, scripts/stage-explicit-paths.py, apps/.releaserc.cjs, the last 50 closed pull requests on Forgejo and Ploeg's writer and reviewer prompts in pkg/taskprompt/prompt.go of the pinned Ploeg release. Step 8 and the branch rules gained the proposed merge queue on 2026-11-19 against .github/workflows/on_pull_request.yml and scripts/release_train_pin.py. The GitHub ruleset itself was not read."
 ---
 
 # How work on Unfold is done
@@ -21,7 +21,7 @@ Three kinds of contributor change this repository: the owner, interactive agent 
 5. **The gates.** `mise run verify` from the repository root before every push, `mise run docs-check` after a docs or `AGENTS.md` change. CI runs the same gates.
 6. **A pull request** into `development`: [Open a pull request](open-a-pull-request.md). One whole change per pull request ([ADR-0010](../adr/adr-0010-pull-requests-are-small-whole-and-explained.md) sets the size limits Unfold applies to agent work; its checks are not built yet, so here they are guidance).
 7. **Review** against the [review guide](review.md). Tools decide format, types, tests and policy; review covers intent, risk and what no test sees.
-8. **Merge** when every required check is green; the ruleset on `development` refuses the merge before that. The hourly release train, not the merge, ships the change, and it releases only a head its own checks passed ([the release train](../operations/ci.md#the-release-train)).
+8. **Merge** when every required check is green; the ruleset on `development` refuses the merge before that. Once the merge queue of [ADR-0061](../adr/adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md) (proposed) is on, choose **Merge when ready** instead: the queue runs `gate` again on the pull request combined with the current `development` and every pull request ahead of it, merges it when that passes, and the ruleset refuses any merge that skips the queue, an administrator's included ([branch rules](#branch-rules)). The hourly release train, not the merge, ships the change, and it releases only a head its own checks passed ([the release train](../operations/ci.md#the-release-train)).
 9. **Release.** Every push to `development` that touches an application cuts a release candidate ([CI and releases](../operations/ci.md)).
 
 ## The board
@@ -50,6 +50,8 @@ A task tagged with another repository is worked in that repository instead of th
 ## Branch rules
 
 On GitHub, a ruleset on `development` lets a pull request merge only when [the pull request gate](../operations/ci.md#the-pull-request-gate) passed, with no required approvals ([ADR-0055](../adr/adr-0055-github-unfold-hq-is-the-project-home.md)). It requires one check, `gate`, which waits for every pull request job except the advisory `agent-trace` and `warnings`. Releases push only a tag, so no CI job pushes to `development`. A direct push does not run through the checks, so nobody pushes there. `main`, which receives only promotion pull requests, gets the same rule. Before the move, the same rule held on Forgejo from 2026-10-11.
+
+Proposed in [ADR-0061](../adr/adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md), and not yet applied to the repository: `development` merges only through a merge queue, which runs `gate` again on the `merge_group` event against the pull request combined with the current `development`, so two pull requests that pass alone cannot break the trunk together. The ruleset grants no bypass, administrators included, so the owner merges through the queue like everyone else. The workflow side is in place: [on_pull_request.yml](../../.github/workflows/on_pull_request.yml) runs on `merge_group`, and the Ploeg pin joins the queue ([the Ploeg pin pull request](../operations/ci.md#the-ploeg-pin-pull-request)).
 
 ## Where things are written down
 

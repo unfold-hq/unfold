@@ -78,9 +78,16 @@ class GitHub:
         if status == 200 and not errors:
             return 'armed'
         if any('clean status' in str(error.get('message', '')) for error in errors or []):
-            self.expect('PUT', f'/pulls/{pull["number"]}/merge', {'merge_method': 'merge', 'sha': pull['head']['sha']})
-            return 'merged'
+            return self.enqueue(pull)
         raise PinMergeError(f'enabling auto-merge on #{pull["number"]} answered HTTP {status}: {errors or payload}')
+
+    def enqueue(self, pull):
+        mutation = 'mutation($id: ID!, $head: GitObjectID!) { enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } } }'
+        status, payload = self.call('POST', self.graphql, {'query': mutation, 'variables': {'id': pull['node_id'], 'head': pull['head']['sha']}})
+        errors = payload.get('errors') if isinstance(payload, dict) else [{'message': str(payload)}]
+        if status == 200 and not errors:
+            return 'queued'
+        raise PinMergeError(f'adding #{pull["number"]} to the merge queue answered HTTP {status}: {errors or payload}')
 
     def close(self, number, comment):
         self.expect('POST', f'/issues/{number}/comments', {'body': comment})
@@ -94,7 +101,7 @@ def arm_newest_pin(forge, repository, base, author, log=print):
         return None
     (version, pull), older = candidates[0], candidates[1:]
     outcome = forge.auto_merge(pull)
-    log(f'#{pull["number"]} (Ploeg {version}) {"merges as soon as its required checks pass" if outcome == "armed" else "was already green and merged"}.')
+    log(f'#{pull["number"]} (Ploeg {version}) {"merges as soon as its required checks pass" if outcome == "armed" else "was already green and joined the merge queue"}.')
     for superseded, other in older:
         forge.close(other['number'], f'Superseded by #{pull["number"]} (Ploeg {version}), which merges on its own once its checks pass.')
         log(f'Closed #{other["number"]} (Ploeg {superseded}), superseded by #{pull["number"]}.')

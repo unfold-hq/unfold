@@ -57,6 +57,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | System | [0057](../adr/adr-0057-unfold-owns-its-agent-instructions.md) | Unfold owns its agent instructions, and APM generates them from `.apm/` alone | 2026-11-16 | — |
 | System | [0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md) | People sign in through one Zitadel broker on the production cluster, with an organisation per Tenant | 2026-11-17 | — |
 | System | [0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) | Ploeg owns every tracker and forge connection, and Unfold holds none | 2026-11-18 | — |
+| System | [0061](../adr/adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md) | `development` merges through a merge queue, with no bypass | 2026-11-19 | — |
 | Ploeg | [0001](../../apps/ploeg/docs/adrs/0001-adrs-are-the-decision-ledger.md) | ADRs in docs/adrs/ are the single decision ledger | 2026-07-29 | — |
 | Ploeg | [0002](../../apps/ploeg/docs/adrs/0002-go-as-the-implementation-language.md) | Go is the implementation language | 2026-07-29 | — |
 | Ploeg | [0003](../../apps/ploeg/docs/adrs/0003-apache-2-0-license.md) | Ploeg ships under Apache-2.0 | 2026-07-29 | — |
