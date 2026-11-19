@@ -18,6 +18,7 @@ D(
   TXT('@', 'v=spf1 include:_spf.mx.cloudflare.net ~all'),
   TXT('_dmarc', 'v=DMARC1; p=reject'),
   TXT('_gh-unfold-hq-o', '41a6656e33'),
+  TXT('_visual-studio-marketplace-unfold-hq', '9fd376d4-57b2-4fd5-b9ad-29ed8c480bd2'),
 
   IGNORE('staging-app', 'CNAME'),
   IGNORE('_acme-challenge.**', 'TXT'),
