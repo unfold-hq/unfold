@@ -1407,10 +1407,24 @@ export class AgentHost {
     try {
       const result = await this.request(client, message.method, params);
       this.send(client, { jsonrpc: '2.0', id: message.id, result });
+      if (message.method === 'reconnect') this.reloadChatHistories(client, result?.snapshots);
     } catch (error) {
       const rpc = error instanceof RpcError ? error : new RpcError(codes.internal, error instanceof Error && 'status' in error ? publicError(error, true).message : catalogueMessage('internal_error'));
       this.send(client, { jsonrpc: '2.0', id: message.id, error: { code: rpc.code, message: rpc.message, ...(rpc.data !== undefined ? { data: rpc.data } : {}) } });
       if (rpc.code === codes.unsupportedVersion) { this.clients.delete(client); client.connection.close(1000, 'Unsupported protocol version'); }
+    }
+  }
+
+  /**
+   * A reconnect snapshot replaces a chat's turns without the client watching the turns it missed start, and VS Code 1.147
+   * then truncates its history to the last turn it watched before the next message. An empty `chat/turnsLoaded` adds no
+   * turn and is the action on which the client rebuilds its history from the turns it holds.
+   */
+  private reloadChatHistories(client: Client, snapshots: unknown): void {
+    for (const snapshot of Array.isArray(snapshots) ? snapshots as Json[] : []) {
+      if (!Array.isArray(snapshot?.state?.turns)) continue;
+      const action = { type: 'chat/turnsLoaded', turns: [], ...(typeof snapshot.state.turnsNextCursor === 'string' ? { turnsNextCursor: snapshot.state.turnsNextCursor } : {}) };
+      this.send(client, { jsonrpc: '2.0', method: 'action', params: { channel: snapshot.resource, action, serverSeq: ++this.serverSeq } });
     }
   }
 

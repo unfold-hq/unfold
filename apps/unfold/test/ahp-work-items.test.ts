@@ -16,7 +16,7 @@ import { runChatChannel } from '../src/ahp/runs.ts';
 import { condenseTraceback } from '../src/ahp/tracebacks.ts';
 import { readOnlyTerminal } from '../src/ahp/terminals.ts';
 import { application, login, request } from './api-support.ts';
-import { action, chatAsSeen, connect, defaultChatOf, vscodeChangesetCatalogue, vscodeChangesets, type Json } from './ahp-support.ts';
+import { action, chatAsSeen, closed, connect, defaultChatOf, vscode1147ChatModel, vscode1147Truncation, vscodeChangesetCatalogue, vscodeChangesets, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
 
 const password = 'work-items-password-161803';
@@ -506,6 +506,58 @@ test('a question to a person keeps its input request id across a reconnect, and 
   assert.equal(summary?.modifiedAt, moved, 'a new waiting question takes Ploeg\'s update time');
 });
 
+test('a message from VS Code 1.147 after its connection slept through a Round is sent, and the chat keeps every Round', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const watching = await f.attach('op-1');
+  await f.listed(watching);
+  const operator = { id: 'op-1', name: 'op-1', role: 'operator' as const };
+  const url = `${f.server.url.replace(/^http/, 'ws')}/?tkn=${f.host.issueToken(operator)}`;
+  const session = 'unfold:/wi-202';
+  const chat = defaultChatOf(session);
+  const clientId = `vscode-1-147-${randomBytes(3).toString('hex')}`;
+  const asleep = connect(url);
+  t.after(() => asleep.close());
+  await asleep.open;
+  await asleep.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['1.2.0'], clientId, clientInfo: { name: 'vscode-agents-window' }, initialSubscriptions: ['ahp-root://'] });
+  await f.listed(asleep);
+  await asleep.rpc('subscribe', { channel: session });
+  const opened = (await asleep.rpc('subscribe', { channel: chat })).snapshot.state;
+  assert.equal(opened.activeTurn?.id, 'wi-202-round-1-1', 'Round 1 runs while the window is open');
+  const known = [...opened.turns.map((turn: Json) => turn.id), opened.activeTurn.id];
+  asleep.close();
+  await closed(asleep.socket);
+
+  const finished = workItem('202', { state: 'needs_human', closeReason: 'run stuck: implementer round 2', spent: 1.5, updated: minutesAgo(0), runs: [{ id: '301', role: 'implementer', round: 1 }, { id: '307', role: 'implementer', round: 2, outcome: 'stuck' }] });
+  f.state.details.set('202', finished);
+  f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'team:delivery', action: 'run.finished', workItemId: '202', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  await settled(watching);
+
+  const awake = connect(url);
+  t.after(() => awake.close());
+  await awake.open;
+  const reconnected = await awake.rpc('reconnect', { channel: 'ahp-root://', clientId, lastSeenServerSeq: 0, subscriptions: ['ahp-root://', session, chat] });
+  const snapshot = reconnected.snapshots.find((entry: Json) => entry.resource === chat).state;
+  const rounds = snapshot.turns.map((turn: Json) => turn.id);
+  assert.equal(snapshot.activeTurn, undefined);
+  assert.equal(rounds.length, known.length + 1, 'the snapshot holds the Round the window slept through');
+  await settled(awake);
+  const seen = vscode1147ChatModel(snapshot, awake.inbox, chat, 0, known);
+  let seq = 0;
+  const send = (body: Json) => { const clientSeq = ++seq; awake.notify('dispatchAction', { channel: chat, clientSeq, action: body }); return awake.until(message => message.method === 'action' && message.params.origin?.clientId === clientId && message.params.origin?.clientSeq === clientSeq); };
+  const truncation = vscode1147Truncation(seen.state, seen.known);
+  if (truncation) { const confirmed = await send(truncation); assert.equal(confirmed.params.rejectionReason, undefined, `Chat history could not be restored: ${confirmed.params.rejectionReason}`); }
+  const sent = await send({ type: 'chat/turnStarted', turnId: 'note-1', message: { text: 'Use the decimal rounding helper in totals.ts.', origin: { kind: 'user' } } });
+  assert.equal(sent.params.rejectionReason, undefined, 'the message is sent');
+  await awake.until(message => action(message, chat, 'chat/inputRequested'));
+  assert.equal(f.state.writes.length, 0, 'it restarts nothing without a confirmation');
+  const kept = (await awake.rpc('subscribe', { channel: chat })).snapshot.state;
+  assert.deepEqual([...kept.turns.map((turn: Json) => turn.id), ...(kept.activeTurn ? [kept.activeTurn.id] : [])].filter((id: string) => id !== 'note-1'), rounds, 'every Round is kept');
+
+  const edited = await send({ type: 'chat/truncated', turnId: rounds[1] });
+  assert.equal(edited.params.rejectionReason, workItemRefusals.history, 'an edit of an earlier message is refused and says the history is kept');
+});
+
 test('Ploeg events page oldest first from an after cursor, scoped to the caller\'s teams',{ timeout: testTimeout(20_000) }, async t => {
   const f = await fixture(t);
   f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'team:research', action: 'run.started', workItemId: '209', team: 'research', detail: {} });
@@ -568,7 +620,7 @@ test('every change to a Work Item session is refused with what to do instead, an
   assert.equal((await answer(3)).params.rejectionReason, workItemCommandText.confirmStop('202'), 'Stop only asks');
   assert.equal((await answer(4)).params.rejectionReason, workItemRefusals.tryAgain);
   assert.equal((await answer(5)).params.rejectionReason, workItemRefusals.readOnly);
-  assert.equal((await answer(6)).params.rejectionReason, workItemRefusals.readOnly);
+  assert.equal((await answer(6)).params.rejectionReason, workItemRefusals.history);
   await assert.rejects(op.rpc('disposeSession', { channel: session }), (error: Json) => error.code === -32009 && error.message === workItemRefusals.dispose);
   await assert.rejects(op.rpc('createSession', { channel: 'unfold:/wi-999', provider: 'unfold' }), (error: Json) => error.code === -32003, 'no Unfold session takes a Work Item id');
 
