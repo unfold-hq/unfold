@@ -299,3 +299,144 @@ test('the key ring rotates every 30 days and keeps the previous key, so a live t
   assert.equal((await rpc(h.as(), 'tasks/get', { taskId })).error?.code, -32602, 'two rotations later the old key is gone');
   assert.equal((await rpc(h.as(), 'tasks/get', { taskId: newer.taskId })).result.resultType, 'complete');
 });
+
+const coreTasks = { list: {}, cancel: {}, requests: { elicitation: { create: {} } } };
+
+async function legacyClient(server: ReturnType<typeof createMcpServer>, capabilities: Json = { elicitation: { form: {} }, tasks: coreTasks }): Promise<{ init: Json; call(method: string, params?: Json): Promise<Json> }> {
+  server.connect(async () => ({ action: 'accept', content: { confirm: true } }));
+  const init = (await server.handle({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }))!;
+  let sent = 0;
+  return { init, call: (method, params) => server.handle({ jsonrpc: '2.0', id: ++sent, method, ...(params ? { params } : {}) }) as Promise<Json> };
+}
+
+const handOffAsTask = (client: Awaited<ReturnType<typeof legacyClient>>) => client.call('tools/call', { name: 'unfold_hand_off', arguments: handOffArgs, task: {} });
+
+function assertCoreTask(task: Json) {
+  assert.deepEqual(Object.keys(task).sort(), ['createdAt', 'lastUpdatedAt', 'pollInterval', 'status', 'statusMessage', 'taskId', 'ttl'], JSON.stringify(task));
+  assert.ok(task.statusMessage.length > 0);
+  assert.equal(task.ttl, null);
+  assert.equal(task.pollInterval, 30_000);
+}
+
+test('a 2025-11-25 client that declares core tasks gets the tasks capability and a task-capable unfold_hand_off only while mcp.tasks is on', async () => {
+  const on = await legacyClient(harness().as());
+  assert.deepEqual(on.init.result.capabilities.tasks, { cancel: {}, requests: { tools: { call: {} } } }, 'tasks/list is not offered: there is no task store to list');
+  const listed = (await on.call('tools/list')).result.tools as Json[];
+  assert.deepEqual(listed.find(tool => tool.name === 'unfold_hand_off')!.execution, { taskSupport: 'optional' });
+  assert.deepEqual(listed.filter(tool => tool.execution).map(tool => tool.name), ['unfold_hand_off'], 'tasks for no other tool');
+
+  const off = harness({ enabled: false });
+  const offClient = await legacyClient(off.as());
+  assert.equal(offClient.init.result.capabilities.tasks, undefined);
+  assert.ok(((await offClient.call('tools/list')).result.tools as Json[]).every(tool => tool.execution === undefined));
+  const synchronous = (await handOffAsTask(offClient)).result;
+  assert.equal(synchronous.task, undefined, 'flag off: the same answer as today');
+  assert.equal(synchronous.structuredContent.summary, 'Handed task board/1505 to Team silver.');
+  for (const method of ['tasks/get', 'tasks/result', 'tasks/cancel', 'tasks/list']) assert.equal((await offClient.call(method, { taskId: 'x' })).error.code, -32601, `${method} with the flag off`);
+
+  const undeclared = harness();
+  const plainClient = await legacyClient(undeclared.as(), { elicitation: { form: {} } });
+  assert.equal(plainClient.init.result.capabilities.tasks, undefined);
+  assert.ok(((await plainClient.call('tools/list')).result.tools as Json[]).every(tool => tool.execution === undefined));
+  const plain = (await handOffAsTask(plainClient)).result;
+  assert.equal(plain.task, undefined, 'a client without core tasks gets the synchronous result even when it sends task');
+  assert.equal(plain.structuredContent.done, true);
+  assert.equal((await plainClient.call('tasks/get', { taskId: 'x' })).error.code, -32601);
+
+  const modernServer = harness().as();
+  assert.equal((await rpc(modernServer, 'tasks/result', { taskId: 'x' })).error.code, -32601, '2026-07-28 keeps answering tasks/result as before');
+  assert.equal(((await rpc(modernServer, 'tools/list', {})).result.tools as Json[]).find(tool => tool.name === 'unfold_hand_off')!.execution, undefined);
+});
+
+test('a 2025-11-25 hand-off with the task parameter returns a core task after the confirmation, and ends once Ploeg picks the task up', async () => {
+  const h = harness();
+  const client = await legacyClient(h.as());
+  const created = (await handOffAsTask(client)).result;
+  assert.equal(created.resultType, undefined);
+  assert.equal(created.content, undefined);
+  assertCoreTask(created.task);
+  assert.equal(created.task.status, 'working');
+  assert.equal(created.task.createdAt, '2026-10-30T10:00:00.000Z');
+  assert.match(created.task.statusMessage, /^Handed task board\/1505 to Team silver\. Ploeg has not picked it up yet; it becomes a Work Item for Team silver when Ploeg next reads the tracker\. Follow it in Unfold: https:\/\/unfold\.example\.test\/#tasks$/);
+  assert.equal(h.fake.state.posted.length, 1, 'the hand-off happened before the task was returned');
+  const { taskId } = created.task;
+
+  const waiting = (await client.call('tasks/get', { taskId })).result;
+  assertCoreTask(waiting);
+  assert.equal(waiting.status, 'working');
+  const early = await client.call('tasks/result', { taskId });
+  assert.equal(early.error.code, -32602);
+  assert.match(early.error.message, /still working; ask tasks\/result once tasks\/get says completed/);
+
+  h.fake.state.items.push({ id: '201', team: 'silver', state: 'needs_human', attempts: 1, updatedAt: '2026-10-30T10:30:00Z' });
+  h.fake.state.details['201'] = workItem('201', 'needs_human', { questions: [question('q1', 'Which locale?')] });
+  assert.equal((await client.call('tasks/get', { taskId })).result.status, 'working', 'a cached answer stands for a few seconds');
+  h.advance(16_000);
+  const picked = (await client.call('tasks/get', { taskId })).result;
+  assertCoreTask(picked);
+  assert.equal(picked.status, 'completed', 'a question for a person is not input_required here: the task ends once Ploeg picked it up');
+  assert.equal(picked.statusMessage, `Ploeg picked task board/1505 up as Work Item 201 for Team silver; it is needs human. Follow it in Unfold: ${base}/#work/201`);
+  assert.equal(picked.lastUpdatedAt, '2026-10-30T11:00:00.000Z');
+
+  const final = (await client.call('tasks/result', { taskId })).result;
+  assert.equal(final.isError, false);
+  assert.deepEqual(final._meta, { 'io.modelcontextprotocol/related-task': { taskId } });
+  assert.equal(final.structuredContent.summary, picked.statusMessage);
+  assert.deepEqual(final.structuredContent.result, { workItemId: '201', state: 'needs_human', team: 'silver', pullRequestUrl: '', spentUsd: null });
+  assert.deepEqual(JSON.parse(final.content[0].text), final.structuredContent);
+  assert.equal(h.fake.state.posted.length, 1, 'following answers nothing and starts nothing');
+
+  const finished = harness();
+  const finishedClient = await legacyClient(finished.as());
+  const second = (await handOffAsTask(finishedClient)).result.task;
+  finished.fake.state.items.push({ id: '202', team: 'silver', state: 'awaiting_review', attempts: 1, updatedAt: '2026-10-30T12:00:00Z', prUrl: 'https://forge.example.test/acme/shop/pulls/9' });
+  finished.fake.state.details['202'] = workItem('202', 'awaiting_review');
+  assert.equal((await finishedClient.call('tasks/get', { taskId: second.taskId })).result.status, 'completed');
+  assert.deepEqual((await finishedClient.call('tasks/result', { taskId: second.taskId })).result.structuredContent.result, { workItemId: '202', state: 'awaiting_review', team: 'silver', pullRequestUrl: 'https://forge.example.test/acme/shop/pulls/9', spentUsd: 1.25 });
+});
+
+test('a 2025-11-25 task that stops waiting ends with the reason: the task was taken back before Ploeg picked it up', async () => {
+  const h = harness();
+  const client = await legacyClient(h.as());
+  const { taskId } = (await handOffAsTask(client)).result.task;
+  h.fake.state.assigned = false;
+  const ended = (await client.call('tasks/get', { taskId })).result;
+  assertCoreTask(ended);
+  assert.equal(ended.status, 'completed');
+  assert.match(ended.statusMessage, /no longer assigned to Team silver and Ploeg never picked it up, so nothing ran and nothing was spent/);
+  const result = (await client.call('tasks/result', { taskId })).result;
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.result.state, 'taken_back');
+});
+
+test('a 2025-11-25 task id is bound to its person: another person can neither read, nor fetch the result of, nor cancel it', async () => {
+  const h = harness();
+  const client = await legacyClient(h.as());
+  const { taskId } = (await handOffAsTask(client)).result.task;
+  h.fake.state.assigned = false;
+  const other = await legacyClient(h.as('op-2'));
+  for (const method of ['tasks/get', 'tasks/result', 'tasks/cancel']) {
+    const answer = await other.call(method, { taskId });
+    assert.equal(answer.error?.code, -32602, `${method} for another person`);
+    assert.equal(answer.error.message, 'Failed to retrieve task: Task not found');
+  }
+  assert.equal((await client.call('tasks/get', { taskId })).result.status, 'completed', 'the owner still reads it');
+  assert.equal((await client.call('tasks/get', { taskId: 'not-a-task' })).error.code, -32602);
+});
+
+test('cancelling a 2025-11-25 task stops only the following: the hand-off stays, nothing is changed, and the person is told so', async () => {
+  const h = harness();
+  const client = await legacyClient(h.as());
+  const { taskId } = (await handOffAsTask(client)).result.task;
+  h.fake.state.items.push({ id: '201', team: 'silver', state: 'active', attempts: 1, updatedAt: '2026-10-30T10:30:00Z' });
+  h.fake.state.details['201'] = workItem('201', 'active');
+  const posts = h.fake.state.posted.length;
+  const reads = h.fake.state.reads.length;
+  const cancelled = (await client.call('tasks/cancel', { taskId })).result;
+  assertCoreTask(cancelled);
+  assert.equal(cancelled.taskId, taskId);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.statusMessage, `Stopped following the hand-off. The hand-off stays: task board/1505 is still with Team silver, and Ploeg picks it up as before. Follow it in Unfold: ${base}/#tasks`);
+  assert.equal(h.fake.state.posted.length, posts, 'nothing is stopped, unassigned or changed');
+  assert.equal(h.fake.state.reads.length, reads, 'cancelling does not even reach Unfold');
+});

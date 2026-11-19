@@ -742,6 +742,26 @@ test('over HTTP, the Tasks extension follows the person\'s mcp.tasks flag, and a
   assert.deepEqual(undeclared.json.error.data, { requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } } });
 });
 
+test('over HTTP, a 2025-11-25 client\'s core tasks are remembered from initialize and follow the person\'s mcp.tasks flag', async t => {
+  const declared = { elicitation: { form: {} }, tasks: { list: {}, cancel: {}, requests: { elicitation: { create: {} } } } };
+  const handOffOf = (answer: { json: any }) => answer.json.result.tools.find((tool: { name: string }) => tool.name === 'unfold_hand_off');
+  const on = await served(t, {}, config => { config.flags = { document: { flags: { 'mcp.tasks': { defaultVariant: 'on' } } }, unknown: [] }; });
+  const legacy = (id: number, method: string, agent: string, params?: Record<string, unknown>) => post(on.unfold.url, { jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }, { token: on.token(), version: '2025-11-25', headers: { 'user-agent': agent } });
+  assert.equal(handOffOf(await legacy(1, 'tools/list', 'vscode')).execution, undefined, 'nothing is assumed before initialize');
+  const init = await legacy(2, 'initialize', 'vscode', { protocolVersion: '2025-11-25', capabilities: declared, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } });
+  assert.deepEqual(init.json.result.capabilities.tasks, { cancel: {}, requests: { tools: { call: {} } } });
+  assert.deepEqual(handOffOf(await legacy(3, 'tools/list', 'vscode')).execution, { taskSupport: 'optional' }, 'a later stateless request of the same client');
+  const unknown = await legacy(4, 'tasks/get', 'vscode', { taskId: 'abc' });
+  assert.equal(unknown.status, 200);
+  assert.equal(unknown.json.error.code, -32602);
+  assert.equal((await legacy(5, 'tasks/get', 'other-client', { taskId: 'abc' })).json.error.code, -32601, 'another client of the same person declared nothing');
+
+  const off = await served(t);
+  const offInit = await post(off.unfold.url, { jsonrpc: '2.0', id: 6, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: declared, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: off.token(), version: '2025-11-25', headers: { 'user-agent': 'vscode' } });
+  assert.equal(offInit.json.result.capabilities.tasks, undefined, 'off by default');
+  assert.equal((await post(off.unfold.url, { jsonrpc: '2.0', id: 7, method: 'tasks/get', params: { taskId: 'abc' } }, { token: off.token(), version: '2025-11-25', headers: { 'user-agent': 'vscode' } })).json.error.code, -32601);
+});
+
 async function streamedCall(url: string, message: Record<string, any>, access: string, agent: string) {
   const controller = new AbortController();
   const response = await fetch(`${url}/mcp`, { method: 'POST', signal: controller.signal, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${access}`, 'mcp-protocol-version': '2025-11-25', 'user-agent': agent }, body: JSON.stringify(message) });
