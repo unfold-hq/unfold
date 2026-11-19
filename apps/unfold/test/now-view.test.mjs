@@ -502,7 +502,7 @@ test('Needs you lists a task Ploeg could not start first, says why in plain word
 });
 
 test('each refusal code has its own sentence and an unclassified one shows Ploeg’s reason', () => {
-  const codes = ['label_missing', 'label_not_allowed', 'label_unregistered', 'multiple_labels', 'labels_unread', 'no_board_rule', 'target_not_ready', 'team_unknown', 'team_missing', 'team_cannot_write', 'budget_exhausted', 'harness_refuses_repository'];
+  const codes = ['label_missing', 'label_not_allowed', 'label_unregistered', 'multiple_labels', 'labels_unread', 'no_board_rule', 'target_not_ready', 'team_unknown', 'team_missing', 'team_cannot_write', 'budget_exhausted', 'harness_refuses_repository', 'binding_paused'];
   const sentences = codes.map(code => {
     const html = nowMarkup(view({ data: { ...nowData(), refused: [refusal(code, { labels: ['repo/infrastructure'] })] } }), options, nowAt);
     const match = /<span class="now-why now-why-fix"[^>]*>([^<]+)<\/span>/.exec(html.slice(html.indexOf('Could not start')));
