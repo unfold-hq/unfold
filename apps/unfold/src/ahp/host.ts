@@ -33,7 +33,7 @@ import { WorkItemCommands, openShiftOf, promptClosedActions, promptInputNeeded, 
 import { PloegClient, PloegError, type PloegDetail } from '../ploeg.ts';
 import type { PloegContractGate } from '../ploeg-compatibility.ts';
 import { refusalPlacement, refusalReply } from './refusals.ts';
-import { unsentAttachments, unsentAttachmentsEvent, unsentAttachmentsNotice } from './attachments.ts';
+import { forwardedMessage, messageLimits, unsentAttachmentsEvent, unsentAttachmentsNotice } from './attachments.ts';
 import { editorLink, openElsewherePart, withLeadingPart, type EditorTarget, type EditorWindow } from './editor-window.ts';
 import { ChatSessions, chatChatUri, chatProvider, chatSessionUri } from './chats.ts';
 import type { ChatService } from '../chat/service.ts';
@@ -1695,9 +1695,10 @@ export class AgentHost {
     const text = String(message.text ?? '').trim();
     if (pending.starting || this.pending.get(pending.id) !== pending) return 'The session is already starting';
     pending.starting = true;
+    const { text: objective, unsent } = forwardedMessage(message, text, repositoriesDirectory, messageLimits.session);
     let session: Session;
     try {
-      session = this.engine.create({ title: String(pending.config.title ?? text.split('\n')[0]).slice(0, 160) || 'Agent host session', objective: text, repositoryId: String(pending.config.repository), teamId: String(pending.config.team), runtime: this.config.mode === 'demo' ? 'demo' : this.config.runtime.kind, placement: pending.config.placement as WorkspaceBackend | undefined, approval: approvalOf(pending.config), budgetUsd: Number(pending.config.budgetUsd) }, pending.user);
+      session = this.engine.create({ title: String(pending.config.title ?? text.split('\n')[0]).slice(0, 160) || 'Agent host session', objective, repositoryId: String(pending.config.repository), teamId: String(pending.config.team), runtime: this.config.mode === 'demo' ? 'demo' : this.config.runtime.kind, placement: pending.config.placement as WorkspaceBackend | undefined, approval: approvalOf(pending.config), budgetUsd: Number(pending.config.budgetUsd) }, pending.user);
     } catch (error) {
       pending.starting = false;
       this.refuseFirstMessage(pending, message, origin, requestedTurnId, { errorType: (error as Json)?.code ?? 'create_failed', message: (error as Error)?.message ?? 'Could not create the session' });
@@ -1716,7 +1717,6 @@ export class AgentHost {
     const projection = this.projection(session);
     const turn = projection.activeTurn ?? projection.turns.at(-1);
     if (turn) this.broadcast(chatChannel(pending.id), { type: 'chat/turnStarted', turnId: turn.id, startedAt: turn.startedAt, message: turn.message }, origin);
-    const unsent = unsentAttachments(message, repositoriesDirectory);
     if (unsent.length) this.store.appendEvent(session.id, unsentAttachmentsEvent, pending.user.id, { names: unsent });
     try { await this.engine.start(session.id, pending.user); }
     catch (error) { this.broadcast(pending.uri, { type: 'session/creationFailed', error: { errorType: (error as Json)?.code ?? 'start_failed', message: (error as Error)?.message ?? 'Could not start the session' } }); }
@@ -2004,8 +2004,8 @@ export class AgentHost {
     const user = client.user;
     const own = (viewer: Client) => viewer.user.id === user.id;
     const opening = { text, origin: 'user' as const };
-    const unsent = unsentAttachments(action.message, repositoriesDirectory);
-    const { prompt, replaced } = this.workItemCommands.ask(user, found.entry, 'requeue', { ...(queued ? {} : { ownTurnId: action.turnId }), opening, unsentAttachments: unsent }, text);
+    const forwarded = forwardedMessage(action.message, text, repositoriesDirectory, messageLimits.workItemNote);
+    const { prompt, replaced } = this.workItemCommands.ask(user, found.entry, 'requeue', { ...(queued ? {} : { ownTurnId: action.turnId }), opening, unsentAttachments: forwarded.unsent }, forwarded.text);
     if (queued) { this.echo(client, channel, action, origin, own); this.broadcast(channel, { type: 'chat/pendingMessageRemoved', kind: action.kind, id: action.id }, undefined, own); }
     if (replaced) this.publishPromptDismissed(user, replaced);
     if (!queued) this.echo(client, channel, action, origin, own);
@@ -2035,8 +2035,9 @@ export class AgentHost {
     if ('refused' in message) return message.refused;
     const { text, queued } = message;
     const turnId = queued ? `${entry.publicId}-note-${randomUUID()}` : String(action.turnId);
+    const forwarded = forwardedMessage(action.message, text, repositoriesDirectory, messageLimits.workItemNote);
     let reply: string;
-    try { reply = (await this.workItemCommands.note(user, entry, text, turnId, openShiftOf(projected), unsentAttachments(action.message, repositoriesDirectory))).reply; }
+    try { reply = (await this.workItemCommands.note(user, entry, forwarded.text, turnId, openShiftOf(projected), forwarded.unsent)).reply; }
     catch (error) {
       if (!(error instanceof PloegError)) throw error;
       return error.code === 'ploeg_notes_unsupported' ? workItemRefusals.message : error.message;
@@ -2489,7 +2490,8 @@ export class AgentHost {
         const projection = this.projection(session);
         const turnId = this.acceptableTurnId(projection, action.turnId) ?? randomUUID();
         projection.origins.set(`turn:${turnId}`, origin);
-        try { await this.engine.message(session.id, text, client.user, turnId, unsentAttachments(action.message, repositoriesDirectory)); }
+        const forwarded = forwardedMessage(action.message, text, repositoriesDirectory, messageLimits.session);
+        try { await this.engine.message(session.id, forwarded.text, client.user, turnId, forwarded.unsent); }
         catch (error) {
           projection.origins.delete(`turn:${turnId}`);
           if ((error as { code?: unknown })?.code !== 'session_stranded') throw error;
@@ -2539,7 +2541,8 @@ export class AgentHost {
         const settled = () => { this.echo(client, channel, action, origin); this.broadcast(channel, { type: 'chat/pendingMessageRemoved', kind: action.kind, id: action.id }); };
         const choose = async () => { const recovery = await this.engine.recovery(session.id, client.user); settled(); return this.offerForMessage(client, session, text, origin, undefined, recovery); };
         if (ended || this.openChoice(this.projection(session))) return choose();
-        try { await this.engine.message(session.id, text, client.user, undefined, unsentAttachments(action.message, repositoriesDirectory)); }
+        const forwarded = forwardedMessage(action.message, text, repositoriesDirectory, messageLimits.session);
+        try { await this.engine.message(session.id, forwarded.text, client.user, undefined, forwarded.unsent); }
         catch (error) {
           if ((error as { code?: unknown })?.code !== 'session_stranded') throw error;
           return intent !== 'steer' && this.chatAsks.covers(session) ? this.askInline(client, channel, session, action, text, origin, true) : choose();

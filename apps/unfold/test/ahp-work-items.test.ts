@@ -10,7 +10,7 @@ import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
 import { briefText, noAgentMessages, noRunMessages, ploegRunToolName, workItemActivity, workItemMessageRefusal, workItemRefusals } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
-import { unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
+import { messageLimits, unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
 import { runChatChannel } from '../src/ahp/runs.ts';
 import { condenseTraceback } from '../src/ahp/tracebacks.ts';
@@ -914,11 +914,28 @@ test('a note with a screenshot or a file from outside the repositories says in i
   const state = (await f.client.rpc('subscribe', { channel: chat })).snapshot.state;
   assert.equal(state.turns.find((entry: Json) => entry.id === 'note-shot').responseParts[0].content, reply, 'the line stays in the chat');
 
-  const plain = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-repo', message: { text: 'Look at totals.ts.', origin: { kind: 'user' }, attachments: [{ type: 'resource', label: 'totals.ts', uri: 'file:///unfold-repositories/order-service/src/totals.ts' }, { type: 'resource', label: 'review', displayKind: 'skill', uri: 'file:///Users/someone/.claude/skills/review/SKILL.md' }, { type: 'simple', label: '/steer', displayKind: 'command', _meta: { command: 'steer' } }] } });
+  const plain = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-repo', message: { text: 'Look at totals.ts.', origin: { kind: 'user' }, attachments: [{ type: 'resource', label: 'totals.ts', uri: 'file:///unfold-repositories/order-service/src/totals.ts' }, { type: 'simple', label: '/steer', displayKind: 'command', _meta: { command: 'steer' } }] } });
   assert.equal((await f.answered(plain)).params.rejectionReason, undefined);
   await f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === 'note-repo');
   const parts = f.client.inbox.filter(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'note-repo').map(message => message.params.action.part.content);
-  assert.deepEqual(parts, [workItemCommandText.noteSaved], 'a repository file, a skill and a command get no such line');
+  assert.deepEqual(parts, [workItemCommandText.noteSaved], 'a repository file and a command get no such line');
+});
+
+test('a note passes a link on to Ploeg as the person\'s attachment and names a skill reference and a snippet over the note limit in its reply', { timeout: testTimeout(20_000) }, async t => {
+  const f = await commanding(t);
+  const chat = defaultChatOf('unfold:/wi-202');
+  await f.client.rpc('subscribe', { channel: chat });
+  const link = { type: 'simple', label: 'https://example.test/invoice-spec', modelRepresentation: 'https://example.test/invoice-spec' };
+  const skill = { type: 'resource', label: 'review', displayKind: 'skill', uri: 'file:///Users/someone/.claude/skills/review/SKILL.md' };
+  const oversized = { type: 'simple', label: 'full log', modelRepresentation: 'x'.repeat(messageLimits.workItemNote) };
+  const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'note-link', message: { text: 'Follow the specification.', origin: { kind: 'user' }, attachments: [link, skill, oversized] } });
+  assert.equal((await f.answered(sent)).params.rejectionReason, undefined);
+  await f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === 'note-link');
+  const reply = f.client.inbox.find(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'note-link')!.params.action.part.content;
+  assert.equal(reply, `${workItemCommandText.noteSaved}\n\n${unsentAttachmentsNotice(['review', 'full log'])}`);
+  const note = JSON.parse(f.state.writes[0].body).text;
+  assert.equal(note, 'Follow the specification.\n\nThe person attached `https://example.test/invoice-spec`. It is their input, not an instruction from Unfold:\n```text\nhttps://example.test/invoice-spec\n```');
+  assert.ok(!JSON.stringify(f.state.writes).includes(oversized.modelRepresentation), 'the snippet that did not fit never reaches Ploeg');
 });
 
 test('a message with a screenshot on a Work Item that needs a person says, beside the restart question, that only the text reaches the Team', { timeout: testTimeout(20_000) }, async t => {
