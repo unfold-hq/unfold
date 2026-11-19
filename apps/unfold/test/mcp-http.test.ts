@@ -194,7 +194,7 @@ test('server/discover and the stateless 2026-07-28 rules: headers must match the
   const unsupported = await post(unfold.url, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { token: token(), version: '1900-01-01' });
   assert.equal(unsupported.status, 400);
   assert.equal(unsupported.json.error.code, -32022);
-  const unknown = await post(unfold.url, { jsonrpc: '2.0', id: 5, method: 'resources/list' }, { token: token() });
+  const unknown = await post(unfold.url, { jsonrpc: '2.0', id: 5, method: 'logging/setLevel', params: { level: 'info' } }, { token: token() });
   assert.equal(unknown.status, 404);
   assert.equal(unknown.json.error.code, -32601);
   assert.equal((await post(unfold.url, {}, { token: token(), method: 'GET' })).status, 405);
@@ -712,11 +712,11 @@ test('over HTTP, MCP Apps reaches only clients that declare it: per request for 
   const init = await legacy(6, 'initialize', 'host-a', { protocolVersion: '2025-11-25', capabilities: ui, clientInfo: { name: 'host-a', version: '1' } });
   assert.deepEqual(init.json.result.capabilities.extensions, { 'io.modelcontextprotocol/ui': {} });
   assert.equal(viewOf(await legacy(7, 'tools/list', 'host-a')), 'ui://unfold/work-item', 'a later stateless request of the same client gets the view');
-  assert.equal((await legacy(8, 'resources/list', 'host-a')).json.result.resources.length, 2);
+  assert.deepEqual((await legacy(8, 'resources/list', 'host-a')).json.result.resources.map((resource: { uri: string }) => resource.uri.split(':')[0]), ['unfold', 'ui', 'ui']);
   assert.equal(viewOf(await legacy(9, 'tools/list', 'host-b')), undefined, 'another client of the same person does not');
   await legacy(10, 'initialize', 'host-a', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'host-a', version: '1' } });
   assert.equal(viewOf(await legacy(11, 'tools/list', 'host-a')), undefined, 'initializing without the extension forgets it');
-  assert.equal((await legacy(12, 'resources/list', 'host-a')).json.error.code, -32601);
+  assert.deepEqual((await legacy(12, 'resources/list', 'host-a')).json.result.resources.map((resource: { uri: string }) => resource.uri), ['unfold://now'], 'the card resources go with the extension; the context resource stays');
 });
 
 test('over HTTP, the Tasks extension follows the person\'s mcp.tasks flag, and a task request must name its task in Mcp-Name', async t => {

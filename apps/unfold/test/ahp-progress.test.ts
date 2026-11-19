@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { application, request } from './api-support.ts';
 import { action, connect, defaultChatOf, reduceChat, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
 import { activity, choiceEvents, closedToMessages } from '../src/ahp/host.ts';
+import { PreparationProgress, preparationSteps } from '../src/ahp/preparation-progress.ts';
 import type { Event, Session } from '../src/types.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/session-059675b9.json', import.meta.url), 'utf8'));
@@ -257,4 +259,95 @@ test('a message into a queued session names the first Role, which picks it up wh
   server.app.store.appendEvent(created.id, 'message', operator.id, { role: 'operator', text: 'Keep it small.' });
   const ack = await client.until(message => action(message, chat, 'chat/responsePart') && message.params.action.part.kind === 'systemNotification');
   assert.equal(ack.params.action.part.content, `Queued for the ${created.runs[0].roleName}'s next step, when the session starts.`);
+});
+
+const preparationConfig = { repository: 'order-service', team: 'delivery', budgetUsd: 1 };
+const progressFrames = (client: { inbox: Json[] }) => client.inbox.filter(message => message.method === 'root/progress').map(message => message.params);
+const workspaceReady = (chat: string) => (message: Json) => action(message, chat, 'chat/responsePart') && /^Workspace ready/.test(message.params.action.part.content ?? '');
+
+async function preparationWindow(server: Awaited<ReturnType<typeof application>>, t: { after: (fn: () => unknown) => void }, token: string, clientId: string) {
+  const client = connect(`${server.url.replace(/^http/, 'ws')}/?tkn=${token}`);
+  t.after(() => client.close());
+  await client.open;
+  await client.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId, clientInfo: vscodeAgentsWindow, _meta: { 'vscode.ahpSessionUris': true }, initialSubscriptions: ['ahp-root://'] });
+  return client;
+}
+
+/** A new session in one window of its creator, a second window of the same person and an administrator's window, before its first message. */
+async function preparing(t: { after: (fn: () => unknown) => void }, progressToken?: string) {
+  const server = await application();
+  t.after(() => server.close());
+  const token = (await request(server.url, '/api/agent-host/tokens', { method: 'POST', body: { label: 'preparation' } })).body.token;
+  const creator = await preparationWindow(server, t, token, 'creator');
+  const sibling = await preparationWindow(server, t, token, 'sibling');
+  server.app.store.addUser({ id: 'admin-preparation', name: 'admin-preparation', role: 'admin', passwordHash: 'unused' });
+  const admin = await preparationWindow(server, t, server.app.agentHost.issueToken({ id: 'admin-preparation', name: 'admin-preparation', role: 'admin' }), 'admin');
+  const channel = `ahp-session:/${randomUUID()}`;
+  await creator.rpc('createSession', { channel, provider: 'unfold', config: preparationConfig, ...(progressToken ? { progressToken } : {}) });
+  const chat = defaultChatOf(channel);
+  await creator.rpc('subscribe', { channel: chat });
+  await sibling.rpc('subscribe', { channel: chat });
+  const send = () => creator.notify('dispatchAction', { channel: chat, clientSeq: 1, action: { type: 'chat/turnStarted', turnId: 'preparation-turn', startedAt: new Date().toISOString(), message: { text: 'Reproduce the rounding regression and fix it with the tests intact.', origin: { kind: 'user' } } } });
+  return { server, creator, sibling, admin, channel, chat, send };
+}
+
+test('a new session created with a progress token shows native progress from its first message, names each step and ends when a Run starts; the chat notices stay and no other window gets a frame', { timeout: testTimeout(60_000) }, async t => {
+  const progressToken = randomUUID();
+  const { creator, sibling, admin, chat, send } = await preparing(t, progressToken);
+  assert.deepEqual(progressFrames(creator), [], 'nothing before the first message');
+  send();
+  await creator.until(message => message.method === 'root/progress' && message.params.total !== undefined);
+  await creator.until(workspaceReady(chat));
+  assert.deepEqual(progressFrames(creator), [
+    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationSteps.workspace },
+    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationSteps.team },
+    { channel: 'ahp-root://', progressToken, progress: 0, total: 0 },
+  ]);
+  await sibling.until(workspaceReady(chat));
+  await creator.rpc('ping', {});
+  await admin.rpc('ping', {});
+  assert.deepEqual(progressFrames(sibling), [], 'the same person\'s other window gets no frame');
+  assert.deepEqual(progressFrames(admin), [], 'another person gets no frame, also one who may see the session');
+});
+
+test('a new session created without a progress token gets no progress and the same chat notices', { timeout: testTimeout(60_000) }, async t => {
+  const { creator, chat, send } = await preparing(t);
+  send();
+  await creator.until(workspaceReady(chat));
+  await creator.rpc('ping', {});
+  assert.deepEqual(progressFrames(creator), []);
+});
+
+test('a preparation that fails ends the progress and reports the failure in the session as before', { timeout: testTimeout(60_000) }, async t => {
+  const progressToken = randomUUID();
+  const { server, creator, channel, send } = await preparing(t, progressToken);
+  server.app.engine.start = async () => { throw Object.assign(new Error('No workspace backend is available.'), { code: 'workspace_unavailable' }); };
+  send();
+  const failed = await creator.until(message => action(message, channel, 'session/creationFailed'));
+  assert.deepEqual(failed.params.action.error, { errorType: 'workspace_unavailable', message: 'No workspace backend is available.' });
+  assert.deepEqual(progressFrames(creator), [
+    { channel: 'ahp-root://', progressToken, progress: 0, message: preparationSteps.workspace },
+    { channel: 'ahp-root://', progressToken, progress: 0, total: 0 },
+  ]);
+});
+
+test('preparation progress ends once on a failed session, drops a removed provisional session\'s token and sends nothing for a session it never began', () => {
+  const sent: Json[] = [];
+  const progress = new PreparationProgress<string>((client, params) => sent.push({ client, ...params }));
+  progress.remember('public-a', 'window-a', 'token-a');
+  progress.remember('public-b', 'window-b', 'token-b');
+  progress.remember('public-c', 'window-c', 42);
+  progress.forget('public-b');
+  progress.begin('public-b', 'session-b');
+  progress.begin('public-c', 'session-c');
+  progress.observe('session-x', 'run.started');
+  assert.deepEqual(sent, [], 'a forgotten token, a token that is not a string and an unknown session send nothing');
+  progress.begin('public-a', 'session-a');
+  progress.observe('session-a', 'session.failed');
+  progress.observe('session-a', 'run.started');
+  assert.deepEqual(sent, [
+    { client: 'window-a', channel: 'ahp-root://', progressToken: 'token-a', progress: 0, message: preparationSteps.workspace },
+    { client: 'window-a', channel: 'ahp-root://', progressToken: 'token-a', progress: 0, total: 0 },
+  ], 'nothing references the token after its last frame');
+  assert.equal(progress.watching, false);
 });

@@ -530,6 +530,21 @@ test('Now, a Work Item and its card come from the workbench, scoped to the signe
   assert.equal(server.app.store.listSessions().length, 0);
 });
 
+test('a Work Item action from chat lands in the Action Records with the extension as its channel and the agreed confirmation', async t => {
+  const server = await application();
+  t.after(() => server.close());
+  const client = new UnfoldClient(server.url, new MemorySecrets());
+  const proposal = (await client.ploegNow(true)).waiting.find(item => item.state === 'proposed');
+  assert.ok(proposal, 'the demo has a proposal waiting');
+  const confirmation = `vscode-test:${'a'.repeat(64)}`;
+  await client.workItemAction(proposal.id, 'approve', {}, { client: 'VS Code chat', confirmation });
+  const [record] = server.app.store.actionRecords({ target: { kind: 'work-item', id: proposal.id }, limit: 1 });
+  assert.equal(record?.action, 'POST /api/ploeg/work-items/:id/approve');
+  assert.match(record?.channel ?? '', /\(VS Code chat\)$/);
+  assert.equal(record?.confirmation, confirmation);
+  assert.throws(() => client.workItemAction('../private', 'approve', {}, { client: 'VS Code chat', confirmation }));
+});
+
 test('the extension sends teamId with crewId beside it and reads the Teams of a workbench older than the rename', async t => {
   const team = { id: 'delivery', name: 'Delivery', description: 'Build then review', roles: [{ name: 'Builder', mode: 'write' }] };
   const bodies: Record<string, unknown>[] = [];

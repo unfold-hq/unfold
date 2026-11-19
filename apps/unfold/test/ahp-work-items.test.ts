@@ -8,7 +8,7 @@ import { PloegClient, cancelShiftChanged, detail as parseDetail, noteFailures, n
 import { listReason, waitingGroup } from '../public/core/reasons.js';
 import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
-import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
+import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, roundDiagram, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemChatState, workItemMessageRefusal, workItemRefusals, workItemSessionId, workItemTranscriptActions } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
 import { messageLimits, unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
@@ -380,7 +380,9 @@ test('a Work Item\'s chat is one turn per Round with each Run a ploeg_run subage
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'toolCall').map((part: Json) => [part.toolCall.toolName, part.toolCall.displayName, part.toolCall.status, part.toolCall._meta.toolKind]), [[ploegRunToolName, 'Implementer', 'completed', 'subagent'], [ploegRunToolName, 'Reviewer', 'completed', 'subagent']]);
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'markdown').map((part: Json) => part.content), [
     '**Implementer opened the [pull request #42](https://forge.invalid/pulls/42).** Rounded half up in the order totals. Open Implementer above for the full report.',
+    '```mermaid\nflowchart LR\n  r1["Implementer#58; finished #40;pr opened#41;"]\n```',
     '**Reviewer approved.** The change is correct. Open Reviewer above for the full report.',
+    '```mermaid\nflowchart LR\n  r1["Reviewer#58; approved"]\n```',
   ], 'each finished Run gets one line of what Ploeg recorded for it, and no agent message is invented');
   assert.deepEqual(parts.filter((part: Json) => part.kind === 'systemNotification').map((part: Json) => part.content), [noAgentMessages]);
   const reviewer = parts.find((part: Json) => part.kind === 'toolCall' && part.toolCall.displayName === 'Reviewer').toolCall;
@@ -390,6 +392,60 @@ test('a Work Item\'s chat is one turn per Round with each Run a ploeg_run subage
   assert.equal(runChat.interactivity, 'read-only');
   assert.equal(runChat.turns[0].responseParts[0].content, noRunMessages);
   assert.match(runChat.turns[0].responseParts[1].content, /The change is correct\./);
+});
+
+const chatOf = (detail: Json) => {
+  const item = detail.item as PloegItem;
+  const entry = { workItemId: item.id, publicId: workItemSessionId(item.id), item, activity: workItemActivity(item, detail.runs), stale: false };
+  return workItemChatState(entry, detail as never, { session: `unfold:/wi-${item.id}`, chat: `unfold:/wi-${item.id}/chat` }, { session: 0, chat: 0 });
+};
+const mermaidBlocks = (parts: Json[]) => parts.filter((part: Json) => part.kind === 'markdown' && part.content.startsWith('```mermaid'));
+const labelsOf = (diagram: string) => [...diagram.matchAll(/^ {2}\w+\["([^"\n]*)"\]$/gm)].map(match => match[1].replace(/#(\d+);/g, (_, code) => String.fromCodePoint(Number(code))));
+
+test('a finished Round\'s turn ends with one diagram of its Runs in order, after their Run reports and verdict lines', () => {
+  const detail = workItem('220', { state: 'needs_human', closeReason: 'run stuck: reviewer round 1', runs: [{ id: '401', role: 'implementer', round: 1, summary: 'Changed it.' }, { id: '402', role: 'reviewer', round: 1, summary: 'Looks right.' }, { id: '403', role: 'tester', round: 1, outcome: 'stuck' }] });
+  const [, turn] = chatOf(detail).turns;
+  const diagrams = mermaidBlocks(turn.responseParts);
+  assert.equal(diagrams.length, 1, 'one diagram per finished Round');
+  assert.equal(turn.responseParts.at(-1), diagrams[0], 'the diagram ends the turn');
+  assert.equal(diagrams[0].id, 'wi-220-round-1-1-diagram');
+  assert.deepEqual(turn.responseParts.slice(0, -1).map((part: Json) => part.kind), ['systemNotification', 'toolCall', 'markdown', 'toolCall', 'markdown', 'toolCall', 'markdown'], 'every Run report and verdict line stays before it');
+  assert.match(diagrams[0].content, /^```mermaid\nflowchart LR\n[\s\S]*\n {2}r1 --> r2 --> r3\n```$/);
+  assert.deepEqual(labelsOf(diagrams[0].content), ['Implementer: finished (pr opened)', 'Reviewer: approved', 'Tester: stopped (stuck)']);
+});
+
+test('a Round still running shows no diagram, and the Round that ends gets its diagram before it completes', () => {
+  const running = workItem('221', { state: 'leased', runs: [{ id: '411', role: 'implementer', round: 1, summary: 'Changed it.' }, { id: '412', role: 'reviewer', round: 1, state: 'running' }] });
+  const chat = chatOf(running);
+  assert.ok(chat.activeTurn, 'the Round is open');
+  assert.deepEqual(mermaidBlocks(chat.activeTurn.responseParts), [], 'a running Round shows no diagram');
+  const finished = workItem('221', { state: 'awaiting_review', pullRequest: 9, runs: [{ id: '411', role: 'implementer', round: 1, summary: 'Changed it.' }, { id: '412', role: 'reviewer', round: 1, summary: 'Fine.' }] });
+  const actions = workItemTranscriptActions(running as never, finished as never, { session: 'unfold:/wi-221', chat: 'unfold:/wi-221/chat' }).filter(({ to }) => to === 'chat').map(({ action }) => action);
+  const diagram = actions.findIndex(action => action.type === 'chat/responsePart' && action.part.id === 'wi-221-round-1-1-diagram');
+  assert.ok(diagram >= 0, 'the Round that ends gets its diagram');
+  assert.ok(diagram > actions.findIndex(action => action.type === 'chat/toolCallComplete'), 'after the Run that finished it');
+  assert.equal(actions[diagram + 1].type, 'chat/turnComplete', 'right before the turn completes');
+});
+
+test('a Role name or outcome with Mermaid syntax in it shows as text and cannot break out of the diagram', () => {
+  const hostile = ['re"viewer] x["owned"]', 'a[b]{c}(d)<e>`f`|g|;h', 'x\n  click r1 "https://evil.invalid" blank\n%%{init: {"securityLevel": "loose"}}%%\n```'];
+  const detail = workItem('222', { state: 'needs_human', closeReason: 'run stuck', runs: hostile.map((role, index) => ({ id: String(421 + index), role, round: 1, outcome: index === 2 ? 'stuck"] --> y["x' : undefined })) });
+  const [diagram] = mermaidBlocks(chatOf(detail).turns[1].responseParts);
+  const lines = diagram.content.split('\n');
+  assert.deepEqual([...lines.slice(0, 2), ...lines.slice(-2)], ['```mermaid', 'flowchart LR', '  r1 --> r2 --> r3', '```'], 'the diagram keeps its own frame and edges');
+  assert.equal(lines.length, 7, 'one line per node, whatever the labels hold');
+  assert.ok(lines.slice(2, 5).every((line: string) => /^ {2}r\d\["[\p{L}\p{N} #;]*"\]$/u.test(line)), 'each label is one quoted string of letters, digits, spaces and entity codes');
+  assert.doesNotMatch(diagram.content, /^\s*click\b|%%|https:|-->\s*y\[|"\]\s*-->/m, 'no directive, link, init block or extra edge reaches the diagram source');
+  assert.equal(diagram.content.match(/```/g)?.length, 2, 'the code fence cannot be closed from a label');
+  assert.deepEqual(labelsOf(diagram.content), ['Re"viewer] x["owned"]: finished (pr opened)', 'A[b]{c}(d)<e>`f`|g|;h: finished (pr opened)', `X\n  click r1 "https://evil.invalid" blank\n%%{init: {"securityLevel": "loose"}}%%\n\`\`\`: finished (stuck"] --> y["x)`], 'each label still reads as the text Ploeg sent');
+});
+
+test('a Round of more than twelve Runs draws the first twelve and a node that counts the rest', () => {
+  const runs = Array.from({ length: 15 }, (_, index) => ({ ...structuredClone(runTemplate), id: String(500 + index), role: `role${index + 1}`, state: 'finished', verdict: '', outcome: 'done', failureReason: null })) as never[];
+  const diagram = roundDiagram(runs);
+  assert.deepEqual(labelsOf(diagram), [...Array.from({ length: 12 }, (_, index) => `Role${index + 1}: finished (done)`), '3 more Runs']);
+  assert.match(diagram, /\n {2}r1 --> r2 --> r3 --> r4 --> r5 --> r6 --> r7 --> r8 --> r9 --> r10 --> r11 --> r12 --> more\n```$/);
+  assert.equal(labelsOf(roundDiagram(runs.slice(0, 12))).length, 12, 'twelve Runs need no "more" node');
 });
 
 test('the fleet poller follows Ploeg\'s events in order from its cursor and tells only the viewers of the Work Item\'s team', { timeout: testTimeout(20_000) }, async t => {

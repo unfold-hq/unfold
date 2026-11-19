@@ -73,7 +73,7 @@
   ],
   "secondForge": {
     "record": "Ploeg ADR-0192",
-    "release": null
+    "release": "0.2.0-rc.109"
   },
   "gitlab": {
     "forge": "gitlab",

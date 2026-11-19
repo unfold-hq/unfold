@@ -68,3 +68,9 @@ Chosen option: "Every candidate as a Marketplace pre-release under a derived ver
 [Publishing extensions](https://code.visualstudio.com/api/working-with-extensions/publishing-extension) documents Trusted Publishing, pre-releases and the version format. The Marketplace serves the uploaded VSIX unchanged: on 2026-11-19 the `rust-lang.rust-analyzer` 0.3.3121 `linux-x64` download matched the GitHub release asset byte for byte. Whether Trusted Publishing creates a new extension on its first publish was not checked before this decision; `vsce` calls the create endpoint when the extension does not exist yet.
 
 Reconsider when the product moves to calendar versions, a candidate number nears 10000, or the Marketplace accepts pre-release suffixes.
+
+## Update, 2026-11-19: publication paused until the extension is renamed
+
+The first publication, the rerun of `unfold-v0.4.0-rc.156`, exchanged its OIDC token, so the Trusted Publishing policy works, and then failed: "The extension 'unfold' already exists in the Marketplace". `ThatsAThoughOne.unfold` has held the name since 2026-03-01. Unlike Open VSX, the Marketplace keeps extension names unique across publishers: of 2875 extensions returned for three broad searches on 2026-11-19, none shared a name with another publisher's. This decision did not check that.
+
+Until the extension has a name of its own, `PAUSED` in `scripts/marketplace_version.py` holds the reason, the publish step skips with a notice and the distributor skips the Marketplace check, so releases are no longer stranded as drafts. The owner chose to rename the extension on every registry, so that one identifier serves both; that rename is a decision of its own and ends the pause.

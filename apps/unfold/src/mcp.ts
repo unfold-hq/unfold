@@ -12,6 +12,7 @@ import type { McpEventsHandler } from './mcp-events.ts';
 import type { McpIcon } from './mcp-icons.ts';
 import { catalogueMessage, errorCatalogue } from './error-catalogue.ts';
 import { completion, completionTarget, contextTask, promptList, promptMessages, PromptRefusal, teamChoices, workItemChoices, type McpPromptOptions } from './mcp-prompts.ts';
+import { choiceIds, completesWorkItemId, contextMimeType, contextRead, contextResources, contextTemplates, type ContextRead, type McpResourceOptions } from './mcp-resources.ts';
 import type { Readable, Writable } from 'node:stream';
 
 /** Legacy protocol revisions this server answers `initialize` with; the client's own revision wins when it is listed. */
@@ -94,7 +95,7 @@ const workRow = object({
 }, ['id', 'state', 'team', 'tracker', 'link', 'untrusted']);
 
 /** A stdio MCP server over one Unfold's HTTP API. `handle` answers one JSON-RPC message, and returns undefined for a notification. */
-export function createMcpServer(options: McpOptions & McpPromptOptions) {
+export function createMcpServer(options: McpOptions & McpPromptOptions & McpResourceOptions) {
   const base = options.url.replace(/\/+$/, '');
   const api = (options.apiUrl ?? options.url).replace(/\/+$/, '');
   const fetcher = options.fetch ?? fetch;
@@ -818,7 +819,7 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
       initializedClient = clientName(params?.clientInfo);
       const asked = params?.protocolVersion;
       const protocolVersion = (mcpProtocolVersions as readonly string[]).includes(asked) ? asked : mcpProtocolVersions[0];
-      return result(id, { protocolVersion, capabilities: withSkills(withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), { listChanged: false }), serverInfo, instructions });
+      return result(id, { protocolVersion, capabilities: withSkills(withContext(withPrompts(supportsMcpApps(clientCapabilities) ? { tools: { listChanged: false }, resources: { listChanged: false }, extensions: { [mcpAppsExtension]: {} } } : { tools: { listChanged: false } }, { listChanged: false }), { listChanged: false }), { listChanged: false }), serverInfo, instructions });
     }
     const meta = params && typeof params === 'object' && params._meta && typeof params._meta === 'object' && !Array.isArray(params._meta) ? params._meta as Json : undefined;
     const declared = meta?.[versionKey];
@@ -841,7 +842,7 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
         if (!call.modern) return failure(id, -32601, `Method ${method} is not supported.`);
         return (options.tasks ? options.tasks.enabled() : Promise.resolve(false)).then(followable => {
           const extensions = { ...(apps ? { [mcpAppsExtension]: {} } : {}), ...(followable ? { [mcpTasksExtension]: {} } : {}) };
-          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withSkills(withEvents(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {})), {}), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events || options.skills ? 'private' : 'public' });
+          return complete({ supportedVersions: [...mcpModernProtocolVersions, ...mcpProtocolVersions], capabilities: withSkills(withEvents(withContext(withPrompts({ tools: {}, ...(apps ? { resources: {} } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) }, {}), {})), {}), instructions, ttlMs: 3_600_000, cacheScope: options.tasks || options.events || options.skills ? 'private' : 'public' });
         });
       case 'tasks/get':
       case 'tasks/update':
@@ -853,14 +854,19 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
       case 'tools/list': return complete({ tools: tools.filter(tool => apps || !appOnlyTool(tool.name)).map(tool => { const ui = apps ? mcpAppToolMeta(tool.name) : undefined; return { name: tool.name, title: tool.title, ...icons, description: tool.description, inputSchema: tool.inputSchema, outputSchema: tool.outputSchema, annotations: tool.readOnly === false ? { title: tool.title, readOnlyHint: false, destructiveHint: tool.destructive === true, idempotentHint: false, openWorldHint: true } : { title: tool.title, readOnlyHint: true, idempotentHint: true, openWorldHint: false }, ...(ui ? { _meta: ui } : {}) }; }), ...cacheable });
       case 'tools/call': return apps || !appOnlyTool(params?.name) ? callTool(id, params, call, complete) : failure(id, -32602, `Unknown tool ${String(params?.name)}.`);
       case 'resources/list':
-        if (!apps && !options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
-        return complete({ resources: [...(apps ? mcpAppResources() : []), ...(options.skills ? skillResourceList() : [])], ...(options.skills ? personal : cacheable) });
+        if (!apps && !options.contextResources && !options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ resources: [...(options.contextResources ? contextResources() : []), ...(apps ? mcpAppResources() : []), ...(options.skills ? skillResourceList() : [])], ...(options.skills ? personal : cacheable) });
+      case 'resources/templates/list':
+        if (!options.contextResources) return failure(id, -32601, `Method ${method} is not supported.`);
+        return complete({ resourceTemplates: contextTemplates(), ...cacheable });
       case 'resources/read': {
-        if (!apps && !options.skills) return failure(id, -32601, `Method ${method} is not supported.`);
         const skillFile = options.skills ? readSkillResource(params?.uri) : undefined;
         if (skillFile) return complete({ contents: skillFile, ...personal });
-        const contents = apps ? readMcpAppResource(params?.uri) : undefined;
-        if (!contents) return failure(id, call.modern ? -32602 : -32002, 'Resource not found.', { uri: typeof params?.uri === 'string' ? params.uri.slice(0, 200) : null });
+        const context = options.contextResources ? contextRead(params?.uri) : undefined;
+        if (context) return readContext(id, params!.uri, context, call, complete);
+        if (!apps) return options.contextResources || options.skills ? resourceNotFound(id, params?.uri, call) : failure(id, -32601, `Method ${method} is not supported.`);
+        const contents = readMcpAppResource(params?.uri);
+        if (!contents) return resourceNotFound(id, params?.uri, call);
         return complete({ contents, ...cacheable });
       }
       case 'skills/list':
@@ -880,12 +886,37 @@ export function createMcpServer(options: McpOptions & McpPromptOptions) {
         try { return complete(promptMessages(params?.name, params?.arguments)); }
         catch (error) { if (error instanceof PromptRefusal) return failure(id, -32602, error.message); throw error; }
       case 'completion/complete':
+        if (options.contextResources && completesWorkItemId(params)) return completeWorkItemId(params, call, complete);
         if (!options.prompts) return failure(id, -32601, `Method ${method} is not supported.`);
         return completeArgument(id, params, call, complete);
       default:
         if (call.modern && options.events && method.startsWith('events/')) return options.events.handle(method, params).then(answer => 'error' in answer ? failure(id, answer.error.code, answer.error.message, answer.error.data) : complete(answer.result));
         return failure(id, -32601, `Method ${method} is not supported.`);
     }
+  }
+
+  function withContext(capabilities: Json, listing: Json): Json {
+    return options.contextResources ? { ...capabilities, resources: { ...capabilities.resources, ...listing }, completions: {} } : capabilities;
+  }
+
+  function resourceNotFound(id: unknown, uri: unknown, call: Call): Json {
+    return failure(id, call.modern ? -32602 : -32002, 'Resource not found.', { uri: typeof uri === 'string' ? uri.slice(0, 200) : null });
+  }
+
+  async function readContext(id: unknown, uri: string, context: ContextRead, call: Call, complete: (value: Json) => Json): Promise<Json> {
+    try {
+      const output = await calling.run(call, () => tools.find(tool => tool.name === context.tool)!.run(context.args, call));
+      return complete({ contents: [{ uri, mimeType: contextMimeType, text: JSON.stringify(output) }] });
+    } catch (error) {
+      if (error instanceof UnfoldAnswer && (error.status === 403 || error.status === 404)) return resourceNotFound(id, uri, call);
+      return failure(id, -32603, redact(error instanceof UnfoldAnswer ? error.message : catalogueMessage('internal_error')));
+    }
+  }
+
+  async function completeWorkItemId(params: Json | undefined, call: Call, complete: (value: Json) => Json): Promise<Json> {
+    const typed = typeof params?.argument?.value === 'string' ? params.argument.value.trim().slice(0, 200) : '';
+    try { return complete(completion(choiceIds(await calling.run(call, async () => workItemChoices(await get('/api/ploeg/now'), typed))))); }
+    catch { return complete(completion([])); }
   }
 
   function withPrompts(capabilities: Json, listing: Json): Json {

@@ -71,7 +71,7 @@ Before you change behavior that crosses Ploeg and Unfold, read [managed executio
 - The trunk is `development`. Use [Conventional Commits](https://www.conventionalcommits.org/).
 - Other sessions share this checkout. Stage only the paths you wrote, and never run `git add -A`, `git add .` or `git commit -a`.
 - Read the app's own `AGENTS.md` before you change that app, for example [apps/unfold/AGENTS.md](apps/unfold/AGENTS.md).
-- Production desired state lives in the owner's cluster repository, not here.
+- Production desired state lives in the operator's cluster repository, not here.
 - Agents start from [AGENTS.md](AGENTS.md) and [llms.txt](llms.txt).
 
 ## Documentation
