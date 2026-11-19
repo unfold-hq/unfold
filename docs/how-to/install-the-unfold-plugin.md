@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner, operator]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Read apps/unfold/extensions/claude-code against the Agent Plugins 1.0.0 specification and schemas at agentplugins/agent-plugins-spec ff8ab5e; ran test/agent-plugin.test.ts. VS Code steps read in the VS Code 1.144.0 source (pluginUrlHandler.ts, marketplaceReference.ts, pluginMarketplaceService.ts, AGENTS_PLUGINS.md). Codex steps read in the openai/codex main branch source on 2026-10-30 (marketplace_cmd.rs, marketplace.rs, plugin_namespace.rs, agent_plugin_config.rs), not the 0.166.0 tag. Copilot CLI steps read in its plugin reference and changelog up to 1.0.105. Cursor and Kiro steps read in their documentation only. No install was run in any of these clients, and no client signed in to unfold-mcp from a plugin."
+last_verified: 2026-11-19
+verified_by: "Section 'In a managed VS Code' added on 2026-11-19: read against code.visualstudio.com/docs/enterprise/policies, /docs/enterprise/manage-ai-settings, /docs/agent-customization/agent-plugins, the 1.145, 1.146 and 1.147 release notes and docs.github.com enterprise-managed-settings reference, all fetched that day; the (source) statements read in microsoft/vscode at tag 1.147.0 (languageModelToolsService.ts against 1.146.0, copilotManagedSettings.ts, agentHostStarter.config.contribution.ts, pluginUrlHandler.ts). No policy was deployed, no allow-list tried and neither install link clicked. Earlier: read apps/unfold/extensions/claude-code against the Agent Plugins 1.0.0 specification and schemas at agentplugins/agent-plugins-spec ff8ab5e; ran test/agent-plugin.test.ts. VS Code steps read in the VS Code 1.144.0 source (pluginUrlHandler.ts, marketplaceReference.ts, pluginMarketplaceService.ts, AGENTS_PLUGINS.md). Codex steps read in the openai/codex main branch source on 2026-10-30 (marketplace_cmd.rs, marketplace.rs, plugin_namespace.rs, agent_plugin_config.rs), not the 0.166.0 tag. Copilot CLI steps read in its plugin reference and changelog up to 1.0.105. Cursor and Kiro steps read in their documentation only. No install was run in any of these clients, and no client signed in to unfold-mcp from a plugin."
 ---
 
 # Install the Unfold plugin in Codex, Cursor, Copilot and VS Code
@@ -135,6 +135,54 @@ It refuses a URL that is not HTTPS (except `localhost`), or that carries user in
 
 Commit the output to a repository your people can clone, and give them that repository's URL instead of this one in the steps above. Then they install both `unfold` and `unfold-mcp`. To move to a new Unfold release, generate again with the new commit.
 
+## In a managed VS Code
+
+An organisation can manage VS Code in two ways: with VS Code's [device policies](https://code.visualstudio.com/docs/enterprise/policies), and with [Copilot enterprise-managed settings](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings). Either can switch off a part of Unfold, as of VS Code 1.147. A developer who sees only part of Unfold can run **Developer: Policy Diagnostics**, which lists every policy that applies and where it came from ([Verify policy enforcement](https://code.visualstudio.com/docs/enterprise/policies#_verify-policy-enforcement)), and take that list to whoever manages the settings.
+
+Statements marked **(source)** were read in VS Code's source at tag 1.147.0, because its documentation does not cover them.
+
+### What can be switched off
+
+| Part of Unfold | Switched off by | Where it says so |
+| --- | --- | --- |
+| The connections: Unfold's sessions in the Agents window | `ChatAgentMode` set to `false`, which makes the Agents window unavailable. No policy names remote agent hosts such as Unfold's, and `chat.remoteAgentHosts` and `chat.remoteAgentHostsEnabled` are settings the developer controls **(source)**: none of VS Code's 64 policies at 1.147.0 names them. | [Control the Agent option and Agents window](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_control-the-agent-option-and-agents-window); the [policy reference](https://code.visualstudio.com/docs/enterprise/policies#_vs-code-enterprise-policy-reference) lists no remote agent host policy |
+| The extension's three chat tools (`unfold_now`, `unfold_get_work`, `unfold_find_work`) | `ChatAgentExtensionTools` (`chat.extensionTools.enabled`) set to `false`, or MCP turned off with `ChatMCP` (`chat.mcp.access`) set to `none`. The second applies from VS Code 1.147 **(source)**: 1.146 checked only the first. | [Enable or disable extension language tools](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_enable-or-disable-extension-language-tools); the [policy reference](https://code.visualstudio.com/docs/enterprise/policies#_vs-code-enterprise-policy-reference) entry for `ChatAgentExtensionTools`: "These tools are also disabled when your organization disables MCP" |
+| `unfold-mcp`, Unfold's MCP server, and the extension's **Ploeg** server | `allowedMcpServers` that no entry of theirs matches, a `deniedMcpServers` entry that matches, or MCP turned off. Since VS Code 1.145 the allow-list decides on its own, and an empty list, `[]`, blocks every server. | [Configure managed MCP server access](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_configure-managed-mcp-server-access); [`allowedMcpServers`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#allowedmcpservers), [`deniedMcpServers`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#deniedmcpservers); [1.145 release note](https://code.visualstudio.com/updates/v1_145#_managed-mcp-allowlists-take-precedence-over-registry-only-access) |
+| The Agent Plugin, `unfold` and `unfold-mcp` | `ChatPluginsEnabled` set to `false`; `strictKnownMarketplaces` or the `ChatStrictMarketplaces` policy without your marketplace (both an empty list and a list that names other marketplaces leave it out); `enabledPlugins` or `ChatEnabledPlugins` set to `false` for the plugin. `ChatExtraMarketplaces` and `extraKnownMarketplaces` add a marketplace; they never remove one. | [Manage agent plugins and marketplaces](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_manage-agent-plugins-and-marketplaces); [`strictKnownMarketplaces`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#strictknownmarketplaces), [`enabledPlugins`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#enabledplugins) |
+
+### What does not block Unfold's agent host
+
+Copilot enterprise-managed settings switch off VS Code's own Claude and Codex harnesses, and since VS Code 1.147 `vscode.allowedHarnesses` lets an administrator permit them again. Its only valid entries are `claude` and `codex` ([Claude and Codex availability](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_claude-and-codex-availability), [1.147 release note](https://code.visualstudio.com/updates/v1_147#_permit-claude-and-codex-alongside-managed-settings)). **(source)** The restriction is attached only to the settings that enable those two local harnesses (`Claude3PIntegration` and `Codex3PIntegration`, through `thirdPartyAgentEnabledValue` in `copilotManagedSettings.ts`). Unfold's host is a remote agent host, so neither the managed settings nor the list of allowed harnesses blocks it, and Unfold does not need to be on that list.
+
+### What to allow
+
+Give these to the administrator:
+
+1. **The MCP server.** When the organisation sets `allowedMcpServers`, add an entry for `unfold-mcp`. Match it by URL or command, which the documentation prefers over a name, because a name is whatever the configuration's author typed ([Configure managed MCP server access](https://code.visualstudio.com/docs/enterprise/manage-ai-settings#_configure-managed-mcp-server-access)):
+   * served over HTTPS, the `UNFOLD_MCP_RESOURCE` of your Unfold, which the generated `unfold-mcp` plugin also names: `{ "serverUrl": "https://unfold.example.com/mcp" }`;
+   * run locally as in [Ask from an AI client](ask-from-an-ai-client.md#unfold), the exact command and arguments, in order: `{ "serverCommand": ["node", "/path/to/apps/unfold/scripts/mcp.ts"] }`. The path differs per machine, so the URL form is the one to roll out.
+
+   Add the URL of the extension's **Ploeg** server the same way when your people use it. Make sure no `deniedMcpServers` entry matches either one, because a deny rule wins over the allow-list.
+2. **The plugin marketplace.** When the organisation sets `strictKnownMarketplaces` (or the `ChatStrictMarketplaces` policy), add the repository of your [operator marketplace](#for-operators-publish-a-marketplace-for-your-installation), for example `{ "source": "git", "url": "https://git.example.com/your-agent-plugins.git" }` ([`strictKnownMarketplaces`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#strictknownmarketplaces)). `extraKnownMarketplaces` or `ChatExtraMarketplaces` then offers it to everyone without a setting of their own.
+3. **The chat tools.** Leave `ChatAgentExtensionTools` on and MCP access above `none`.
+
+### Require the plugin
+
+An organisation can require the plugin. `enabledPlugins` set to `true` for `unfold@unfold` and `unfold-mcp@unfold` (plugin name, then the marketplace name, which the generator sets to `unfold` unless you pass `--name`) installs both for everyone, and since VS Code 1.145 nobody can uninstall a required plugin ([`enabledPlugins`](https://docs.github.com/en/copilot/reference/enterprise-administrators/enterprise-managed-settings#enabledplugins), [1.145 release note](https://code.visualstudio.com/updates/v1_145#_organization-required-plugins-cant-be-uninstalled)).
+
+The plugin is also the route that still works where standalone customizations are blocked. `ChatStrictPluginOnlyCustomization` (`strictPluginOnlyCustomization` in Copilot enterprise-managed settings) blocks the skills, agents, hooks, instructions and MCP servers a developer adds by hand, and keeps those from eligible plugins ([policy reference](https://code.visualstudio.com/docs/enterprise/policies#_vs-code-enterprise-policy-reference), [1.146 release note](https://code.visualstudio.com/updates/v1_146#_enterprise-controls-for-canvas-extensions)). An `unfold-mcp` entry in a developer's own `mcp.json` is blocked there; the `unfold-mcp` plugin carries the same server and is the route the policy leaves open. The documentation does not say what makes a plugin eligible, so try the plugin in one managed VS Code before you roll the policy out.
+
+### An install link for a managed VS Code
+
+From VS Code 1.147 a plugin link takes an optional `harness`, and `harness=vscode` installs into VS Code's shared plugin installation, which VS Code makes available to compatible harnesses, without asking where to install **(source)**: `pluginUrlHandler.ts` accepts `copilot` or `vscode` and refuses the link in a remote or web window. The [deep-link documentation](https://code.visualstudio.com/docs/agent-customization/agent-plugins#_share-and-install-plugins-with-deep-links) describes the rest of the form, and says a link never bypasses enterprise policies. For your operator marketplace:
+
+```text
+vscode://chat-plugin/install?source=https%3A%2F%2Fgit.example.com%2Fyour-agent-plugins.git&plugin=unfold&harness=vscode
+vscode://chat-plugin/install?source=https%3A%2F%2Fgit.example.com%2Fyour-agent-plugins.git&plugin=unfold-mcp&harness=vscode
+```
+
+Not clicked yet: neither link has been opened in a desktop VS Code 1.147.
+
 ## Symptom → cause → fix
 
 | Symptom | Cause | Fix |
@@ -144,3 +192,4 @@ Commit the output to a repository your people can clone, and give them that repo
 | The MCP server fails to sign in, or asks for a client id | Your identity provider registers no clients by itself | Enter `unfold-mcp` when asked, or add the server with that client id in the client's own MCP settings |
 | `unfold_*` tools are missing, but the skills are there | No MCP connection | Install `unfold-mcp` from your operator's marketplace, or add the server yourself |
 | The install link says plugin links are unavailable | `chat.plugins.enabled` is off, or chat is disabled | Turn it on, or use `chat.plugins.marketplaces` |
+| In an organisation's VS Code, a part of Unfold is missing and no setting brings it back | A device policy or Copilot enterprise-managed setting switches it off | Run **Developer: Policy Diagnostics** and give the administrator [what to allow](#what-to-allow) |
