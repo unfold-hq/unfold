@@ -27,7 +27,7 @@ import { CommandLog, clientTerminalState, clientTerminalUri, maxClientTerminals,
 import { catalogOf, isActionKnownToVersion, negotiateProtocolVersion, oldestBaseline, sessionChatCatalog, speaksCatalog, supportedVersions } from './versions.ts';
 import { ChatAsks, askMarkdown, commandCompletions, messageIntent, type ChatAskEntry, type ChatAskService } from './asks.ts';
 import { candidateEdits, carryRuns, parseRunChannel, runChatChannel, runChatState, runChats, runFinished, runMessage, runRoute, runStarted, runTool, runTranscripts, stopRuns, toolActions, type RunTranscripts, type Spelling } from './runs.ts';
-import { WorkItemSessions, isWorkItemSession, workItemChatState, workItemIdOf, workItemMessageRefusal, workItemQuestions, workItemRefusal, workItemRefusals, workItemRunChatState, workItemSessionState, workItemStatus, workItemSummary, type RoutedAction, type WorkItemRecord } from './work-items.ts';
+import { WorkItemSessions, isPullRequestBannerPrompt, isWorkItemSession, workItemBannerReply, workItemChatState, workItemIdOf, workItemMessageRefusal, workItemQuestions, workItemRefusal, workItemRefusals, workItemRunChatState, workItemSessionState, workItemStatus, workItemSummary, type RoutedAction, type WorkItemRecord } from './work-items.ts';
 import { RunLive, type LiveAction } from './run-live.ts';
 import { WorkItemCommands, openShiftOf, promptClosedActions, promptInputNeeded, promptOpenActions, restartable, takesNotes, withPrompts, workItemCommandText, type WorkItemPrompt } from './work-item-commands.ts';
 import { PloegClient, PloegError, type PloegDetail } from '../ploeg.ts';
@@ -1818,7 +1818,7 @@ export class AgentHost {
     for (const entry of change.added) this.notify(rootChannel, 'root/sessionAdded', viewer => ({ channel: rootChannel, summary: this.workItemSummary(entry, viewer) }), undefined, own);
     for (const entry of change.changed) {
       if (workItemStatus(entry) === statusBits.inputNeeded && !entry.stale) this.store.clearAgentHostFlags(entry.publicId, statusBits.isRead, at);
-      this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.workItemSummary(entry, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, ...(summary.project ? { project: summary.project } : {}), ...catalogOf(summary) } }; }, undefined, own);
+      this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.workItemSummary(entry, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, ...(summary.project ? { project: summary.project } : {}), ...catalogOf(summary), _meta: summary._meta } }; }, undefined, own);
       this.broadcast(sessionChannel(entry.publicId), viewer => { const summary = this.workItemSummary(entry, viewer); return { type: 'session/chatUpdated', chat: chatChannel(entry.publicId, viewer.scheme), changes: { title: summary.title, status: summary.chats?.[0]?.status ?? summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt } }; }, undefined, own);
     }
     for (const publicId of change.removed) this.notify(rootChannel, 'root/sessionRemoved', viewer => ({ channel: rootChannel, session: sessionChannel(publicId, viewer.scheme) }), undefined, own);
@@ -1989,12 +1989,14 @@ export class AgentHost {
    * A message on a running or queued Work Item becomes a Ploeg note for its next Round (ADR 0023: steering reaches the next
    * Round, not the running Run), and its turn says so. A message on a Work Item that needs a person or went stale becomes
    * the note of a restart the person confirms first, in the message's own turn. A message on a withdrawn Work Item says how
-   * Ploeg restarts it; on other work, or against a Ploeg that takes no notes, it is refused.
+   * Ploeg restarts it; on other work, or against a Ploeg that takes no notes, it is refused. The prompt of VS Code's Fix
+   * Checks or Address Comments banner is refused in every state with the steer or Try Again that would act and its spend.
    */
   private async messageWorkItem(client: Client, channel: string, publicId: string, action: Json, origin: Origin): Promise<string | undefined> {
     const projected = this.workItems.remembered(client.user, publicId);
     const read = await this.readWorkItem(client, publicId);
     if ('refused' in read) return read.refused;
+    if (isPullRequestBannerPrompt(action.message?.text)) return workItemBannerReply(read.entry.item);
     if (takesNotes(read.entry.item.state)) return this.noteWorkItem(client, channel, read.entry, projected ?? read.entry, action, origin);
     const found = this.restartRefusal(client.user, read.entry, workItemMessageRefusal(read.entry.item));
     if ('refused' in found) return found.refused;

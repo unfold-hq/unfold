@@ -8,7 +8,7 @@ import { PloegClient, cancelShiftChanged, noteFailures, nowItem, type PloegItem 
 import { listReason, waitingGroup } from '../public/core/reasons.js';
 import { money } from '../public/core/format.js';
 import { agentHostAuthority } from '../public/core/agents-window.js';
-import { briefText, noAgentMessages, noRunMessages, ploegRunToolName, workItemActivity, workItemMessageRefusal, workItemRefusals } from '../src/ahp/work-items.ts';
+import { briefText, isPullRequestBannerPrompt, noAgentMessages, noRunMessages, ploegRunToolName, sessionArtifactsMetaKey, workItemActivity, workItemArtifacts, workItemBannerReply, workItemMessageRefusal, workItemRefusals } from '../src/ahp/work-items.ts';
 import { workItemCommandText } from '../src/ahp/work-item-commands.ts';
 import { unsentAttachmentsNotice } from '../src/ahp/attachments.ts';
 import { liveRunNotice, podLogsToolName } from '../src/ahp/run-live.ts';
@@ -319,6 +319,36 @@ test('a viewer lists the open and recently finished Work Items of their teams, o
   await assert.rejects(op.rpc('subscribe', { channel: 'unfold:/wi-209' }), (error: Json) => error.code === -32001, 'another team\'s Work Item is not found');
   await assert.rejects(viewer.rpc('subscribe', { channel: 'unfold:/wi-205' }), (error: Json) => error.code === -32001);
   await assert.rejects(op.rpc('subscribe', { channel: 'unfold:/wi-210' }), (error: Json) => error.code === -32001, 'an operator-owned Work Item is its Unfold session');
+});
+
+test('a Work Item session names its pull request and tracker issue under VS Code\'s session artifacts key, with GitHub only for github.com, and offers no merge', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const onGitHub = f.state.details.get('205')!.item;
+  Object.assign(onGitHub, { provider: 'github', externalId: 'acme/order-service#7', url: 'https://github.com/acme/order-service/issues/7', pullRequest: { ...onGitHub.pullRequest, url: 'https://github.com/acme/order-service/pull/42' } });
+  Object.assign(f.state.details.get('207')!.item, { url: 'https://tracker.invalid/tasks/T-207' });
+  const op = await f.attach('op-1');
+  const work = new Map(workItemsOf(await f.listed(op)).map(item => [item.resource, item]));
+  assert.deepEqual(work.get('unfold:/wi-205')!._meta[sessionArtifactsMetaKey], [
+    { id: 'wi-205-issue', type: 'issue', label: 'GitHub task acme/order-service#7', isArtifact: false, link: 'https://github.com/acme/order-service/issues/7', isGitHub: true },
+    { id: 'wi-205-pull-request', type: 'pullRequest', label: 'Pull request #42', isArtifact: true, link: 'https://github.com/acme/order-service/pull/42', isGitHub: true },
+  ], 'a github.com pull request and issue, which VS Code polls CI for with the person\'s own sign-in');
+  assert.deepEqual(work.get('unfold:/wi-207')!._meta[sessionArtifactsMetaKey].map((artifact: Json) => [artifact.type, artifact.link, artifact.isGitHub]), [['issue', 'https://tracker.invalid/tasks/T-207', false], ['pullRequest', 'https://forge.invalid/pulls/41', false]], 'another forge\'s pull request is a plain link, without CI');
+  assert.equal(work.get('unfold:/wi-201')!._meta[sessionArtifactsMetaKey], undefined, 'no pull request and no tracker link, no artifacts');
+  assert.deepEqual(work.get('unfold:/wi-205')!._meta['unfold.workItem'].pullRequest, { url: 'https://github.com/acme/order-service/pull/42', number: 42 }, 'Unfold\'s own key stays for other clients');
+  assert.deepEqual(workItemArtifacts({ ...(onGitHub as PloegItem), provider: 'manual', url: 'https://github.com/acme/order-service/issues/7', pullRequest: undefined }), [], 'a hand-off names no tracker issue');
+  assert.deepEqual(workItemArtifacts({ ...(onGitHub as PloegItem), pullRequest: { ...(onGitHub as PloegItem).pullRequest!, url: 'javascript:alert(1)' } }).map(artifact => artifact.type), ['issue'], 'only a web link becomes an artifact');
+
+  const session = (await op.rpc('subscribe', { channel: 'unfold:/wi-205' })).snapshot.state;
+  const chat = (await op.rpc('subscribe', { channel: defaultChatOf('unfold:/wi-205') })).snapshot.state;
+  assert.equal(session._meta[sessionArtifactsMetaKey].length, 2, 'the subscribed session carries the same artifacts');
+  assert.deepEqual([session.changesets, chat.changesets], [[], []], 'no changeset, so no pull-request operation and no Merge in VS Code\'s Inbox');
+  assert.equal(work.get('unfold:/wi-205')!.changesets, undefined);
+
+  Object.assign(f.state.details.get('201')!.item, { state: 'awaiting_review', updatedAt: new Date().toISOString(), pullRequest: { url: 'https://github.com/acme/order-service/pull/44', number: 44, mergeState: 'clean', baseBranch: 'main', headSha: 'fed', checkedAt: minutesAgo(0) } });
+  f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'ploegd:writer', action: 'work_item.awaiting_review', workItemId: '201', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  const opened = await op.until(message => message.method === 'root/sessionSummaryChanged' && message.params.session === 'unfold:/wi-201');
+  assert.equal(opened.params.changes._meta[sessionArtifactsMetaKey].at(-1).link, 'https://github.com/acme/order-service/pull/44', 'a pull request that opens later reaches the list without a new listing');
 });
 
 test('a Work Item\'s session takes no review comments, so it names no annotations channel', { timeout: testTimeout(20_000) }, async t => {
@@ -658,6 +688,32 @@ test('a Work Item waiting for review points a message at its pull request, and a
   const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: 'review-1', message: { text: 'Looks good, ship it', origin: { kind: 'user' } } });
   assert.equal((await f.answered(sent)).params.rejectionReason, workItemMessageRefusal(item('205')));
   assert.equal(f.state.writes.length, 0);
+});
+
+test('Fix Checks and Address Comments on a Work Item session start no Run: the reply names a steer or Try Again and what it spends', { timeout: testTimeout(20_000) }, async t => {
+  const item = (id: string) => world().details.get(id)!.item as PloegItem;
+  assert.ok(isPullRequestBannerPrompt('/fix-ci\nPull request: https://github.com/acme/order-service/pull/42\nFailed CI checks:'));
+  assert.ok(isPullRequestBannerPrompt('/act-on-feedback for #42'));
+  assert.ok(isPullRequestBannerPrompt('/fix-ci and /act-on-feedback'));
+  assert.ok(!isPullRequestBannerPrompt('/fix-cid'), 'only the banner\'s own commands');
+  assert.ok(!isPullRequestBannerPrompt('Please fix the checks'));
+  assert.equal(workItemBannerReply(item('205')), `Ploeg runs #205, so Fix Checks and Address Comments start nothing here. Ask for changes on pull request #42 on the forge. Ploeg restarts it only once it stops and needs you; then Try Again restarts it from Round 1 once you confirm, and spends from Team delivery's budget, up to ${money(3)} like its last attempt.`);
+  assert.equal(workItemBannerReply(item('204')), `Ploeg runs #204, so Fix Checks and Address Comments start nothing here. Try Again restarts it from Round 1 once you confirm, and spends from Team delivery's budget, up to ${money(3)} like its last attempt. Type what it should fix to restart it with that note instead; that asks you first too.`);
+  assert.equal(workItemBannerReply(item('202')), `Ploeg runs #202, so Fix Checks and Address Comments start nothing here. Type what it should fix instead: your message is saved as a steer for its next Round, which spends from the attempt already open (${money(0.5)} of ${money(3)} spent), and nothing more.`);
+  assert.equal(workItemBannerReply(item('207')), workItemMessageRefusal(item('207')));
+
+  const f = await commanding(t);
+  for (const [id, text] of [['205', '/fix-ci\nPull request: https://forge.invalid/pulls/42\nFailed CI checks:\n\nCheck: unit'], ['204', '/act-on-feedback'], ['202', '/fix-ci and /act-on-feedback']] as const) {
+    const chat = defaultChatOf(`unfold:/wi-${id}`);
+    await f.client.rpc('subscribe', { channel: `unfold:/wi-${id}` });
+    await f.client.rpc('subscribe', { channel: chat });
+    const mark = f.client.inbox.length;
+    const sent = f.dispatch(chat, { type: 'chat/turnStarted', turnId: `banner-${id}`, message: { text, origin: { kind: 'user' } } });
+    assert.equal((await f.answered(sent)).params.rejectionReason, workItemBannerReply(item(id)), `#${id} answers the banner`);
+    await settled(f.client);
+    assert.ok(!f.client.inbox.slice(mark).some(message => action(message, chat, 'chat/inputRequested')), `#${id} asks no restart from the banner's message alone`);
+  }
+  assert.deepEqual(f.state.writes, [], 'nothing reached Ploeg: no note, no requeue');
 });
 
 test('a proposed Work Item asks its operator to approve or reject it, a rejection needs a reason, and an approval queues it as that person', { timeout: testTimeout(20_000) }, async t => {
