@@ -100,9 +100,9 @@ async function fakeUnfold() {
   return { url: `http://127.0.0.1:${address.port}`, received, close: () => new Promise<void>(done => server.close(() => done())) };
 }
 
-function runHook(payload: Record<string, unknown>, env: Record<string, string>): Promise<{ stdout: string; code: number | null }> {
+function runHook(payload: Record<string, unknown>, env: Record<string, string>, args: string[] = []): Promise<{ stdout: string; code: number | null }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [hook], { env: { PATH: process.env.PATH ?? '', HOME: env.HOME, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [hook, ...args], { env: { PATH: process.env.PATH ?? '', HOME: env.HOME, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.on('error', reject);
@@ -228,6 +228,44 @@ test('a commit git cannot show in time is left for the next hook, which reports 
   await bash();
   assert.deepEqual([reported(), traced()], [[first, third], [first, third]], 'after three failed attempts the commit is skipped and later commits are reported');
   assert.throws(() => gitIn('notes', '--ref=agent-trace', 'show', second), 'the skipped commit has no note');
+});
+
+test('with --vscode the hook reports a VS Code Copilot session from VS Code 1.147 payloads: its start, prompts, commits from the terminal tool and its stops', async t => {
+  const unfold = await fakeUnfold();
+  const dir = await mkdtemp(join(tmpdir(), 'unfold-plugin-'));
+  t.after(async () => { await unfold.close(); await rm(dir, { recursive: true, force: true }); });
+  const repo = join(dir, 'repo');
+  const gitIn = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['init', '-q', '-b', 'feat/vik-2051-login', repo]);
+  gitIn('config', 'user.email', 'test@example.org'); gitIn('config', 'user.name', 'Test');
+  gitIn('commit', '-q', '--allow-empty', '-m', 'root');
+  await writeFile(join(dir, 'transcript.jsonl'), `${JSON.stringify({ type: 'session.start', version: '9.9.9', model: 'claude-not-this-one' })}\n`);
+  const env = { ...patience, HOME: dir, UNFOLD_URL: unfold.url, UNFOLD_TOKEN: 'vle_test', CLAUDE_PLUGIN_DATA: join(dir, 'data') };
+  const common = { timestamp: '2026-11-19T10:00:00.000Z', session_id: '0f6a2c1e-7b9d-4e2f-9a31-5c8d7e6b4a20', transcript_path: join(dir, 'transcript.jsonl'), cwd: repo };
+  const vsCode = ['--vscode'];
+
+  const started = await runHook({ ...common, hook_event_name: 'SessionStart', source: 'new', model: 'gpt-5.5' }, env, vsCode);
+  assert.equal(started.code, 0);
+  assert.equal(JSON.parse(started.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
+  assert.deepEqual([unfold.received[0].body.harness, unfold.received[0].body.event, unfold.received[0].body.sessionId, unfold.received[0].body.branch, unfold.received[0].body.model, unfold.received[0].body.harnessVersion], ['vscode-copilot', 'start', common.session_id, 'feat/vik-2051-login', 'gpt-5.5', ''], 'VS Code\'s transcript is not read as Claude Code\'s');
+  await runHook({ ...common, hook_event_name: 'UserPromptSubmit', prompt: 'fix the login' }, env, vsCode);
+  const reports = () => unfold.received.filter(entry => entry.path === '/api/linked-sessions/events').map(entry => [entry.body.harness, entry.body.event]);
+  assert.deepEqual(reports(), [['vscode-copilot', 'start'], ['vscode-copilot', 'prompt']]);
+  gitIn('commit', '-q', '--allow-empty', '-m', 'fix: login');
+  const head = gitIn('rev-parse', 'HEAD');
+  await runHook({ ...common, hook_event_name: 'PostToolUse', tool_name: 'run_in_terminal', tool_input: { command: 'git commit -m "fix: login"' }, tool_response: '', tool_use_id: 'call_1' }, env, vsCode);
+  assert.deepEqual(unfold.received.find(entry => entry.body.event === 'commit')?.body.commit, { sha: head, subject: 'fix: login', trailer: false });
+  assert.equal(unfold.received.some(entry => entry.path.endsWith('/traces')), false, 'with no edit it could attribute, the hook sends no Agent Trace record');
+  await runHook({ ...common, hook_event_name: 'Stop', stop_hook_active: false }, env, vsCode);
+  assert.deepEqual(reports(), [['vscode-copilot', 'start'], ['vscode-copilot', 'prompt'], ['vscode-copilot', 'commit'], ['vscode-copilot', 'idle']]);
+
+  const before = unfold.received.length;
+  await runHook({ ...common, session_id: 'not a session id', hook_event_name: 'SessionStart', source: 'new' }, env, vsCode);
+  await runHook({ timestamp: common.timestamp, cwd: repo, hookEventName: 'sessionStart', sessionId: common.session_id }, env, vsCode);
+  assert.equal(unfold.received.length, before, 'a payload without a usable session_id is never reported under a guessed id');
+
+  await runHook({ ...common, session_id: 'claude-session-9', hook_event_name: 'SessionStart', source: 'startup' }, env);
+  assert.deepEqual(reports().at(-1), ['claude-code', 'start'], 'without the flag the hook reports Claude Code as before');
 });
 
 test('without UNFOLD_URL and UNFOLD_TOKEN, or with Unfold down, the hook prints nothing and exits 0', async t => {
