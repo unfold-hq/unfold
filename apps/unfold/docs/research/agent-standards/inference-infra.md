@@ -796,7 +796,7 @@ Not to be confused with: product implementations, not standards; none is standar
 | --- | --- |
 | Steward | Kong Inc.; Docker Inc.; Microsoft (single-vendor) |
 | Status | stabilising |
-| Latest | [Microsoft mcp-gateway v1.0.0 (2026-10-16); Docker mcp-gateway v0.44.3 (2026-10-26); Kong AI MCP OAuth2 plugin requires Gateway 3.12+, claim mapping 3.14.0.0 (2026-04-07) 2026-10-26](https://github.com/docker/mcp-gateway/releases/tag/v0.44.3) |
+| Latest | [Microsoft mcp-gateway v1.0.1 (2026-11-16); Docker mcp-gateway v0.44.3 (2026-10-26); Kong AI MCP OAuth2 plugin requires Gateway 3.12+, claim mapping 3.14.0.0 (2026-04-07) 2026-11-16](https://github.com/microsoft/mcp-gateway/releases/tag/v1.0.1) |
 | Radar | **hold**: Fit decided it: products, not standards, and Unfold's MCP traffic already has a gateway boundary. |
 | Moves when | An MCP gateway SEP appears, or an Agency requires Unfold behind its existing vendor gateway. |
 | Competes with | [LiteLLM Proxy (AI Gateway)](inference-infra.md#litellm), [agentgateway](inference-infra.md#agentgateway), [Agent Router (formerly Envoy AI Gateway)](inference-infra.md#agent-router) |
@@ -805,7 +805,7 @@ Not to be confused with: product implementations, not standards; none is standar
 | Superseded by | — |
 | Decisions | [0078-runs-reach-read-only-mcp-tools-only-through-the-gateway-bounded-by-a-litellm-team](../../../../../apps/ploeg/docs/adrs/0078-runs-reach-read-only-mcp-tools-only-through-the-gateway-bounded-by-a-litellm-team.md), [adr-0011-unfold-is-reachable-over-mcp-through-a-read-first-server](../../../../../docs/adr/adr-0011-unfold-is-reachable-over-mcp-through-a-read-first-server.md), [adr-0035-interactive-sessions-reach-tenant-knowledge-only-through-unfold-mcp](../../../../../docs/adr/adr-0035-interactive-sessions-reach-tenant-knowledge-only-through-unfold-mcp.md), [0047-people-link-their-own-agent-sessions-through-a-plugin-agent-trace-and-telemetry-never-a-claude-sign-in](../../../../../apps/unfold/docs/adrs/0047-people-link-their-own-agent-sessions-through-a-plugin-agent-trace-and-telemetry-never-a-claude-sign-in.md), [2026-10-30-mcp-extensions-fit](../../../../../apps/unfold/docs/research/2026-10-30-mcp-extensions-fit.md) |
 | Watchlist | T31, T34 |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-19 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -819,7 +819,7 @@ Not to be confused with: product implementations, not standards; none is standar
 
 **Open problems:** Absence: no MCP gateway SEP/WG; roadmap only names 'gateway behavior' under enterprise readiness: https://blog.modelcontextprotocol.io/posts/2026-mcp-roadmap/
 
-**Watched:** github-tags `microsoft/mcp-gateway` at v1.0.0, github-tags `docker/mcp-gateway` at v0.44.3, changelog-page `https://developer.konghq.com/plugins/ai-mcp-oauth2/changelog/`
+**Watched:** github-tags `microsoft/mcp-gateway` at v1.0.1, github-tags `docker/mcp-gateway` at v0.44.3, changelog-page `https://developer.konghq.com/plugins/ai-mcp-oauth2/changelog/`
 
 ## vLLM production-stack { #vllm-production-stack }
 
