@@ -7094,11 +7094,11 @@ standards:
   governance: foundation
   status: stabilising
   latest:
-    version: 5.2.1 (also 4.14.6); 5.0.0 GA 2026-06-07
-    date: '2026-10-25'
-    url: https://github.com/DependencyTrack/dependency-track/releases/tag/5.2.1
+    version: 5.2.2 (also 4.14.7); 5.0.0 GA 2026-06-07
+    date: '2026-11-18'
+    url: https://github.com/DependencyTrack/dependency-track/releases/tag/5.2.2
   watch:
-  - {kind: github-releases, ref: DependencyTrack/dependency-track, current: "5.2.1"}
+  - {kind: github-releases, ref: DependencyTrack/dependency-track, current: "5.2.2"}
   adoption:
   - '"CycloneDX 1.7.1 proto (https://github.com/DependencyTrack/dependency-track/pull/6237)"'
   - '"5.0.0 release (https://github.com/DependencyTrack/dependency-track/releases/tag/5.0.0)"'
@@ -7150,7 +7150,7 @@ standards:
   - apps/ploeg/docs/adrs/0145-a-release-publishes-no-image-over-its-cve-budget-and-attaches-signed-openvex-to-every-digest.md
   - apps/unfold/docs/adrs/0010-one-release-train-with-zero-cve-images.md
   watchlist: []
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-19'
 - id: openssf-model-signing
   name: OpenSSF Model Signing (OMS) specification and sigstore/model-transparency (model_signing)
   disambiguation: A detached signature over a manifest of every file in a model directory, using Sigstore keyless, bare keys

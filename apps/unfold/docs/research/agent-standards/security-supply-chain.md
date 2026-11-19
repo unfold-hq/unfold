@@ -142,7 +142,7 @@ Not to be confused with: Tool support, not a standard. DT v5 has MACHINE_LEARNIN
 | --- | --- |
 | Steward | OWASP Dependency-Track (foundation) |
 | Status | stabilising |
-| Latest | [5.2.1 (also 4.14.6); 5.0.0 GA 2026-06-07 2026-10-25](https://github.com/DependencyTrack/dependency-track/releases/tag/5.2.1) |
+| Latest | [5.2.2 (also 4.14.7); 5.0.0 GA 2026-06-07 2026-11-18](https://github.com/DependencyTrack/dependency-track/releases/tag/5.2.2) |
 | Radar | **hold**: Maturity decided it for the ML-BOM part: classifiers exist but modelCard data is neither persisted nor analysed, and Unfold runs no Dependency-Track today. |
 | Moves when | Dependency-Track persists modelCard data or adds a model risk feed, or the owner decides to run it as the SBOM sink. |
 | Competes with | — |
@@ -151,7 +151,7 @@ Not to be confused with: Tool support, not a standard. DT v5 has MACHINE_LEARNIN
 | Superseded by | — |
 | Decisions | [0145-a-release-publishes-no-image-over-its-cve-budget-and-attaches-signed-openvex-to-every-digest](../../../../../apps/ploeg/docs/adrs/0145-a-release-publishes-no-image-over-its-cve-budget-and-attaches-signed-openvex-to-every-digest.md), [0010-one-release-train-with-zero-cve-images](../../../../../apps/unfold/docs/adrs/0010-one-release-train-with-zero-cve-images.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-19 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -165,7 +165,7 @@ Not to be confused with: Tool support, not a standard. DT v5 has MACHINE_LEARNIN
 
 **Open problems:** "v4 lacks CycloneDX 1.5/1.6 classifiers (https://github.com/DependencyTrack/dependency-track/issues/4361)"; "CBOM support still open (https://github.com/DependencyTrack/dependency-track/issues/6191)"; "No model vulnerability or risk feed (absence)"
 
-**Watched:** github-releases `DependencyTrack/dependency-track` at 5.2.1
+**Watched:** github-releases `DependencyTrack/dependency-track` at 5.2.2
 
 ## IETF AUDIT (Agent Use of Delegation and Interaction Traceability) BoF { #ietf-audit }
 
