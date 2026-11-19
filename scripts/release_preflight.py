@@ -14,6 +14,11 @@ def former_home_returned(read):
     return state is not None and state.get('full_name') == FORMER_HOME
 
 
+def marketplace_publisher_exists(publisher, read=request):
+    page, _ = read(f'https://marketplace.visualstudio.com/publishers/{publisher}', missing=True)
+    return page is not None
+
+
 def github_identity(environ=os.environ):
     url = environ['ACTIONS_ID_TOKEN_REQUEST_URL']
     url += ('&' if '?' in url else '?') + 'audience=sigstore'
@@ -41,6 +46,9 @@ def main():
     if api(f'https://open-vsx.org/api/{namespace}', '', missing=True) is None:
         raise RuntimeError(f'Open VSX has no namespace {namespace} to publish {namespace}.{name} into')
     print(f'Open VSX namespace {namespace} exists')
+    if not marketplace_publisher_exists(namespace):
+        raise RuntimeError(f'The Visual Studio Marketplace has no publisher {namespace} to publish {namespace}.{name} into')
+    print(f'Visual Studio Marketplace publisher {namespace} exists')
     claims = github_identity()
     require_same(claims['repository'], HOME_REPOSITORY, 'signing identity')
     print('GitHub Actions OIDC identity for keyless signing passed')
