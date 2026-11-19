@@ -140,7 +140,7 @@ Not to be confused with: runtime-level device injection spec (vendor.com/class=n
 | --- | --- |
 | Steward | CNCF TAG Runtime (cncf-tags org) (foundation) |
 | Status | stable |
-| Latest | [v1.1.1 (specs-go/v1.1.1) 2026-09-04](https://github.com/cncf-tags/container-device-interface/releases/tag/v1.1.1) |
+| Latest | [v1.1.2 (specs-go/v1.1.1) 2026-11-12](https://github.com/cncf-tags/container-device-interface/releases/tag/v1.1.2) |
 | Radar | **hold**: Fit decided it: a stable runtime spec with no device workloads in Unfold. |
 | Moves when | Any Unfold workload needs a device beyond CPU and memory. |
 | Competes with | — |
@@ -149,7 +149,7 @@ Not to be confused with: runtime-level device injection spec (vendor.com/class=n
 | Superseded by | — |
 | Decisions | [adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire](../../../../../docs/adr/adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire.md), [0120-a-worker-container-meets-the-restricted-pod-security-standard-by-default](../../../../../apps/ploeg/docs/adrs/0120-a-worker-container-meets-the-restricted-pod-security-standard-by-default.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-16 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -163,7 +163,7 @@ Not to be confused with: runtime-level device injection spec (vendor.com/class=n
 
 **Open problems:** Whether Talos containerd has enable_cdi and spec dirs set with the nvidia-container-toolkit extension is not verified; Talos NVIDIA guide does not mention CDI: https://docs.siderolabs.com/talos/v1.11/configure-your-talos-cluster/hardware-and-drivers/nvidia-gpu-proprietary
 
-**Watched:** github-releases `cncf-tags/container-device-interface` at v1.1.1
+**Watched:** github-releases `cncf-tags/container-device-interface` at v1.1.2
 
 ## Google Gemini Interactions API { #gemini-interactions-api }
 
@@ -270,7 +270,7 @@ Not to be confused with: Kubernetes-native agent framework (CRDs Agent, ModelCon
 | --- | --- |
 | Steward | kagent project, CNCF Sandbox (accepted 2025-05-22 per https://github.com/kagent-dev/community/issues/7; CNCF blog https://www.cncf.io/blog/2025/08/19/celebrating-100-days-of-kagent/) (foundation) |
 | Status | stable |
-| Latest | [v1.0.0 2026-11-09](https://github.com/kagent-dev/kagent/releases/tag/v1.0.0) |
+| Latest | [v1.0.1 2026-11-12](https://github.com/kagent-dev/kagent/releases/tag/v1.0.1) |
 | Radar | **hold**: Fit decided it: kagent overlaps Ploeg's dispatch plane and is CRD-first, which Ploeg ADR-0071 rules out, and its 1.0 is still a release candidate. |
 | Moves when | kagent adds a tracker or forge trigger or an enforced budget (the trigger named in ecosystem-fit.md), or an Agency asks to drive Ploeg from kagent. |
 | Competes with | — |
@@ -279,7 +279,7 @@ Not to be confused with: Kubernetes-native agent framework (CRDs Agent, ModelCon
 | Superseded by | — |
 | Decisions | [0005-build-a-dedicated-dispatch-plane](../../../../../apps/ploeg/docs/adrs/0005-build-a-dedicated-dispatch-plane.md), [0032-keep-the-dispatch-plane-and-compete-on-authorized-spend](../../../../../apps/ploeg/docs/adrs/0032-keep-the-dispatch-plane-and-compete-on-authorized-spend.md), [0033-board-control-planes-are-mined-for-design-never-depended-on](../../../../../apps/ploeg/docs/adrs/0033-board-control-planes-are-mined-for-design-never-depended-on.md), [0071-ploeg-keeps-its-state-in-postgresql-and-is-not-a-kubernetes-operator](../../../../../apps/ploeg/docs/adrs/0071-ploeg-keeps-its-state-in-postgresql-and-is-not-a-kubernetes-operator.md), [0110-a-team-is-ploegs-own-manifest-of-charter-crew-permissions-intake-and-skills](../../../../../apps/ploeg/docs/adrs/0110-a-team-is-ploegs-own-manifest-of-charter-crew-permissions-intake-and-skills.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-11 |
+| Reviewed | 2026-11-16 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -293,7 +293,7 @@ Not to be confused with: Kubernetes-native agent framework (CRDs Agent, ModelCon
 
 **Open problems:** API version and whether SandboxTemplate is the k8s-sigs CRD are not stated in the RC notes: https://github.com/kagent-dev/kagent/releases/tag/v1.0.0-rc1
 
-**Watched:** github-releases `kagent-dev/kagent` at v1.0.0
+**Watched:** github-releases `kagent-dev/kagent` at v1.0.1
 
 ## Kata Containers { #kata-containers }
 
@@ -312,7 +312,7 @@ Not to be confused with: lightweight-VM OCI runtime (RuntimeClass handler, e.g. 
 | Superseded by | — |
 | Decisions | [adr-0045-agent-code-runs-under-kata-or-gvisor-chosen-by-what-the-node-and-the-work-need](../../../../../docs/adr/adr-0045-agent-code-runs-under-kata-or-gvisor-chosen-by-what-the-node-and-the-work-need.md), [adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging](../../../../../docs/adr/adr-0040-unfold-production-runs-on-a-rented-eu-talos-cluster-and-the-homelab-is-staging.md), [adr-0009-one-tenant-per-agency](../../../../../docs/adr/adr-0009-one-tenant-per-agency.md), [0013-sandbox-crd-placement-with-warm-kata-pools](../../../../../apps/unfold/docs/adrs/0013-sandbox-crd-placement-with-warm-kata-pools.md), [0106-a-run-declares-an-isolation-floor-and-a-cell-runs-it-at-the-strictest-class-it-can-honour](../../../../../apps/ploeg/docs/adrs/0106-a-run-declares-an-isolation-floor-and-a-cell-runs-it-at-the-strictest-class-it-can-honour.md), [0168-profile-p1-turns-on-the-worker-admission-policy-and-a-sandbox-team-names-its-runtime-class-there](../../../../../apps/ploeg/docs/adrs/0168-profile-p1-turns-on-the-worker-admission-policy-and-a-sandbox-team-names-its-runtime-class-there.md), [2026-10-24-sandbox-runtimes-and-encryption](../../../../../docs/research/2026-10-24-sandbox-runtimes-and-encryption.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-16 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -322,11 +322,11 @@ Not to be confused with: lightweight-VM OCI runtime (RuntimeClass handler, e.g. 
 | VM snapshots as Run evidence (proposed) | Run evidence | The 2026-09-10 shortlist proposed hypervisor snapshots at candidate time; Kata 4 with Cloud Hypervisor's snapshot support is the route. | L | Forensic state for a hostile Run. |
 | Per-Agency Kata nodes (proposed) | hosted Tenant cluster | System ADR-0009 gives each Agency a sandboxed runtime; bare-metal Kata workers per Tenant or shared with strict namespaces. | L | Isolation between Agencies at the hardware boundary. |
 
-**Shipped adoption:** Talos ships a kata-containers system extension at 4.3.1, level with upstream (KATA_CONTAINERS_VERSION, https://github.com/siderolabs/extensions/blob/main/container-runtime/vars.yaml, read 2026-11-04); Named runtime for agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox; OpenSandbox SandboxSnapshot supports a qemu-v1 VM-state format: https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/architecture/control-plane/operator.md
+**Shipped adoption:** Talos ships a kata-containers system extension at 4.3.1, level with upstream (KATA_CONTAINERS_VERSION, https://github.com/siderolabs/extensions/blob/main/container-runtime/vars.yaml, read 2026-11-16); Named runtime for agent-sandbox: https://github.com/kubernetes-sigs/agent-sandbox; OpenSandbox SandboxSnapshot supports a qemu-v1 VM-state format: https://github.com/opensandbox-group/OpenSandbox/blob/main/docs/architecture/control-plane/operator.md
 
 **Open problems:** The Talos extension tracks upstream (4.3.1 on 2026-11-04); verify per Talos release: https://github.com/siderolabs/extensions; GPU passthrough into Kata VMs on a GPU node
 
-**Watched:** github-releases `kata-containers/kata-containers` at 4.3.1, github-releases `siderolabs/extensions` at v1.14.5
+**Watched:** github-releases `kata-containers/kata-containers` at 4.3.1, github-releases `siderolabs/extensions` at v1.14.6
 
 ## kmcp { #kmcp }
 
@@ -369,7 +369,7 @@ Not to be confused with: kubernetes-sigs/agent-sandbox; CRDs Sandbox (agents.x-k
 | --- | --- |
 | Steward | Kubernetes SIG Apps (foundation) |
 | Status | stabilising |
-| Latest | [v1.0.9 2026-10-29](https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.9) |
+| Latest | [v1.0.11 2026-11-12](https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.11) |
 | Radar | **trial**: Maturity decided it: the API is v1beta1 under a SIG and both products have an accepted or experimental path, but neither is qualified on a live cluster. |
 | Moves when | Adopt when Unfold ADR 0013's warm path and Ploeg's executor both pass qualification on one cluster, or the project serves v1. |
 | Competes with | [OpenSandbox](inference-infra.md#aaif-opensandbox) |
@@ -378,11 +378,11 @@ Not to be confused with: kubernetes-sigs/agent-sandbox; CRDs Sandbox (agents.x-k
 | Superseded by | — |
 | Decisions | [0013-sandbox-crd-placement-with-warm-kata-pools](../../../../../apps/unfold/docs/adrs/0013-sandbox-crd-placement-with-warm-kata-pools.md), [0011-sandboxes-dial-out-through-a-relay](../../../../../apps/unfold/docs/adrs/0011-sandboxes-dial-out-through-a-relay.md), [2026-09-10-kubernetes-and-sandbox-crds](../../../../../apps/unfold/docs/research/2026-09-10-kubernetes-and-sandbox-crds.md), [2026-09-10-sandbox-landscape](../../../../../apps/unfold/docs/research/2026-09-10-sandbox-landscape.md), [0099-each-allowed-harness-runs-in-its-own-workload-and-the-claim-selects-on-it](../../../../../apps/ploeg/docs/adrs/0099-each-allowed-harness-runs-in-its-own-workload-and-the-claim-selects-on-it.md), [0101-a-paused-run-keeps-its-pod-and-session-for-a-bounded-time-and-is-never-retried-automatically](../../../../../apps/ploeg/docs/adrs/0101-a-paused-run-keeps-its-pod-and-session-for-a-bounded-time-and-is-never-retried-automatically.md), [0137-the-chart-renders-a-default-deny-networkpolicy-for-every-pod-with-an-allowlist-derived-from-its-urls](../../../../../apps/ploeg/docs/adrs/0137-the-chart-renders-a-default-deny-networkpolicy-for-every-pod-with-an-allowlist-derived-from-its-urls.md) |
 | Watchlist | — |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-16 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
-| Qualify warm Kata pools for Unfold sessions | Unfold sandbox provisioner | Unfold ADR 0013 accepted a sandbox provisioner on SandboxClaim and SandboxWarmPool, unqualified on the cluster; qualify it on v1.0.9 with the relay token by TokenReview. | M | Sessions start in clone time rather than VM-boot time. |
+| Qualify warm Kata pools for Unfold sessions | Unfold sandbox provisioner | Unfold ADR 0013 accepted a sandbox provisioner on SandboxClaim and SandboxWarmPool, unqualified on the cluster; qualify it on v1.0.11 with the relay token by TokenReview. | M | Sessions start in clone time rather than VM-boot time. |
 | Ploeg's agent-sandbox executor on a second cluster | Ploeg workers | ecosystem-fit.md lists the executor as experimental under Kata; qualify it on gVisor too per system ADR-0045 and Ploeg ADR-0099. | M | A second launcher beside KEDA with the same executor contract. |
 | NetworkPolicy for sandboxd | Run sandbox | sandboxd binds 0.0.0.0 by default; Ploeg ADR-0137's default-deny policy must cover any template that enables it. | S | Closes an unauthenticated in-pod API. |
 | CRD upgrade order in the chart docs | self-hosting docs | Helm users must apply CRDs before helm upgrade and cannot jump from below v0.5.0; write that into the sandbox runtime how-to. | S | Avoids a broken upgrade for self-hosters. |
@@ -392,7 +392,7 @@ Not to be confused with: kubernetes-sigs/agent-sandbox; CRDs Sandbox (agents.x-k
 
 **Open problems:** Release 1.0 still serves v1beta1, not v1; no GA claim: https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.0; No upgrade from <v0.5.0 without storage migration; Helm users must apply CRDs before helm upgrade: https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.0; sandboxd binds 0.0.0.0 by default, so a NetworkPolicy is needed: https://github.com/kubernetes-sigs/agent-sandbox/releases/tag/v1.0.0
 
-**Watched:** github-releases `kubernetes-sigs/agent-sandbox` at v1.0.9
+**Watched:** github-releases `kubernetes-sigs/agent-sandbox` at v1.0.11
 
 ## Kubernetes Dynamic Resource Allocation (DRA, structured parameters) { #k8s-dra }
 
