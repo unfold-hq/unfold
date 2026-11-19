@@ -82,9 +82,16 @@
     "onView:unfold.ploeg",
     "onWebviewPanel:unfold.session",
     "onStartupFinished",
-    "onUri"
+    "onUri",
+    "onAuthenticationRequest:unfold"
   ],
   "contributes": {
+    "authentication": [
+      {
+        "id": "unfold",
+        "label": "Unfold"
+      }
+    ],
     "commands": [
       {
         "command": "unfold.connect",
