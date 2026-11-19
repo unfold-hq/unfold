@@ -517,7 +517,7 @@ export const en = {
       },
       intHarnessOthers: {
         title: 'OpenCode, Qwen Code, Goose, Claude Code, Codex and Gemini CLI',
-        text: 'Their adapters are in Ploeg’s source and run in the scheduled attack drill, but they sit outside the supported profile.',
+        text: 'Their adapters are in Ploeg’s source and run in the scheduled attack drill, but Ploeg refuses their Runs until each is qualified with its credentials kept out of its reach.',
       },
       intChat: {
         title: 'Slack, Microsoft Teams, ntfy and Web Push',
@@ -1326,7 +1326,6 @@ export const en = {
     ports: {
       trackers: { name: 'Trackers', job: 'Where work comes from, and where it is handed off.' },
       forges: { name: 'Forges', job: 'Where the pull request lands.' },
-      links: { name: 'Account links', job: 'A person’s own token for a tracker or forge.' },
       agents: { name: 'Agent tools', job: 'The agent a Run drives, inside Ploeg.' },
       gateway: { name: 'Model gateway', job: 'Where every model call and every key goes.' },
       editors: { name: 'Editors and AI apps', job: 'Where people follow and steer the work.' },
@@ -1353,6 +1352,7 @@ export const en = {
       ocsf: 'OCSF audit trail',
       events: 'CloudEvents webhooks',
       reporting: 'reporting',
+      notQualified: 'refused until qualified',
     },
     standardsKicker: 'On the wire',
     standardsTitle: 'Open standards, so one implementation reaches every tool.',
@@ -1380,7 +1380,7 @@ export const en = {
     extendSteps: [
       {
         title: 'Pick the port.',
-        text: 'Trackers, forges, account links, notification channels, billing tools and request intake each have a registry in Unfold. Agent tools and Ploeg’s own tracker intake are ports in Ploeg.',
+        text: 'Trackers, forges, notification channels, billing tools and request intake each have a registry in Unfold. Agent tools and Ploeg’s own tracker intake are ports in Ploeg.',
       },
       {
         title: 'Write the adapter and register it.',
@@ -1420,7 +1420,7 @@ export const en = {
         tests: 'A shared conformance kernel, plus a scheduled drill against a hostile repository.',
       },
       others: {
-        port: 'Notifications, billing tools, request intake, account links',
+        port: 'Notifications, billing tools, request intake',
         how: 'An adapter registered by name in that port’s registry.',
         tests: 'No shared suite yet.',
       },
