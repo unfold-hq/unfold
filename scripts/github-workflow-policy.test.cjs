@@ -126,8 +126,10 @@ test('the workflows use only the repository secrets the move names, and the Clou
 
 test('a pull request runs the push\'s checks without write access or secrets, and builds and scans the image contexts from a fork too', () => {
   assert.deepEqual(Object.keys(pr.on).sort(), ['merge_group', 'pull_request', 'workflow_dispatch']);
-  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-notes', 'release-policy', 'warnings']);
-  for (const name of ['checks', 'checks-unfold', 'warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
+  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-notes', 'release-policy', 'typecheck', 'warnings']);
+  const withoutCondition = ({ if: _, ...job }) => job;
+  for (const name of ['checks', 'checks-unfold']) assert.deepEqual(withoutCondition(pr.jobs[name]), withoutCondition(source.jobs[name]), name);
+  for (const name of ['warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
   for (const [name, job] of Object.entries(pr.jobs)) {
     assert.equal(job.permissions, undefined, `${name} keeps the read-only default`);
     const secrets = [...JSON.stringify(job).matchAll(/secrets\.([A-Z_]+)/g)].map(match => match[1]);
@@ -172,17 +174,55 @@ test('a merge group runs the pull request checks against the queue\'s base and h
   assert.doesNotMatch(pr.jobs.gate.if, /event_name|pull_request/, 'the gate reports on every event, the merge group included');
 });
 
-test('the pull request gate waits for every job except the advisory ones, and passes only when each succeeded', () => {
+const heavy = ['build-contexts', 'checks', 'checks-unfold'];
+const fullRun = "github.event_name != 'pull_request' || github.base_ref != 'development' || contains(github.event.pull_request.labels.*.name, 'full-ci')";
+const evaluateFull = (expression, { event_name, base_ref, labels = [] }) => evaluate(String(expression).replace('github.event.pull_request.labels.*.name', 'labels'), { github: { event_name, base_ref }, labels, contains: (list, value) => list.includes(value) });
+const events = [
+  [{ event_name: 'merge_group' }, true],
+  [{ event_name: 'workflow_dispatch' }, true],
+  [{ event_name: 'pull_request', base_ref: 'development' }, false],
+  [{ event_name: 'pull_request', base_ref: 'development', labels: ['dependencies'] }, false],
+  [{ event_name: 'pull_request', base_ref: 'development', labels: ['full-ci'] }, true],
+  [{ event_name: 'pull_request', base_ref: 'main' }, true],
+];
+
+test('a pull request to development runs the fast jobs, and the merge queue, a manual run, a full-ci label or a pull request to main run every job', () => {
+  assert.deepEqual(pr.on.pull_request.types, ['opened', 'synchronize', 'reopened', 'labeled'], 'adding the full-ci label starts a full run');
+  for (const [name, job] of Object.entries(pr.jobs).filter(([name]) => name !== 'gate' && name !== 'warnings')) {
+    if (heavy.includes(name)) {
+      assert.equal(job.if, `${guard} && (${fullRun})`, name);
+      for (const [event, full] of events) assert.equal(evaluateFull(job.if, event), full, `${name} on ${JSON.stringify(event)}`);
+    } else {
+      assert.equal(job.if, guard, `${name} runs on every event`);
+    }
+  }
+  assert.equal(pr.jobs.typecheck.steps.at(-1).run, 'mise -C apps/unfold exec -- npm run typecheck');
+});
+
+test('the pull request gate waits for every job except the advisory ones, and passes only when each that had to run succeeded', () => {
   const gate = pr.jobs.gate;
   const advisory = ['agent-trace', 'warnings'];
   assert.deepEqual([...gate.needs].sort(), Object.keys(pr.jobs).filter(name => name !== 'gate' && !advisory.includes(name)).sort());
   assert.equal(gate.if, `${guard} && always()`);
   const step = gate.steps.find(candidate => candidate.run);
-  const run = needs => spawnSync('bash', ['-eo', 'pipefail', '-c', step.run], { env: { ...process.env, NEEDS: JSON.stringify(needs, null, 2) }, encoding: 'utf8' }).status;
+  assert.equal(step.env.FULL, `\${{ ${fullRun} }}`, 'the gate asks for the heavy jobs exactly when they run');
+  for (const [event, full] of events) assert.equal(evaluateFull(step.env.FULL, event), full, JSON.stringify(event));
+  const run = (needs, full) => spawnSync('bash', ['-eo', 'pipefail', '-c', step.run], { env: { ...process.env, FULL: String(full), NEEDS: JSON.stringify(needs, null, 2) }, encoding: 'utf8' }).status;
   const all = value => Object.fromEntries(gate.needs.map(name => [name, { result: value, outputs: {} }]));
-  assert.equal(run(all('success')), 0);
-  for (const failed of ['failure', 'cancelled', 'skipped']) assert.equal(run({ ...all('success'), checks: { result: failed, outputs: {} } }), 1, failed);
-  assert.equal(run({}), 1);
+  const fast = Object.fromEntries(Object.entries(all('success')).map(([name, need]) => [name, heavy.includes(name) ? { ...need, result: 'skipped' } : need]));
+  for (const full of [true, false]) {
+    assert.equal(run(all('success'), full), 0, `full=${full}`);
+    for (const failed of ['failure', 'cancelled', 'skipped']) {
+      assert.equal(run({ ...all('success'), gitleaks: { result: failed, outputs: {} } }, full), 1, `fast job ${failed}, full=${full}`);
+    }
+    for (const failed of ['failure', 'cancelled']) {
+      for (const name of heavy) assert.equal(run({ ...all('success'), [name]: { result: failed, outputs: {} } }, full), 1, `${name} ${failed}, full=${full}`);
+    }
+    assert.equal(run({}, full), 1);
+  }
+  assert.equal(run(fast, false), 0, 'a fast run passes with the heavy jobs skipped');
+  assert.equal(run(fast, true), 1, 'the merge queue never passes with a heavy job skipped');
+  for (const name of heavy) assert.equal(run({ ...all('success'), [name]: { result: 'skipped', outputs: {} } }, true), 1, `${name} skipped in a full run`);
 });
 
 test('the release train versions Unfold and the site from a checked development head, with the repository\'s own toolchain', () => {
