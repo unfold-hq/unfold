@@ -5908,7 +5908,7 @@ standards:
     date: '2026-09-04'
     url: https://github.com/cncf-tags/container-device-interface/releases/tag/v1.1.1
   watch:
-  - {kind: github-releases, ref: cncf-tags/container-device-interface, current: "v1.1.1"}
+  - {kind: github-releases, ref: cncf-tags/container-device-interface, current: "v1.1.2"}
   adoption:
   - 'CRI-O default-on; containerd needs enable_cdi; Docker default from 28.2.0: https://github.com/cncf-tags/container-device-interface'
   - 'GPU Operator GPUCluster requires a CDI-compatible runtime: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/release-notes.html'
