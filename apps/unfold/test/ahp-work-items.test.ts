@@ -445,7 +445,68 @@ test('the fleet poller follows Ploeg\'s events in order from its cursor and tell
   assert.ok(op.inbox.some(message => message.method === 'root/sessionSummaryChanged' && message.params.session === 'unfold:/wi-203' && message.params.changes.activity === 'Queued for delivery'));
 });
 
-test('Ploeg events page oldest first from an after cursor, scoped to the caller\'s teams', { timeout: testTimeout(20_000) }, async t => {
+test('a Work Item keeps its modification time while only Ploeg\'s update time moves, so an acknowledged one stays out of the VS Code Inbox, and takes a new one when its state changes', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  const op = await f.attach('op-1');
+  const first = new Map(workItemsOf(await f.listed(op)).map(item => [item.resource, item.modifiedAt]));
+  for (const id of ['201', '202', '205']) assert.equal(first.get(`unfold:/wi-${id}`), f.state.details.get(id)!.item.updatedAt, 'a Work Item listed for the first time shows Ploeg\'s update time');
+  await f.host.workItems.tick();
+
+  const reviewed = f.state.details.get('205')!.item.updatedAt;
+  f.state.details.get('205')!.item.updatedAt = minutesAgo(0);
+  f.state.details.set('202', workItem('202', { state: 'leased', spent: 1.25, round: 2, updated: minutesAgo(0), runs: [{ id: '301', role: 'implementer', round: 1 }, { id: '311', role: 'reviewer', round: 2, state: 'running' }] }));
+  f.state.events.push(
+    { id: '1004', at: minutesAgo(0), actor: 'ploegd:review', action: 'work_item.checked', workItemId: '205', team: 'delivery', detail: {} },
+    { id: '1005', at: minutesAgo(0), actor: 'team:delivery', action: 'run.finished', workItemId: '202', team: 'delivery', detail: {} },
+  );
+  await f.host.workItems.tick();
+  await settled(op);
+  const changed = (resource: string, after = 0) => op.inbox.slice(after).filter(message => message.method === 'root/sessionSummaryChanged' && message.params.session === resource && 'modifiedAt' in message.params.changes).at(-1)?.params.changes;
+  assert.equal(changed('unfold:/wi-205')?.modifiedAt, reviewed, 'the same state, reason, pull request and question keep the time shown');
+  assert.equal(changed('unfold:/wi-202')?.activity, `Reviewer · Round 2 · ${money(1.25)}/${money(3)}`, 'the activity line still follows spend and Round');
+  assert.equal(changed('unfold:/wi-202')?.modifiedAt, first.get('unfold:/wi-202'), 'spend and Round alone keep the time shown');
+  assert.equal(workItemsOf(await f.listed(op)).find(item => item.resource === 'unfold:/wi-205')!.modifiedAt, reviewed, 'a fresh list keeps it too');
+
+  const mark = op.inbox.length;
+  const awaiting = minutesAgo(0);
+  f.state.details.set('202', workItem('202', { state: 'awaiting_review', pullRequest: 43, updated: awaiting, runs: [{ id: '301', role: 'implementer', round: 1 }, { id: '311', role: 'reviewer', round: 2 }] }));
+  f.state.events.push({ id: '1006', at: awaiting, actor: 'team:delivery', action: 'work_item.awaiting_review', workItemId: '202', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  await settled(op);
+  assert.equal(changed('unfold:/wi-202', mark)?.modifiedAt, awaiting, 'running to ready for review takes Ploeg\'s update time');
+});
+
+test('a question to a person keeps its input request id across a reconnect, and a new question gets a new id and a new modification time', { timeout: testTimeout(20_000) }, async t => {
+  const f = await commanding(t);
+  parkedOnQuestions(f.state);
+  const opened = (await f.client.rpc('subscribe', { channel: 'unfold:/wi-204' })).snapshot.state;
+  const asked = opened.inputNeeded[0].id;
+  await f.host.workItems.tick();
+
+  const again = await f.attach('op-1');
+  await f.listed(again);
+  const reopened = (await again.rpc('subscribe', { channel: 'unfold:/wi-204' })).snapshot.state;
+  assert.equal(reopened.inputNeeded[0].id, asked, 'the same question after a reconnect keeps its id');
+  assert.equal(reopened.modifiedAt, opened.modifiedAt);
+
+  const detail = f.state.details.get('204')!;
+  const moved = minutesAgo(0);
+  detail.item.updatedAt = moved;
+  Object.assign(detail.questions[0], { answer: 'Away from zero.', answeredBy: 'op-1', waitingForPerson: false });
+  detail.questions.push({ id: 'q302-3', shiftId: '9204', runId: '302', role: 'implementer', round: 1, to: 'person', text: 'Also round the tax lines?', answer: null, answeredBy: null, waitingForPerson: true });
+  detail.resume.waitingQuestionIds = ['q302-3'];
+  const mark = again.inbox.length;
+  f.state.events.push({ id: '1004', at: moved, actor: 'team:delivery', action: 'run.question_asked', workItemId: '204', team: 'delivery', detail: {} });
+  await f.host.workItems.tick();
+  await settled(again);
+  const requested = (await again.until(message => action(message, 'unfold:/wi-204', 'session/inputNeededSet') && again.inbox.indexOf(message) >= mark)).params.action.request;
+  assert.notEqual(requested.id, asked, 'a new question gets a new id');
+  assert.equal(requested.request.questions[0].message, 'Also round the tax lines?');
+  const summary = again.inbox.slice(mark).filter(message => message.method === 'root/sessionSummaryChanged' && message.params.session === 'unfold:/wi-204' && 'modifiedAt' in message.params.changes).at(-1)?.params.changes;
+  assert.equal(summary?.modifiedAt, moved, 'a new waiting question takes Ploeg\'s update time');
+});
+
+test('Ploeg events page oldest first from an after cursor, scoped to the caller\'s teams',{ timeout: testTimeout(20_000) }, async t => {
   const f = await fixture(t);
   f.state.events.push({ id: '1004', at: minutesAgo(0), actor: 'team:research', action: 'run.started', workItemId: '209', team: 'research', detail: {} });
   const ploeg = new PloegClient(f.server.config);
