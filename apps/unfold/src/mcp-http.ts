@@ -120,15 +120,15 @@ export function createMcpHttp(options: McpHttpOptions) {
   const icons = unfoldMcpIcons(resource.origin);
   const taskCache: McpTasks['cache'] = new Map();
   const metadata = resourceMetadata(settings);
-  const appClients = new Map<string, { until: number; apps: boolean; elicitation: boolean }>();
+  const appClients = new Map<string, { until: number; apps: boolean; elicitation: boolean; tasks?: true }>();
   const waiting = new Map<string, Waiting>();
   const now = () => options.now?.() ?? Date.now();
   const rememberedClient = (key: string) => { const entry = appClients.get(key); if (entry !== undefined && entry.until <= now()) appClients.delete(key); return entry !== undefined && entry.until > now() ? entry : undefined; };
-  const rememberClient = (key: string, apps: boolean, elicitation: boolean) => {
+  const rememberClient = (key: string, apps: boolean, elicitation: boolean, tasks: boolean) => {
     appClients.delete(key);
-    if (!apps && !elicitation) return;
+    if (!apps && !elicitation && !tasks) return;
     if (appClients.size >= appsMemoryEntries) appClients.delete(appClients.keys().next().value!);
-    appClients.set(key, { until: now() + appsMemoryMs, apps, elicitation });
+    appClients.set(key, { until: now() + appsMemoryMs, apps, elicitation, ...(tasks ? { tasks: true as const } : {}) });
   };
   if (settings.audience === 'client-id') console.error(JSON.stringify({ level: 'warn', event: 'mcp.client_audience', message: 'UNFOLD_MCP_TOKEN_AUDIENCE=client-id: a token whose aud names a client id in UNFOLD_MCP_CLIENT_IDS is accepted instead of one for UNFOLD_MCP_RESOURCE, so a token that client got for another resource is accepted too' }));
 
@@ -205,10 +205,10 @@ export function createMcpHttp(options: McpHttpOptions) {
       const follow = options.tasks;
       const tasks: McpTasks | undefined = follow ? { enabled: () => follow.enabled(user), keys: () => follow.keys(), tenantOf: source => follow.tenantOf(user, source), cache: taskCache } : undefined;
       const events = modern && options.events && await options.events.enabled(user).catch(() => false) ? options.events.handler(user) : undefined;
-      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, prompts: true, contextResources: true, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(events ? { events } : {}) });
+      const server = createMcpServer({ url: options.linkUrl, apiUrl: options.apiUrl(), token: delegated.token, version: options.version, principal: user.id, role: user.role, confirmations, icons, prompts: true, contextResources: true, ...(remembered?.apps ? { mcpApps: true } : {}), ...(streamable ? { elicitation: true } : {}), ...(tasks ? { tasks } : {}), ...(remembered?.tasks ? { coreTasks: true } : {}), ...(events ? { events } : {}) });
       if (streamable && server.confirmsFirst(String(params?.name))) server.connect(askOnStream(res, user.id, token.client ?? '', waitMs));
       answer = await server.handle(message);
-      if (!modern && method === 'initialize' && answer?.result) rememberClient(appsKey, server.declaredMcpApps(), server.declaredFormElicitation());
+      if (!modern && method === 'initialize' && answer?.result) rememberClient(appsKey, server.declaredMcpApps(), server.declaredFormElicitation(), server.declaredCoreTasks());
     } finally { delegated.revoke(); }
     console.log(JSON.stringify({ level: 'info', event: 'mcp.request', actor: user.id, method: String(method).slice(0, 64), ...(method === 'tools/call' ? { tool: String(params?.name ?? '').slice(0, 64) } : {}), protocol: modern ? 'stateless' : 'legacy', ...(token.audience === 'client' ? { audience: 'client' } : {}) }));
     const code = answer?.error?.code;
