@@ -5844,9 +5844,9 @@ standards:
   governance: single-vendor
   status: stable
   latest:
-    version: v26.7.2
-    date: '2026-10-14'
-    url: https://github.com/NVIDIA/gpu-operator/releases/tag/v26.7.2
+    version: v26.7.3
+    date: '2026-11-17'
+    url: https://github.com/NVIDIA/gpu-operator/releases/tag/v26.7.3
   watch:
   - {kind: github-releases, ref: NVIDIA/gpu-operator, current: "v26.7.3"}
   adoption:
@@ -5894,7 +5894,7 @@ standards:
   decisions:
   - docs/adr/adr-0042-a-self-hosted-decider-reads-what-agents-do-and-starts-as-a-shadow-tripwire.md
   watchlist: []
-  reviewed: '2026-11-04'
+  reviewed: '2026-11-19'
 - id: cdi
   name: Container Device Interface (CDI)
   disambiguation: runtime-level device injection spec (vendor.com/class=name), consumed by containerd/CRI-O/Docker/Podman;
