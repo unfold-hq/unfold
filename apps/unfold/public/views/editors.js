@@ -3,7 +3,7 @@ import { api } from '../core/api.js';
 import { escape, renderHtml, notify } from '../core/dom.js';
 import { button, callout, disclosure, dl, emptyState, skeleton } from '../core/ui.js';
 import { dateTime, namedDate, relativeWords } from '../core/format.js';
-import { agentHostConnectionAddress, agentsWindowLink, openVsxListing } from '../core/vscode.js';
+import { agentHostConnectionAddress, agentsWindowLink, extensionViewLink, openVsxListing } from '../core/vscode.js';
 import { icon } from '../core/icons.js';
 import { failureCallout, failureOf } from '../core/failure.js';
 import { shell } from '../shell.js';
@@ -58,7 +58,7 @@ function manualSteps() {
 function connectCard() {
   if (!view.agentHost) return '';
   const viewer = state.bootstrap?.user?.role === 'viewer';
-  const fallback = disclosure({ summary: 'No Unfold extension in VS Code?', body: `<p>Download it from <a href="${escape(openVsxListing)}" target="_blank" rel="noopener noreferrer">Open VSX</a> and run <strong>Extensions: Install from VSIX…</strong> in VS Code, whose own Marketplace does not list it. An older Unfold extension from the publisher webgrip has to be uninstalled first. Then choose Connect VS Code again. Or add this workbench by hand:</p>${manualSteps()}` });
+  const fallback = disclosure({ summary: 'No Unfold extension in VS Code?', body: `<p>Install it from <a href="${escape(extensionViewLink)}">the Extensions view in VS Code</a> and choose <strong>Switch to Pre-Release Version</strong>, or download it from <a href="${escape(openVsxListing)}" target="_blank" rel="noopener noreferrer">Open VSX</a> and run <strong>Extensions: Install from VSIX…</strong>. Uninstall an older Unfold extension, webgrip.unfold or unfold-hq.unfold, first. Then choose Connect VS Code again. Or add this workbench by hand:</p>${manualSteps()}` });
   const body = viewer
     ? callout({ tone: 'neutral', title: 'An operator account connects VS Code', body: '<p>Viewers can inspect sessions here in the browser. Ask an administrator for operator access to work from VS Code\'s Agents window.</p>' })
     : `<div class="vscode-connect"><a class="button primary" href="${escape(agentsWindowLink(location.origin))}">${icon('code')}<span class="button-label">Connect VS Code</span></a><p class="meta">Opens VS Code, adds this workbench to its Agents window and offers to open it. You need the Unfold extension, signed in to this workbench. Then start a session with New → Workspace ▾ → Unfold · &lt;repository&gt;.</p></div>${fallback}`;

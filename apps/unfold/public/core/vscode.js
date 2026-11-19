@@ -1,7 +1,10 @@
 import { extensionId } from './checkout.js';
 
-/** Where the Unfold extension is listed and its VSIX downloads; VS Code's own Marketplace does not list it. */
+/** Where the Unfold extension is listed on Open VSX and its VSIX downloads. */
 export const openVsxListing = 'https://open-vsx.org/extension/unfold-hq/unfold-workbench';
+
+/** Opens the Unfold extension in VS Code's own Extensions view, from whichever gallery that editor uses. */
+export const extensionViewLink = `vscode:extension/${extensionId}`;
 
 /** The `vscode://` link that asks the Unfold extension to add the workbench at `origin` to VS Code's Agents window. */
 export function agentsWindowLink(origin) {
