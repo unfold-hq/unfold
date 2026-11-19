@@ -88,6 +88,14 @@ test('an ACP session reported through the proxy is a Linked Session with no resu
   await assert.rejects(linked.report(owner, event({ harness: 'claude-code', sessionId: 'acp-sess_abc123', event: 'prompt' }), base), { code: 'linked_harness' });
 });
 
+test('a VS Code Copilot session reported by the plugin is a Linked Session with no resume command, and its start says it is a VS Code Copilot session', async () => {
+  const linked = service(fakePloeg());
+  const started = await linked.report(owner, event({ harness: 'vscode-copilot', sessionId: '0f6a2c1e-7b9d-4e2f-9a31-5c8d7e6b4a20' }), base);
+  assert.deepEqual([started.session.harness, started.session.resume], ['vscode-copilot', '']);
+  assert.match(started.context, /this VS Code Copilot session/);
+  await assert.rejects(linked.report(owner, event({ harness: 'claude-code', sessionId: '0f6a2c1e-7b9d-4e2f-9a31-5c8d7e6b4a20', event: 'prompt' }), base), { code: 'linked_harness' });
+});
+
 test('states follow the hooks, a silent working session reads as stale, and a commit after the end reopens it as idle', async () => {
   const linked = service();
   assert.equal((await linked.report(owner, event({ event: 'prompt' }), base)).session.state, 'working');

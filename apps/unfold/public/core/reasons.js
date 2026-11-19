@@ -7,8 +7,9 @@ export { parseBudgetReason, parseStuckReason, closeReasonLabel, withdrawnReason 
 
 /**
  * Why a Work Item waits on a person, and what to do about it. `chip` is the short label, `sentence` explains it,
- * `fix` says what to change and `requeue` names the only way to start again today: assigning the task to the
- * Team again in its tracker (`trackerUrl` when known). `requeue` is empty for a reason about the Unfold session that
+ * `fix` says what to change and `requeue` names the way to start again that works from every surface: assigning the
+ * task to the Team again in its tracker (`trackerUrl` when known). Now and the Work Item page replace it with Try again
+ * for a person who may restart work. `requeue` is empty for a reason about the Unfold session that
  * drives the Work Item, because that session's own page starts it again. `action` joins `fix` and `requeue`.
  * @typedef {object} Reason
  * @property {string} code
@@ -501,6 +502,32 @@ const cloneCauses = {
   },
 };
 
+const retryCautions = {
+  unreachable: 'The Run fails again if the cluster still cannot reach the repository’s host.',
+  access: 'Nothing changed since it failed, so the same result is likely unless the cause was fixed.',
+  unknown: 'Nothing changed since it failed, so the same result is likely unless the cause was fixed.',
+};
+
+/**
+ * Whether a person may start the Work Item again from Unfold with Try again: its reason names a restart (`requeue`),
+ * so it is not a question, a take-over, a merge that waits or a reason its driving session acts on.
+ * @param {Reason | null | undefined} reason
+ * @returns {boolean}
+ */
+export function retryable(reason) {
+  return Boolean(reason?.requeue);
+}
+
+/**
+ * The sentence a Try again confirmation adds when a new attempt meets the same cause unless someone fixed it: a failed
+ * clone (`variant` `clone_failed`), worded by its `cause`. Empty for every other reason.
+ * @param {{ variant?: string | null, cause?: string | null } | null | undefined} reason the detail reason
+ * @returns {string}
+ */
+export function retryCaution(reason) {
+  return reason?.variant === 'clone_failed' ? retryCautions[reason.cause] || retryCautions.unknown : '';
+}
+
 function cloneFailed(kind, run) {
   const { cause, fix } = cloneCauses[kind];
   const who = run?.role ? `the ${run.role}’s Run` : 'the Run';
@@ -535,8 +562,9 @@ function heldDetail(detail, shift, reason) {
  * whether Ploeg has released the hold since, and points the fix at that failure instead of the budget. For `ci_not_passed`
  * whose every named check was cancelled it sets `variant` `ci_cancelled` and points the fix at re-running CI. For `run_stuck`
  * whose Run could not clone the repository (`cloneFailure`) it sets `variant` `clone_failed`: the sentence says the Work Item
- * is not at fault and no agent work was tried, and the fix points at the network or the bot's access. Returns null
- * unless the item is `needs_human` or `stale`.
+ * is not at fault and no agent work was tried, and the fix points at the network or the bot's access; `cause` is then
+ * `unreachable`, `access` or `unknown` (null for every other reason). Returns null unless the item is `needs_human` or
+ * `stale`.
  */
 export function detailReason(detail) {
   const item = detail?.item;
@@ -595,6 +623,7 @@ export function detailReason(detail) {
   return {
     ...reason,
     variant,
+    cause: clone,
     headline,
     run: run ? { id: run.id, role: run.role, round: run.round, text: run.stuckReason || run.summary || '', failure: failureReason(run.failureReason) } : null,
   };

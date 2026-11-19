@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { application, request } from './api-support.ts';
-import { action, connect, defaultChatOf, vscodeAgentsWindow, type Json } from './ahp-support.ts';
+import { action, closed, connect, defaultChatOf, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { testTimeout } from './timeframes.ts';
-import { IdleSessions, ServerSequence, idleSessionMs } from '../src/ahp/continuity.ts';
+import { Heartbeats, IdleSessions, ServerSequence, heartbeatCheckMs, idleSessionMs } from '../src/ahp/continuity.ts';
 import type { Event, Session } from '../src/types.ts';
 
 const fixture = JSON.parse(readFileSync(new URL('./fixtures/session-059675b9.json', import.meta.url), 'utf8'));
@@ -175,4 +175,86 @@ test('a chat snapshot longer than 200 turns tells the client there are older tur
   assert.equal(whole.turns.length, 200);
   assert.equal('turnsNextCursor' in whole, false, 'a whole history names no older turns');
   assert.deepEqual(await client.rpc('fetchTurns', { channel: withTurns(201), cursor: cut.turnsNextCursor }), {});
+});
+
+test('a peer that stops answering is silent within 90 seconds of its last answer, an answering one is pinged at most every 30 seconds for an hour', () => {
+  const beats = new Heartbeats<string>();
+  const sent = new Map<string, number[]>([['alive', []], ['dead', []]]);
+  const stopsAnsweringAt = 120_000;
+  let lastAnswer = 0;
+  let silentAt: number | undefined;
+  for (let now = 0; now <= 3_600_000; now += heartbeatCheckMs) {
+    const { ping, silent } = beats.check(silentAt === undefined ? ['alive', 'dead'] : ['alive'], now);
+    for (const { peer, id } of ping) {
+      sent.get(peer)!.push(now);
+      if (peer === 'alive') assert.ok(beats.answered(peer, id));
+      else if (now < stopsAnsweringAt) { assert.ok(beats.answered(peer, id)); lastAnswer = now; }
+    }
+    assert.ok(!silent.includes('alive'), `the answering peer is never silent (at ${now} ms)`);
+    if (silent.includes('dead')) silentAt = now;
+  }
+  assert.ok(silentAt !== undefined, 'the peer that stopped answering is found');
+  assert.ok(silentAt - lastAnswer <= 90_000, `found ${silentAt - lastAnswer} ms after its last answer`);
+  for (const [peer, times] of sent) for (let index = 1; index < times.length; index++) assert.ok(times[index] - times[index - 1] >= 30_000, `${peer} is pinged at most every 30 seconds`);
+  assert.equal(sent.get('alive')!.length, 3_600_000 / 30_000 + 1);
+});
+
+test('an answer only clears the ping it answers', () => {
+  const beats = new Heartbeats<string>(30_000, 30_000);
+  const [{ id }] = beats.check(['a'], 0).ping;
+  assert.equal(beats.answered('a', id + 1), false);
+  assert.equal(beats.answered('b', id), false);
+  assert.deepEqual(beats.check(['a'], 30_000), { ping: [], silent: ['a'] });
+});
+
+test('the host pings initialized clients, keeps one that answers for an idle hour, and closes one that stops answering like a client-side close', { timeout: testTimeout(90_000) }, async t => {
+  const server = await application();
+  t.after(() => server.close());
+  const host = server.app.agentHost;
+  host.activeClientGraceMs = 0;
+  let now = 1_000_000;
+  host.clock = () => now;
+  const token = (await request(server.url, '/api/agent-host/tokens', { method: 'POST', body: { label: 'heartbeat' } })).body.token;
+  const attached = async () => (await request(server.url, '/api/agent-host')).body;
+
+  const handshaking = await attach(server, t, token);
+  const answering = await attach(server, t, token);
+  await answering.rpc('initialize', initialize(randomUUID()));
+  for (let tick = 0; tick < 3; tick++, now += heartbeatCheckMs) host.checkHeartbeats();
+  await handshaking.rpc('ping', {});
+  assert.equal(handshaking.pings.length, 0, 'a client still in its handshake is not pinged');
+  assert.equal(handshaking.socket.readyState, WebSocket.OPEN);
+  const handshake = await handshaking.rpc('initialize', initialize(randomUUID()));
+  assert.deepEqual(handshake.snapshots.map((snapshot: Json) => snapshot.resource), ['ahp-root://'], 'its handshake behaves as before');
+
+  const silentId = randomUUID();
+  const silent = await attach(server, t, token);
+  await silent.rpc('initialize', initialize(silentId));
+  silent.stopAnsweringPings();
+  const session = `ahp-session:/${randomUUID()}`;
+  await silent.rpc('createSession', { channel: session, provider: 'unfold', config: { repository: 'order-service', team: 'delivery', budgetUsd: 1, title: 'Heartbeat' }, activeClient: { clientId: silentId, tools: [] } });
+  await answering.rpc('subscribe', { channel: session });
+  const silentClosed = closed(silent.socket);
+  host.checkHeartbeats();
+  await silent.rpc('ping', {});
+  assert.equal(silent.pings.length, 1);
+  let closedAt: number | undefined;
+  const pingedAt = now;
+  for (const start = now; now - start <= 3_600_000; now += heartbeatCheckMs) {
+    const before = answering.pings.length;
+    host.checkHeartbeats();
+    await answering.rpc('ping', {});
+    await answering.rpc('ping', {});
+    assert.ok(answering.pings.length - before <= 1, 'at most one ping per check');
+    if (closedAt === undefined && silent.socket.readyState !== WebSocket.OPEN) closedAt = now;
+  }
+  assert.ok(closedAt !== undefined && closedAt - pingedAt <= 90_000, 'the silent client is closed within 90 seconds');
+  assert.equal(await silentClosed, 1001);
+  assert.equal(answering.socket.readyState, WebSocket.OPEN, 'the answering client stays connected through an idle hour');
+  assert.ok(answering.pings.length >= 120 && answering.pings.length <= 122, `one ping every 30 seconds (${answering.pings.length})`);
+
+  const removed = await answering.until(message => action(message, session, 'session/activeClientRemoved'));
+  assert.deepEqual(removed.params.action, { type: 'session/activeClientRemoved', clientId: silentId }, 'its active-client mark goes as on a client-side close');
+  assert.ok(!host.isDeparting(silentId));
+  assert.equal((await attached()).clients, 2, 'only the two answering connections remain');
 });

@@ -913,7 +913,8 @@ test('a stuck Run whose clone failed is shown as a cause to fix, never as a ques
   const box = html.slice(html.indexOf('id="work-decision"'), html.indexOf('</section>', html.indexOf('id="work-decision"')));
   assert.match(box, /Not the Work Item’s fault: the cluster could not reach the repository’s host, so the builder’s Run stopped in Round 2 before any agent work was tried\./);
   assert.match(box, /Check DNS and the network from the cluster to the repository’s host, not the ticket\./);
-  assert.match(box, /Then assign the task to the Team again in/);
+  assert.match(box, /Then press Try again\. Assigning the task to the Team again in [^<]* also starts it again\.<\/p><div class="work-step-actions"><button type="button" class="button primary" data-action="work-retry" data-id="111">/, 'the restart is offered after the cause, and the tracker stays the other way');
+  assert.match(detailMarkup(detail, model({ detailId: '111' })), /Then assign the task to the Team again in/, 'a viewer is sent to the tracker');
   assert.doesNotMatch(html, /data-action="work-answer-open"/, 'answering cannot fix a clone, so no Answer is offered anywhere on the page');
   assert.doesNotMatch(html, /needs from you|class="work-question"|cannot finish in Round 2 without a person|Or answer in/);
   assert.match(box, /<details class="disclosure plain" open><summary><span class="disclosure-summary">What git printed<\/span>[^]*Resolving timed out after 300003 milliseconds/, 'the git output is the Run’s evidence, open and labelled as git’s');
@@ -923,4 +924,56 @@ test('a stuck Run whose clone failed is shown as a cause to fix, never as a ques
   assert.equal(plan.entries.length, 2);
   assert.deepEqual(plan.entries[0].actions, [], 'the cause is fixed in the cluster, so its step links nowhere');
   assert.doesNotMatch(plan.primary, /work-answer-open/);
+});
+
+test('a stopped Work Item offers Try again where the tracker sentence was, unless its reason has its own action', () => {
+  const budget = demoDetail('110');
+  const operator = decisionPlan(budget, model({ detailId: '110', canWrite: true }), detailReason(budget));
+  const last = operator.entries.at(-1);
+  assert.equal(last.text, 'Then press Try again. Assigning the task to the Team again in its tracker also starts it again.');
+  assert.match(last.actions[0], /^<button type="button" class="button primary" data-action="work-retry" data-id="110">[^]*<span class="button-label">Try again<\/span><\/button>$/, 'with no link-out to open, Try again is the one primary action');
+  assert.match(last.actions[1], /<span class="work-find">Find <strong class="mono">DEMO-10<\/strong>/, 'the tracker stays findable as the other way');
+  assert.equal(operator.primary, last.actions[0], 'the status panel and the phone bar carry the same button');
+  const page = detailMarkup(budget, model({ detailId: '110', canWrite: true }));
+  assert.match(page, /<div class="work-sticky-actions" role="group" aria-label="Next step"><button type="button" class="button primary" data-action="work-retry" data-id="110">/);
+
+  const viewer = decisionPlan(budget, model({ detailId: '110' }), detailReason(budget));
+  assert.equal(viewer.entries.at(-1).text, 'Then assign the task to the Team again in its tracker.');
+  assert.doesNotMatch(detailMarkup(budget, model({ detailId: '110' })), /data-action="work-retry"/, 'a viewer gets no button: Ploeg would answer 403');
+
+  const reviewed = demoDetail('109');
+  reviewed.item.url = 'https://tracker.test/tasks/9';
+  const withLinks = decisionPlan(reviewed, model({ detailId: '109', canWrite: true }), detailReason(reviewed));
+  assert.match(withLinks.primary, /Open pull request #7/, 'the pull request to read stays the primary action');
+  assert.equal(withLinks.entries.at(-1).text, 'Then press Try again. Assigning the task to the Team again in Vikunja also starts it again.');
+  assert.match(withLinks.entries.at(-1).actions[0], /class="button secondary" data-action="work-retry" data-id="109"/);
+  assert.match(withLinks.entries.at(-1).actions[1], /class="button secondary" href="https:\/\/tracker\.test\/tasks\/9"[^]*Open the task in Vikunja/);
+
+  const stale = demoDetail('113');
+  assert.match(decisionPlan(stale, model({ detailId: '113', canWrite: true }), detailReason(stale)).entries.at(-1).actions[0], /data-action="work-retry" data-id="113"/, 'a Work Item Ploeg stopped retrying restarts the same way');
+
+  const manual = demoDetail('110');
+  manual.item = { ...manual.item, provider: 'manual', externalId: '' };
+  assert.equal(decisionPlan(manual, model({ detailId: '110', canWrite: true }), detailReason(manual)).entries.at(-1).text, 'Then press Try again.', 'a Work Item without a tracker task names no tracker');
+
+  const asked = demoDetail('111');
+  const question = detailMarkup(asked, model({ detailId: '111', canWrite: true }));
+  assert.match(question, /data-action="work-answer-open"/);
+  assert.doesNotMatch(question, /data-action="work-retry"/, 'answering restarts it with the answer');
+
+  const session = demoDetail('110');
+  session.shifts[0].closeReason = 'operator_failed';
+  session.item.latestShift = session.shifts[0];
+  assert.doesNotMatch(detailMarkup(session, model({ detailId: '110', canWrite: true })), /data-action="work-retry"/, 'the session retries it');
+
+  const approved = demoDetail('110');
+  approved.shifts[0].closeReason = 'review_approved';
+  approved.item = { ...approved.item, latestShift: approved.shifts[0], pullRequestState: 'open' };
+  assert.equal(detailReason(approved).code, 'approved_to_merge');
+  assert.doesNotMatch(detailMarkup(approved, model({ detailId: '110', canWrite: true })), /data-action="work-retry"/, 'merging finishes it');
+
+  const taken = demoDetail('110');
+  taken.shifts[0].closeReason = 'taken_over';
+  taken.item.latestShift = taken.shifts[0];
+  assert.doesNotMatch(detailMarkup(taken, model({ detailId: '110', canWrite: true })), /data-action="work-retry"/, 'hand-back continues it');
 });
