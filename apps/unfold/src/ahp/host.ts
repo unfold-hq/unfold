@@ -15,6 +15,7 @@ import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfi
 import { TrackerAutomations, automationsChannel, autonomousAutomationsMeta, isAutomationsChannel } from './automations.ts';
 import { WebSocketConnection, connectionToken, isWebSocketUpgrade, rejectUpgrade, upgradeToWebSocket } from './websocket.ts';
 import { Heartbeats, IdleSessions, RememberedClients, ServerSequence, heartbeatCheckMs, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
+import { PreparationProgress } from './preparation-progress.ts';
 import { AnnouncedCustomizations, customizationRefusal, gatewayToolCall, rootConfigRefusal, sessionCustomizations, type GatewaySubject } from './customizations.ts';
 import { outcomeMarkdown, sessionProgress, stopReason } from '../../public/core/progress.js';
 import { money } from '../../public/core/format.js';
@@ -298,6 +299,7 @@ export class AgentHost {
   private readonly idleSessions = new IdleSessions();
   private readonly sweeper: ReturnType<typeof setInterval>;
   private readonly heartbeats = new Heartbeats<Client>();
+  private readonly preparation = new PreparationProgress<Client>((client, params) => { if (this.clients.has(client) && client.initialized) this.send(client, { jsonrpc: '2.0', method: 'root/progress', params }); });
   private readonly heartbeat: ReturnType<typeof setInterval>;
   private readonly departing = new Map<string, ReturnType<typeof setTimeout>>();
   /** How long an active client whose last connection closed keeps its place, waiting for its reconnect: 30 seconds, as in VS Code's own host. */
@@ -423,6 +425,7 @@ export class AgentHost {
 
   private removePending(pending: PendingSession): void {
     this.pending.delete(pending.id);
+    this.preparation.forget(pending.id);
     this.store.deleteAgentHostViews(pending.id);
     if (this.activeClients.delete(pending.id)) this.persistActiveClients();
     this.notify(rootChannel, 'root/sessionRemoved', viewer => ({ channel: rootChannel, session: sessionChannel(pending.id, viewer.scheme) }), pending.user.id);
@@ -1134,6 +1137,7 @@ export class AgentHost {
     const actions: Json[] = [...terminal.actions];
     const ensureTurn = () => { if (!projection.activeTurn) actions.push(...this.openTurn(projection, session, session.objective, event.at)); return projection.activeTurn!; };
     actions.push(...stopRuns(projection.runs, event, projection.activeTurn, projection.turns));
+    if (this.preparation.watching) this.preparation.observe(session.id, event.type);
     switch (event.type) {
       case 'session.started': { ensureTurn(); actions.push(...this.addPart(projection, { kind: 'systemNotification', content: data.resumed ? 'Session resumed by the operator.' : 'Session started.' })); break; }
       case 'workspace.ready': { ensureTurn(); actions.push(...this.addPart(projection, { kind: 'systemNotification', content: `Workspace ready (${data.backend}, ${data.isolation}).` })); break; }
@@ -1430,10 +1434,24 @@ export class AgentHost {
     try {
       const result = await this.request(client, message.method, params);
       this.send(client, { jsonrpc: '2.0', id: message.id, result });
+      if (message.method === 'reconnect') this.reloadChatHistories(client, result?.snapshots);
     } catch (error) {
       const rpc = error instanceof RpcError ? error : new RpcError(codes.internal, error instanceof Error && 'status' in error ? publicError(error, true).message : catalogueMessage('internal_error'));
       this.send(client, { jsonrpc: '2.0', id: message.id, error: { code: rpc.code, message: rpc.message, ...(rpc.data !== undefined ? { data: rpc.data } : {}) } });
       if (rpc.code === codes.unsupportedVersion) { this.clients.delete(client); client.connection.close(1000, 'Unsupported protocol version'); }
+    }
+  }
+
+  /**
+   * A reconnect snapshot replaces a chat's turns without the client watching the turns it missed start, and VS Code 1.147
+   * then truncates its history to the last turn it watched before the next message. An empty `chat/turnsLoaded` adds no
+   * turn and is the action on which the client rebuilds its history from the turns it holds.
+   */
+  private reloadChatHistories(client: Client, snapshots: unknown): void {
+    for (const snapshot of Array.isArray(snapshots) ? snapshots as Json[] : []) {
+      if (!Array.isArray(snapshot?.state?.turns)) continue;
+      const action = { type: 'chat/turnsLoaded', turns: [], ...(typeof snapshot.state.turnsNextCursor === 'string' ? { turnsNextCursor: snapshot.state.turnsNextCursor } : {}) };
+      this.send(client, { jsonrpc: '2.0', method: 'action', params: { channel: snapshot.resource, action, serverSeq: ++this.serverSeq } });
     }
   }
 
@@ -1678,6 +1696,7 @@ export class AgentHost {
     this.makeRoomForProvisionalSession(client.user);
     const pending: PendingSession = { id: parsed.id, uri: channel, config, user: client.user, createdAt: new Date().toISOString(), usedAt: this.clock() };
     this.pending.set(parsed.id, pending);
+    this.preparation.remember(parsed.id, client, params.progressToken);
     if (activeClient) { this.activeClients.set(parsed.id, new Map([[client.clientId!, activeClient]])); this.persistActiveClients(); }
     client.subscriptions.add(channel);
     queueMicrotask(() => { this.broadcast(channel, { type: 'session/ready' }); if (activeClient) this.broadcast(channel, { type: 'session/activeClientSet', activeClient }); this.notify(rootChannel, 'root/sessionAdded', viewer => ({ channel: rootChannel, summary: this.pendingSummary(pending, viewer) }), client.user.id); });
@@ -1750,6 +1769,7 @@ export class AgentHost {
     const session = this.sessionFor(client.user, channel);
     if (!session) throw new RpcError(codes.sessionNotFound, 'Unfold has no such session, or it is not yours. Reopen it from the Unfold view.');
     if (['running', 'waiting_input', 'queued', 'paused', 'interrupted'].includes(session.status)) void this.engine.cancel(session.id, client.user).catch(() => {});
+    this.preparation.end(session.id);
     const publicId = this.publicId(session.id);
     for (const item of this.clients) for (const subscription of [...item.subscriptions]) if (subscribedSessionId(subscription) === publicId) item.subscriptions.delete(subscription);
     this.evict(session.id);
@@ -1777,6 +1797,7 @@ export class AgentHost {
       if (turnId) this.store.setSecret(`ahp-turn:${session.id}`, turnId);
     });
     this.pending.delete(pending.id);
+    this.preparation.begin(pending.id, session.id);
     this.summaries.set(session.id, this.fingerprint(session));
     this.store.clearAgentHostFlags(pending.id, statusBits.isRead, session.createdAt);
     this.notify(rootChannel, 'root/sessionSummaryChanged', viewer => { const summary = this.summary(session, viewer); return { channel: rootChannel, session: summary.resource, changes: { title: summary.title, status: summary.status, activity: summary.activity ?? null, modifiedAt: summary.modifiedAt, ...(summary.project ? { project: summary.project } : {}), ...catalogOf(summary) } }; }, session.ownerId);
@@ -1786,7 +1807,7 @@ export class AgentHost {
     if (turn) this.broadcast(chatChannel(pending.id), { type: 'chat/turnStarted', turnId: turn.id, startedAt: turn.startedAt, message: turn.message }, origin);
     if (unsent.length) this.store.appendEvent(session.id, unsentAttachmentsEvent, pending.user.id, { names: unsent });
     try { await this.engine.start(session.id, pending.user); }
-    catch (error) { this.broadcast(pending.uri, { type: 'session/creationFailed', error: { errorType: (error as Json)?.code ?? 'start_failed', message: (error as Error)?.message ?? 'Could not start the session' } }); }
+    catch (error) { this.preparation.end(session.id); this.broadcast(pending.uri, { type: 'session/creationFailed', error: { errorType: (error as Json)?.code ?? 'start_failed', message: (error as Error)?.message ?? 'Could not start the session' } }); }
     return undefined;
   }
 

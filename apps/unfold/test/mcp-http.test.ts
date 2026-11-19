@@ -194,7 +194,7 @@ test('server/discover and the stateless 2026-07-28 rules: headers must match the
   const unsupported = await post(unfold.url, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, { token: token(), version: '1900-01-01' });
   assert.equal(unsupported.status, 400);
   assert.equal(unsupported.json.error.code, -32022);
-  const unknown = await post(unfold.url, { jsonrpc: '2.0', id: 5, method: 'resources/list' }, { token: token() });
+  const unknown = await post(unfold.url, { jsonrpc: '2.0', id: 5, method: 'logging/setLevel', params: { level: 'info' } }, { token: token() });
   assert.equal(unknown.status, 404);
   assert.equal(unknown.json.error.code, -32601);
   assert.equal((await post(unfold.url, {}, { token: token(), method: 'GET' })).status, 405);
@@ -712,11 +712,11 @@ test('over HTTP, MCP Apps reaches only clients that declare it: per request for 
   const init = await legacy(6, 'initialize', 'host-a', { protocolVersion: '2025-11-25', capabilities: ui, clientInfo: { name: 'host-a', version: '1' } });
   assert.deepEqual(init.json.result.capabilities.extensions, { 'io.modelcontextprotocol/ui': {} });
   assert.equal(viewOf(await legacy(7, 'tools/list', 'host-a')), 'ui://unfold/work-item', 'a later stateless request of the same client gets the view');
-  assert.equal((await legacy(8, 'resources/list', 'host-a')).json.result.resources.length, 2);
+  assert.deepEqual((await legacy(8, 'resources/list', 'host-a')).json.result.resources.map((resource: { uri: string }) => resource.uri.split(':')[0]), ['unfold', 'ui', 'ui']);
   assert.equal(viewOf(await legacy(9, 'tools/list', 'host-b')), undefined, 'another client of the same person does not');
   await legacy(10, 'initialize', 'host-a', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'host-a', version: '1' } });
   assert.equal(viewOf(await legacy(11, 'tools/list', 'host-a')), undefined, 'initializing without the extension forgets it');
-  assert.equal((await legacy(12, 'resources/list', 'host-a')).json.error.code, -32601);
+  assert.deepEqual((await legacy(12, 'resources/list', 'host-a')).json.result.resources.map((resource: { uri: string }) => resource.uri), ['unfold://now'], 'the card resources go with the extension; the context resource stays');
 });
 
 test('over HTTP, the Tasks extension follows the person\'s mcp.tasks flag, and a task request must name its task in Mcp-Name', async t => {
@@ -740,6 +740,26 @@ test('over HTTP, the Tasks extension follows the person\'s mcp.tasks flag, and a
   const undeclared = await post(on.unfold.url, { jsonrpc: '2.0', id: 6, method: 'tasks/get', params: { taskId: 'abc', _meta: meta() } }, { token: on.token() });
   assert.equal(undeclared.json.error.code, -32021);
   assert.deepEqual(undeclared.json.error.data, { requiredCapabilities: { extensions: { 'io.modelcontextprotocol/tasks': {} } } });
+});
+
+test('over HTTP, a 2025-11-25 client\'s core tasks are remembered from initialize and follow the person\'s mcp.tasks flag', async t => {
+  const declared = { elicitation: { form: {} }, tasks: { list: {}, cancel: {}, requests: { elicitation: { create: {} } } } };
+  const handOffOf = (answer: { json: any }) => answer.json.result.tools.find((tool: { name: string }) => tool.name === 'unfold_hand_off');
+  const on = await served(t, {}, config => { config.flags = { document: { flags: { 'mcp.tasks': { defaultVariant: 'on' } } }, unknown: [] }; });
+  const legacy = (id: number, method: string, agent: string, params?: Record<string, unknown>) => post(on.unfold.url, { jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }, { token: on.token(), version: '2025-11-25', headers: { 'user-agent': agent } });
+  assert.equal(handOffOf(await legacy(1, 'tools/list', 'vscode')).execution, undefined, 'nothing is assumed before initialize');
+  const init = await legacy(2, 'initialize', 'vscode', { protocolVersion: '2025-11-25', capabilities: declared, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } });
+  assert.deepEqual(init.json.result.capabilities.tasks, { cancel: {}, requests: { tools: { call: {} } } });
+  assert.deepEqual(handOffOf(await legacy(3, 'tools/list', 'vscode')).execution, { taskSupport: 'optional' }, 'a later stateless request of the same client');
+  const unknown = await legacy(4, 'tasks/get', 'vscode', { taskId: 'abc' });
+  assert.equal(unknown.status, 200);
+  assert.equal(unknown.json.error.code, -32602);
+  assert.equal((await legacy(5, 'tasks/get', 'other-client', { taskId: 'abc' })).json.error.code, -32601, 'another client of the same person declared nothing');
+
+  const off = await served(t);
+  const offInit = await post(off.unfold.url, { jsonrpc: '2.0', id: 6, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: declared, clientInfo: { name: 'Visual Studio Code', version: '1.147.0' } } }, { token: off.token(), version: '2025-11-25', headers: { 'user-agent': 'vscode' } });
+  assert.equal(offInit.json.result.capabilities.tasks, undefined, 'off by default');
+  assert.equal((await post(off.unfold.url, { jsonrpc: '2.0', id: 7, method: 'tasks/get', params: { taskId: 'abc' } }, { token: off.token(), version: '2025-11-25', headers: { 'user-agent': 'vscode' } })).json.error.code, -32601);
 });
 
 async function streamedCall(url: string, message: Record<string, any>, access: string, agent: string) {

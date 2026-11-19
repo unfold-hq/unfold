@@ -120,7 +120,7 @@ export function createBridge({ post, listen }) {
  */
 export async function callTool(bridge, name, args) {
   const result = await bridge.request('tools/call', { name, arguments: args });
-  if (result?.resultType === 'input_required') return { done: false, unconfirmed: true, text: 'Your AI client did not show you the confirmation, so nothing changed and nothing was spent.' };
+  if (result?.resultType === 'input_required') return { done: false, unconfirmed: true, text: notConfirmed };
   const text = Array.isArray(result?.content) ? result.content.filter(part => part?.type === 'text').map(part => String(part.text)).join(' ') : '';
   if (result?.isError) return { done: false, error: true, text: text || 'The tool refused.' };
   return { done: true, structured: result?.structuredContent ?? null, text };
@@ -128,6 +128,114 @@ export async function callTool(bridge, name, args) {
 
 /** Whether a tool the view calls may change work or spend, so the person sees a note that their client asks them first. */
 export function confirmsFirst(name) { return changesWork.has(name); }
+
+const notConfirmed = 'Your AI client did not show you the confirmation, so nothing changed and nothing was spent.';
+const confirmsWithPerson = 'Unfold asks the person to confirm first, exactly as for that tool; nothing changes without that confirmation.';
+const actionLabels = { unfold_ask: 'Ask', unfold_answer_question: 'Answer the agent', unfold_add_note: 'Leave a note for the next Run', unfold_approve_work: 'Approve' };
+const textInput = (description, maxLength) => ({ type: 'string', minLength: 1, maxLength, description });
+const cardToolSpecs = [
+  { act: 'ask', name: 'work_item_ask', tool: 'unfold_ask', title: 'Ask about the Work Item on the card',
+    describe: which => `Ask one question about ${which}, the one the Unfold card shows. Same as unfold_ask for that Work Item: a standing question is answered from the record, free; any other needs use_model: true, and then ${confirmsWithPerson}`,
+    properties: { question: textInput('One question, under 2000 characters', 2000), use_model: { type: 'boolean', description: 'Ask a model when the record does not answer; the person must confirm the spend' } }, required: ['question'],
+    args: (id, input) => ({ id, question: input.question, ...(input.use_model === true ? { use_model: true } : {}) }) },
+  { act: 'answer', name: 'work_item_answer_question', tool: 'unfold_answer_question', title: 'Answer the agent on the Work Item on the card',
+    describe: which => `Answer the question the agent asked on ${which}, the one the Unfold card shows. Same as unfold_answer_question for that Work Item, answering its oldest waiting question. ${confirmsWithPerson}`,
+    properties: { text: textInput('The answer for the agent, under 2000 characters', 2000) }, required: ['text'], args: (id, input) => ({ id, text: input.text }) },
+  { act: 'note', name: 'work_item_add_note', tool: 'unfold_add_note', title: 'Leave a note on the Work Item on the card',
+    describe: which => `Leave a note for the next Run of ${which}, the one the Unfold card shows. Same as unfold_add_note for that Work Item. ${confirmsWithPerson}`,
+    properties: { text: textInput('The note for the next Run, under 4096 characters', 4096) }, required: ['text'], args: (id, input) => ({ id, text: input.text }) },
+  { act: 'approve', name: 'work_item_approve', tool: 'unfold_approve_work', title: 'Approve the Work Item on the card',
+    describe: which => `Approve ${which}, the proposal the Unfold card shows, so Ploeg queues it for its Team. Same as unfold_approve_work for that Work Item. ${confirmsWithPerson}`,
+    properties: {}, required: [], args: id => ({ id }) },
+];
+
+function whichWorkItem(id) { return /^[\w.-]{1,64}$/.test(String(id ?? '')) ? `Work Item ${id}` : 'the Work Item'; }
+
+function cardSpecsFor(model) {
+  if (!model?.id || !Array.isArray(model.actions)) return [];
+  return cardToolSpecs.filter(spec => model.actions.includes(spec.act));
+}
+
+/**
+ * The tools the card registers with its host for the Work Item it shows, as `tools/list` entries: one per action the card
+ * offers, bound to that Work Item. Each forwards to its `unfold_*` tool, so the person confirms exactly as for that tool.
+ * The definitions name only the Work Item id, never text from a tracker or an agent.
+ */
+export function cardTools(model) {
+  const which = whichWorkItem(model?.id);
+  return cardSpecsFor(model).map(spec => ({
+    name: spec.name, title: spec.title, description: spec.describe(which),
+    inputSchema: { type: 'object', properties: spec.properties, required: spec.required, additionalProperties: false },
+    annotations: { title: spec.title, readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }));
+}
+
+function refusal(text) { return { isError: true, content: [{ type: 'text', text }] }; }
+
+function invalidInput(spec, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'arguments must be an object';
+  const extra = Object.keys(input).filter(key => !(key in spec.properties));
+  if (extra.length) return `unknown argument ${extra.join(', ')}; the Work Item is the one on the card`;
+  for (const key of spec.required) if (typeof input[key] !== 'string' || !input[key].trim()) return `${key} is required`;
+  for (const [key, schema] of Object.entries(spec.properties)) {
+    if (input[key] === undefined) continue;
+    if (typeof input[key] !== schema.type) return `${key} must be a ${schema.type}`;
+    if (schema.maxLength && input[key].length > schema.maxLength) return `${key} is longer than ${schema.maxLength} characters`;
+  }
+  return null;
+}
+
+/**
+ * Answers the host's `tools/call` for one of the card's tools: checks the input, then calls the matching `unfold_*` tool
+ * for the Work Item on the card through the host's `tools/call`, and hands its result back. The card never answers a
+ * confirmation; a result that still needs one comes back as an error saying nothing changed.
+ */
+export async function runCardTool(bridge, model, params) {
+  const name = String(params?.name ?? '');
+  const specs = cardSpecsFor(model);
+  const spec = specs.find(entry => entry.name === name);
+  if (!spec) return refusal(`The Unfold card offers no tool ${name} now${specs.length ? `; it offers ${specs.map(entry => entry.name).join(', ')}` : ''}.`);
+  const input = params?.arguments ?? {};
+  const invalid = invalidInput(spec, input);
+  if (invalid) return refusal(`${spec.name}: ${invalid}.`);
+  let result;
+  try { result = await bridge.request('tools/call', { name: spec.tool, arguments: spec.args(model.id, input) }); }
+  catch (error) { return refusal(`${spec.tool} did not answer: ${String(error?.message ?? error)}`); }
+  if (result?.resultType === 'input_required') return refusal(notConfirmed);
+  return result ?? refusal(`${spec.tool} did not answer.`);
+}
+
+function outcomeOf(tool, answer) {
+  if (answer.unconfirmed) return 'not confirmed, so nothing changed';
+  if (!answer.done) return 'refused, so nothing changed';
+  const result = answer.structured ?? {};
+  if (tool === 'unfold_ask') {
+    if (result.asked === true) return 'answered; the answer is on the card';
+    return result.needsModel ? 'the record does not answer it, and no model was asked' : 'not answered';
+  }
+  return result.done === true ? 'done' : 'not done';
+}
+
+/**
+ * The one-line note the card gives the model after the person acted on it: which action, on which Work Item, and what
+ * came of it. It holds only facts Unfold produced, never text the person typed or a tracker or agent wrote.
+ */
+export function actionNote(tool, id, answer) {
+  const label = actionLabels[tool];
+  if (!label || !answer) return null;
+  return `On the Unfold card, the person chose ${label} on ${whichWorkItem(id)}. Result: ${outcomeOf(tool, answer)}.`;
+}
+
+/**
+ * Runs one action the person took on the card, then, when the host takes model context, tells the model what came of
+ * it with `ui/update-model-context`. The note follows the tool's answer, so it never claims an action that did not happen.
+ */
+export async function actFromCard(bridge, tool, args, { tellsModel = false } = {}) {
+  const answer = await callTool(bridge, tool, args).catch(error => ({ done: false, error: true, text: String(error.message) }));
+  const note = tellsModel ? actionNote(tool, args?.id, answer) : null;
+  if (note) bridge.request('ui/update-model-context', { content: [{ type: 'text', text: note }] }).catch(() => {});
+  return answer;
+}
 
 function el(doc, tag, attrs = {}, ...children) {
   const node = doc.createElement(tag);
@@ -331,6 +439,16 @@ export async function boot(win) {
   let showing = null;
   let acting = 0;
   let poller = null;
+  let tellsModel = false;
+  let toolsListed = false;
+  let toolsShown = '';
+  const toolsKey = () => JSON.stringify(cardTools(showing).map(tool => tool.description));
+  const toolsMayHaveChanged = () => {
+    const key = toolsKey();
+    if (key === toolsShown) return;
+    toolsShown = key;
+    if (toolsListed) bridge.notify('notifications/tools/list_changed', {});
+  };
   const seen = { page: doc.visibilityState !== 'hidden', screen: true };
   const announcer = doc.getElementById('unfold-announce');
   const announce = text => { if (announcer) announcer.textContent = text; };
@@ -338,6 +456,7 @@ export async function boot(win) {
   const showCard = data => {
     showing = keepDrafts(root, () => renderWorkItem(doc, root, data, ui));
     addBack();
+    toolsMayHaveChanged();
     return showing;
   };
   const follow = data => {
@@ -363,7 +482,7 @@ export async function boot(win) {
     },
   };
   const perform = async (tool, args, say) => {
-    const answer = await callTool(bridge, tool, args).catch(error => ({ done: false, error: true, text: String(error.message) }));
+    const answer = await actFromCard(bridge, tool, args, { tellsModel });
     if (!answer.done) return say(answer.text, answer.unconfirmed ? 'attention' : 'danger');
     const result = answer.structured ?? {};
     if (tool === 'unfold_ask' && result.needsModel && args.use_model !== true) {
@@ -387,18 +506,28 @@ export async function boot(win) {
     if (view !== 'now' || !nowData) return;
     const back = doc.createElement('button');
     back.type = 'button'; back.className = 'back'; back.textContent = '← What waits for you';
-    back.addEventListener('click', () => { showing = null; unfollow(); renderNow(doc, root, nowData, ui); });
+    back.addEventListener('click', () => { showing = null; unfollow(); renderNow(doc, root, nowData, ui); toolsMayHaveChanged(); });
     root.prepend(back);
   };
   bridge.onNotification('ui/notifications/tool-result', result => {
     const data = result?.structuredContent;
     if (!data || result.isError) { unfollow(); root.textContent = 'Unfold did not answer this call; the text answer says why.'; return; }
-    if (view === 'now') { nowData = data; showing = null; unfollow(); renderNow(doc, root, data, ui); } else { showCard(data); follow(data); }
+    if (view === 'now') { nowData = data; showing = null; unfollow(); renderNow(doc, root, data, ui); toolsMayHaveChanged(); } else { showCard(data); follow(data); }
   });
   bridge.onNotification('ui/notifications/host-context-changed', theme);
   bridge.onRequest('ui/resource-teardown', () => { unfollow(); return {}; });
   bridge.onRequest('ping', () => ({}));
-  const init = await bridge.request('ui/initialize', { protocolVersion: appProtocolVersion, appCapabilities: { availableDisplayModes: ['inline'] }, clientInfo: { name: 'unfold-view', version: '1' } });
+  bridge.onRequest('tools/list', () => { toolsListed = true; toolsShown = toolsKey(); return { tools: cardTools(showing) }; });
+  bridge.onRequest('tools/call', async params => {
+    acting += 1;
+    try {
+      const result = await runCardTool(bridge, showing, params);
+      if (result?.structuredContent?.done === true && showing) ui.show(showing.id);
+      return result;
+    } finally { acting -= 1; }
+  });
+  const init = await bridge.request('ui/initialize', { protocolVersion: appProtocolVersion, appCapabilities: { availableDisplayModes: ['inline'], tools: { listChanged: true } }, clientInfo: { name: 'unfold-view', version: '1' } });
+  tellsModel = Boolean(init?.hostCapabilities?.updateModelContext);
   theme(init?.hostContext);
   bridge.notify('ui/notifications/initialized', {});
   if (typeof win.ResizeObserver === 'function') {
