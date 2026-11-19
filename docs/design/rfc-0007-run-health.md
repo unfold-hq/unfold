@@ -6,7 +6,7 @@
 
 ## The problem, from one Run
 
-[Work Item 190](https://unfold.webgrip.dev/#work/190) ([VIK-2049](https://vikunja.webgrip.dev/tasks/2049)) asked bronze to make a CI job finish under 60 minutes. Its Run 305, on 2026-10-17:
+Work Item 190 ([VIK-2049](https://vikunja.webgrip.dev/tasks/2049)) asked bronze to make a CI job finish under 60 minutes. Its Run 305, on 2026-10-17:
 
 | Time (UTC) | What happened | What the card showed |
 | --- | --- | --- |
