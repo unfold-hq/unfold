@@ -16,6 +16,13 @@ extra_javascript:
   - assets/integrations.js
 nav:
   - Start here: index.md
+  - Get started:
+      - Pick your path: get-started/index.md
+      - Evaluate Unfold: get-started/evaluate.md
+      - Run your own installation: get-started/self-host.md
+      - Use Unfold day to day: get-started/use-unfold.md
+      - Hosted Unfold for agencies (proposed): get-started/agency.md
+      - Contribute to Unfold: get-started/contribute.md
   - Try it:
       - Both applications (demo): workflows/local-demo.md
       - Unfold without Ploeg (demo): unfold/operations/demo.md

@@ -21,8 +21,11 @@ A unit of work, a **Work Item**, is something you have decided to do, or a probl
 
 The application lives in this repository. Ploeg lives at [github.com/ploeg-hq/ploeg](https://github.com/ploeg-hq/ploeg), and Unfold depends on one tested release of it: its contract bundle, unpacked into `apps/ploeg`, and its Go module ([ADR-0039](adr/adr-0039-unfold-depends-on-a-released-ploeg-through-its-contract-bundle-and-go-module.md)). The two deploy separately ([ADR-0002](adr/adr-0002-ploeg-is-the-only-engine.md)).
 
+New here? [Get started](get-started/index.md) has one path each for evaluating Unfold, running your own installation, using it day to day, the hosted service for agencies (not built) and contributing.
+
 | I want to… | Go to |
 | --- | --- |
+| Find the path for my role, and who provides which credential | [Get started](get-started/index.md) |
 | See it work without spending money | [Run the local demo](workflows/local-demo.md) (deterministic, no model calls) |
 | Understand how a Work Item becomes a pull request | [How work flows](concepts/how-work-flows.md) |
 | Understand the parts and why they exist | [Architecture](concepts/architecture.md) |
