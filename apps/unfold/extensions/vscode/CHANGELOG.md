@@ -2,35 +2,76 @@
 
 ## Unreleased
 
+- In the Agents window, the Command Palette leaves out the commands that need a view, the status bar or a checkout: **Refresh**, **Refresh Tasks**, **Refresh Work**, **Open Agents Window**, **Send Selection to Remote Session…**, **Send Current File to Remote Session…** and **Follow Hand-offs in a Claude Code Terminal**, read from VS Code's `isSessionsWindow` context key. Every editor window still offers them. The README opens with what the extension does in each window.
+
+## 0.4.0-rc.151
+
 - The extension reaches a workbench behind an access gateway, an identity-aware proxy such as Cloudflare Access. **Unfold: Set Access Gateway Headers** stores the headers the gateway accepts, for example the two halves of a service token, in SecretStorage under the workbench's origin, and the extension sends them with every API call, event stream and download to that workbench only. It refuses a header it sets itself (`Authorization`, `Cookie`, `Origin` and the like), and **Sign Out** leaves the headers in place.
 - A redirect or a refusal from something in front of the workbench now says what happened. A redirect to another host or path reads as an access gateway asking for a sign-in the editor cannot complete, names where the request was sent without its query, and offers **Set Access Gateway Headers**; the status bar reads **Unfold: access gateway**. A redirect to the same path on another origin names the origin to connect to. A 401 or 403 that does not name a fault as the Unfold JSON API does, whether the gateway answers in HTML or in JSON of its own, no longer signs the editor out of the workbench.
+
+## 0.4.0-rc.126
+
 - VS Code follows the work you hand off from any client: the browser, this extension, or an AI client through `unfold-mcp` such as Claude Code, Copilot, ChatGPT or claude.ai. **Handed off by you** on Now lists your recent hand-offs with their Team, state, why they wait, pull request and spend, read from the new `GET /api/handoffs`; a status bar item counts those in flight ("2 handed off") and hides at zero. A hand-off that starts waiting on you notifies with **Answer**, and one whose pull request is ready with **Review** and **Open pull request**, once across windows and reloads. **Answer** sends your answers through the browser's routes after the same confirmation of what restarting or resuming costs; closing an input sends nothing. `unfold.notifications.handOffs` turns the notifications off.
 - **Unfold: Follow Hand-offs in a Claude Code Terminal** opens an integrated terminal in the workspace running `claude`, where hand-offs to Unfold appear as MCP tasks under `/tasks`. It first checks that Claude Code is installed and 2.1.304 or later, that the CLI has an `unfold-mcp` server, and that nothing keeps it off protocol 2026-07-28 or turns tasks off, and writes each check to the **Unfold: Claude Code** output.
 - The Agents window's connection token stays out of Settings Sync. Before it writes a token into `chat.remoteAgentHosts`, the extension adds that setting to `settingsSync.ignoredSettings`, because VS Code 1.144 registers it application-scoped without `ignoreSync` and reads the token only from there. A token that sat in a synced entry is replaced and revoked. The token check sends the token in an `Authorization` header instead of the URL.
+
+## 0.4.0-rc.109
+
 - Agents in VS Code chat get three read-only tools: **Unfold: What Waits for Me** (`unfold_now`), **Unfold: Work Item State** (`unfold_get_work`) and **Unfold: Find Work Items** (`unfold_find_work`), registered through `vscode.lm.registerTool` when the editor has it. They read the routes the Now view and the Work Item panel read, quote tracker and agent text as untrusted data like `unfold-mcp`, and say in one sentence when the extension is signed out or offline.
 - The extension declares that it runs in VS Code 1.143's Agents window (`capabilities.agentsWindow.supported`), which needs no API proposal, so its commands and the `ploeg-mcp` server definition are available there. In that window, recognised by the `agent-sessions.code-workspace` workspace VS Code opens, it shows no notifications and leaves the **Open the Work Item in VS Code** links to the editor window. `extensions.supportAgentsWindow` with `"webgrip.unfold": false` turns it off.
+
+## 0.4.0-rc.81
+
 - The browser sign-in names the machine it comes from: the extension sends `{client: "vscode", host}` with its short host name, so the approval page and Settings › Signed-in editors read `VS Code on <host>` instead of a row of identical **VS Code** sign-ins. A workbench older than this keeps the plain name.
+
+## 0.4.0-rc.68
+
 - A gated session whose independent checks passed offers **Accept and open pull request** when the workbench publishes: the primary action in the session and Work Item panels, and the command **Unfold: Accept and Open Pull Request**. It sends the displayed candidate, receipt and policy to `POST /api/sessions/{id}/delivery/publish`, and the panels then show the pull request stage (Publishing…, Pull request #N, Needs recovery or Refused). Every other Accept says it only records your decision.
+
+## 0.4.0-rc.63
+
 - The Work Item panel says each thing once and in plain words. The card headline leads with the outcome ("Reviewer approved · 1 file +57 −45") while the header pill keeps the state. The header names the tracker ticket (`VIK-1505`, linked) instead of a truncated internal id such as `#de-vloer:ce265d…`, which moves to the header's tooltip. **Rounds** and "1 Shift" become **Agent runs** and **Attempts** ("2 agent runs in 1 attempt"), with the glossary meaning of Round and Shift on hover. A folded step report previews its first paragraph as plain text instead of raw table pipes, and Markdown tables align their columns. In review, **Download change** saves the captured Git bundle or patch, and the panel says that **Accept** records your decision and pushes, merges and publishes nothing.
+
+## 0.4.0-rc.60
+
 - A session's Work Item panel reads as one decision. The state shows once, in the header. The card gives a plain headline and why it stopped ("At 16:40 Ploeg did not answer in time, so Unfold stopped the session"). It then lists, problems first, what to check before deciding: the files changed, the reviewer's verdict and where it came from, and each recorded check. **View change** leads until the panel has opened the change, then **Finish and review** does. Run again stays beside it, and Investigate, Open session, the browser and Cancel move under **More**. Spend is one line, "≈ US$ 0,03 of US$ 0,25 spent", whose tooltip says the gateway measured it and Ploeg confirms it later. The steps read "What the agents did", and an interrupted reviewer's verdict reads "Approved, not recorded". The timeline, notes, cost per role and Ploeg's record fold under **Details**, and a brief that only repeats the title is left out. **Deliver the approved work** is now **Finish and review**, and its confirmation no longer promises a pull request: finishing completes the session for you to accept or reject, and publication is disabled.
+
+## 0.4.0-rc.58
+
 - Sessions you own notify when they need you, from the shared progress states: a question or permission request offers **Answer**, a result ready for review **Review**, a stop with delivery on offer **Deliver**, and other stops with a recovery and failures **Open**. Each state change notifies once, an open panel's event stream makes it near-immediate, and with every view closed the extension still checks every 30 seconds. `unfold.notifications.needsYou` (on by default) turns them off. `unfold.notifications` becomes `unfold.notifications.workItems` and covers only Ploeg Work Items on Now; an existing value moves over on activation. The README records that VS Code 1.141 shows these notifications inside the window only.
+
+## 0.4.0-rc.55
+
 - The Work Item panel shows what a session is doing. When an Unfold session drives the Work Item, the panel leads with one state from the shared statechart (`public/core/progress.js`), so a stopped Work Item never reads "1 Run running": the headline ("Reviewer approved · stopped before delivery"), why and what next, a live line with the working Role, Round, a ticking clock, its last activity and spend against budget, then Steps, Change and the facts where Unfold and Ploeg disagree. Actions run in VS Code: **View change** opens the multi-file diff editor from each file's before and after, **Investigate** opens the read-only diagnosis, and **Deliver approved work** (with a confirmation that it opens a pull request) and **Run again** (a new queued session, no confirmation) appear when `GET /api/sessions/{id}/recovery` offers them. The panel follows the session's event stream while visible. Ploeg's `operator` Run moves under **As Ploeg records it** and reads **Stopped** once the Work Item is not leased or its session stopped; Rounds never read 0 beside Round 1.
 - Now lists sessions by the same state: running sessions under Running with Role, elapsed time and spend; asking, stopped and failed sessions under Needs you; completed ones under Ready for your review. A Work Item a session drives is shown and counted once. The status bar names the working Role with a running clock while exactly one session runs, and a click opens its Work Item.
 
-- After sign-in, Unfold adds itself to VS Code's Agents window by writing `chat.remoteAgentHosts` into the default profile's user `settings.json`, because VS Code 1.141 refuses that setting through the configuration API in editor windows. Comments, other settings and indentation are kept, and the file is replaced atomically. A token the workbench still accepts is reused instead of minting another, and an unparseable or unwritable file stops before a token is minted and offers **Copy address**. **Attach as Agent Host** is now **Connect VS Code Agents Window**: it is idempotent and offers **Open Agents Window**. Opt out with `unfold.agentHost.autoConnect`.
+## 0.4.0-rc.52
+
 - A status bar item confirms that VS Code really attached: **Unfold · Agents window ✓** once an Agents window is connected with this editor's token, read from `GET /api/agent-host` every 20 seconds, or **not connected** with **Open Agents Window**, **Reconnect** and **Troubleshoot**.
 - The browser's **Connect VS Code** (Settings › Signed-in editors, and the account menu) opens `vscode://webgrip.unfold/connect-agents-window`: the extension adds the Agents window entry for the workbench the link names, signs in first when needed, and offers **Open Agents Window**.
 - The **Get started** walkthrough gains **Use Unfold from the Agents window**, and **Unfold: Open Agents Window** adds the entry when it is missing and opens the window.
 - **Connect VS Code Agents Window** and the status item say how to start a session there: **New → Workspace ▾ → Unfold · <repository>**.
 - The Agents window entry is named **Unfold**, or **Unfold (<host>)** for each workbench once there are several; a name the person changed is kept.
 - Signing out revokes the Agents window's connection token on the workbench before ending the sign-in, and a token the workbench rejected is revoked when the extension replaces it (`DELETE /api/agent-host/tokens/:id`).
+
+## 0.4.0-rc.51
+
+- After sign-in, Unfold adds itself to VS Code's Agents window by writing `chat.remoteAgentHosts` into the default profile's user `settings.json`, because VS Code 1.141 refuses that setting through the configuration API in editor windows. Comments, other settings and indentation are kept, and the file is replaced atomically. A token the workbench still accepts is reused instead of minting another, and an unparseable or unwritable file stops before a token is minted and offers **Copy address**. **Attach as Agent Host** is now **Connect VS Code Agents Window**: it is idempotent and offers **Open Agents Window**. Opt out with `unfold.agentHost.autoConnect`.
+
+## 0.4.0-rc.30
+
 - **Check Out Branch** switches the open clone of a Work Item's repository to the branch Ploeg works on: from the Work Item panel, from Now and Work rows, and from the browser's **Open in VS Code** link (`vscode://webgrip.unfold/checkout`). It fetches through VS Code's Git extension, asks before switching a folder with uncommitted changes or when a link asked, and offers the git command or a clone when no open folder matches.
+
+## 0.4.0-rc.29
+
 - The sidebar opens on **Now**: Ready for your review (with the pull request number), Needs you (led by its reason), Proposed and Running (Role, Round, elapsed time and cost so far), across every Team you may see. This is the browser's Now page, read from `GET /api/ploeg/now`. Supervised sessions waiting for an answer appear under Needs you. Rows open the Work Item panel; inline icons open the pull request and the browser.
 - The activity-bar badge and status bar count what is ready for your review or needs you, plus running Runs. A failed session no longer keeps the badge lit. New Needs-you items notify, and so do new review items under `unfold.notifications: all`; the demo never notifies.
 - **Linked Tasks** is now **Tasks**: a task Ploeg holds shows its state and reason. **Ploeg** is now **Work**: lanes and items are named as in the browser, Needs-you items carry their reason, and empty lanes are hidden. **Sessions** moves last, starts collapsed, and shows only in the demo, with shared execution or when sessions exist.
 - States, reasons, amounts and dates come from the browser's own `public/core/states.js`, `reasons.js` and `format.js`, shipped in the extension: `US$ 1.234,50`, 24-hour times, "Not reported" for unknown spend. Status tones are contributed theme colours (`unfold.live`, `unfold.attention`, `unfold.review`, `unfold.success`, `unfold.danger`, `unfold.severe`) that default to the theme's own colours.
 - The Work Item panel leads with the state, its reason and one next action, with a facts row (cost marked observed and not settled, budget, Runs, Rounds, Team) and the cost per role. Below it come the pull requests (CI, failing checks, human reviews, size), the writer's problem and solution, and the Runs by Round (outcome, agent verdict, failure cause, cost, duration). The brief comes last. Work Items without a tracker task, such as proposals, open the same panel. Long lines and tables no longer push the toolbar off the page, and team roles no longer start with a stray arrow.
 - Browser links open `#work/<id>` and `#now` instead of the legacy `#ploeg` route.
+
+## 0.4.0-rc.20
 
 - Selecting a linked task opens a task view instead of a plain-text preview: the tracker description rendered as inert Markdown (Vikunja HTML is converted on the server), labels with their colours, assignees, priority and due date, and a **Glide** card that states whether Ploeg has the task, its state, attempts, spend and pull request.
 - **Hand to Ploeg** from the task view: pick a team (the last one is remembered) and confirm; the workbench assigns that team's tracker user and comments who handed it over. Boards pinned to one Ploeg team offer only that team. **Take back** while the item is still queued. The view polls quickly for up to 90 seconds after a hand-off. A task whose description is too long opens shortened and says so.
