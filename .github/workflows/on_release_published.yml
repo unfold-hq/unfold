@@ -327,74 +327,63 @@ jobs:
       - name: Stamp the release version into the tagged tree
         shell: bash
         run: node apps/unfold/scripts/stamp-version.mjs "$VERSION"
-      - name: Name the Marketplace version
+      - name: Name the extension version
         shell: bash
-        run: echo "MARKETPLACE_VERSION=$(python3 scripts/marketplace_version.py "$VERSION")" >> "$GITHUB_ENV"
-      - name: Reuse the VSIXes already on the release, or package them from the tagged tree
+        run: echo "EXTENSION_VERSION=$(python3 scripts/extension_version.py "$VERSION")" >> "$GITHUB_ENV"
+      - name: Reuse the VSIX already on the release, or package it from the tagged tree under the extension version
         shell: bash
         run: |
           set -euo pipefail
           test "$(node -p "require('./apps/unfold/extensions/vscode/package.json').version")" = "$VERSION"
           npm ci --no-audit --no-fund --prefix apps/unfold/extensions/vscode
           cd apps/unfold/extensions/vscode
-          package_or_reuse() {
-            local vsix="$1" version="$2"
-            if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$vsix" --pattern "${vsix}.sha256" --clobber 2>/dev/null && [ -s "$vsix" ]; then
-              sha256sum -c "${vsix}.sha256"
-              echo "Reusing $vsix from $TAG, so a retry publishes the same bytes."
-              return
-            fi
+          vsix="unfold-${VERSION}.vsix"
+          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$vsix" --pattern "${vsix}.sha256" --clobber 2>/dev/null && [ -s "$vsix" ]; then
+            sha256sum -c "${vsix}.sha256"
+            echo "Reusing $vsix from $TAG, so a retry publishes the same bytes."
+          else
             rm -f "$vsix" "${vsix}.sha256"
-            local prerelease=()
+            prerelease=()
             [[ "$VERSION" == *-* ]] && prerelease=(--pre-release)
-            npm pkg set version="$version"
+            npm pkg set version="$EXTENSION_VERSION"
             npm run package -- --out "$vsix" "${prerelease[@]}"
-            npm pkg set version="$VERSION"
             test -s "$vsix"
             sha256sum "$vsix" > "${vsix}.sha256"
-          }
-          package_or_reuse "unfold-${VERSION}.vsix" "$VERSION"
-          if [ "$MARKETPLACE_VERSION" != "$VERSION" ]; then
-            package_or_reuse "unfold-marketplace-${MARKETPLACE_VERSION}.vsix" "$MARKETPLACE_VERSION"
           fi
+          test "$(unzip -p "$vsix" extension/package.json | node -p 'JSON.parse(require("fs").readFileSync(0)).version')" = "$EXTENSION_VERSION"
       - name: Verify the listing and the packaged contents
         shell: bash
-        run: |
-          set -euo pipefail
-          VSIX_PATH="extensions/vscode/unfold-${VERSION}.vsix" npm --prefix apps/unfold run extension:verify
-          if [ "$MARKETPLACE_VERSION" != "$VERSION" ]; then
-            VSIX_PATH="extensions/vscode/unfold-marketplace-${MARKETPLACE_VERSION}.vsix" npm --prefix apps/unfold run extension:verify
-          fi
-      - name: Sign the VSIXes keyless and verify the signatures with cosign verify-blob
+        env:
+          VSIX_PATH: extensions/vscode/unfold-${{ needs.parse-release-tag.outputs.version }}.vsix
+        run: npm --prefix apps/unfold run extension:verify
+      - name: Sign the VSIX keyless and verify the signature with cosign verify-blob
         shell: bash
         working-directory: apps/unfold/extensions/vscode
         run: |
           set -euo pipefail
+          vsix="unfold-${VERSION}.vsix"
           tools=(mise exec cosign@2.6.5 --)
-          for vsix in unfold-*.vsix; do
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${vsix}.sigstore.json" --clobber 2>/dev/null || "${tools[@]}" cosign sign-blob --yes --bundle "${vsix}.sigstore.json" "$vsix"
-            "${tools[@]}" cosign verify-blob --bundle "${vsix}.sigstore.json" \
-              --certificate-identity-regexp '^https://github\.com/unfold-hq/unfold/\.github/workflows/on_release_published\.yml@refs/tags/unfold-v0\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$vsix"
-          done
-      - name: Attest the VSIXes' build provenance
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${vsix}.sigstore.json" --clobber 2>/dev/null || "${tools[@]}" cosign sign-blob --yes --bundle "${vsix}.sigstore.json" "$vsix"
+          "${tools[@]}" cosign verify-blob --bundle "${vsix}.sigstore.json" \
+            --certificate-identity-regexp '^https://github\.com/unfold-hq/unfold/\.github/workflows/on_release_published\.yml@refs/tags/unfold-v0\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$vsix"
+      - name: Attest the VSIX's build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: apps/unfold/extensions/vscode/unfold-*.vsix
-      - name: Attach the VSIXes, their checksums and their signature bundles to the draft release
+          subject-path: apps/unfold/extensions/vscode/unfold-${{ needs.parse-release-tag.outputs.version }}.vsix
+      - name: Attach the VSIX, its checksum and its signature bundle to the draft release
         shell: bash
         working-directory: apps/unfold/extensions/vscode
         run: |
           set -euo pipefail
+          vsix="unfold-${VERSION}.vsix"
           attached="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
-          for vsix in unfold-*.vsix; do
-            for asset in "$vsix" "${vsix}.sha256" "${vsix}.sigstore.json"; do
-              if grep -qx "$asset" <<< "$attached"; then
-                echo "$asset is already on $TAG."
-              else
-                gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$asset"
-              fi
-            done
+          for asset in "$vsix" "${vsix}.sha256" "${vsix}.sigstore.json"; do
+            if grep -qx "$asset" <<< "$attached"; then
+              echo "$asset is already on $TAG."
+            else
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" "$asset"
+            fi
           done
       - name: Publish to Open VSX with Trusted Publishing
         shell: bash
@@ -404,26 +393,20 @@ jobs:
           ovsx="$(node -p "require('ovsx/package.json').version")"
           [ "$(printf '%s\n1.4.0\n' "$ovsx" | sort -V | head -1)" = 1.4.0 ] || { echo "::error::ovsx $ovsx cannot publish with --trusted-publishing; it needs 1.4.0 or newer in apps/unfold/extensions/vscode/package.json."; echo "- Open VSX: **failed**, ovsx $ovsx predates Trusted Publishing" >> "$GITHUB_STEP_SUMMARY"; exit 1; }
           npx --no-install ovsx publish --packagePath "unfold-${VERSION}.vsix" --skip-duplicate --trusted-publishing
-          echo "- Open VSX: published \`$(node -p "const m=require('./package.json'); m.publisher+'.'+m.name")\` ${VERSION} with Trusted Publishing" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Open VSX: published \`$(node -p "const m=require('./package.json'); m.publisher+'.'+m.name")\` ${EXTENSION_VERSION} for ${VERSION} with Trusted Publishing" >> "$GITHUB_STEP_SUMMARY"
       - name: Publish to the Visual Studio Marketplace with Trusted Publishing
         shell: bash
         run: |
           set -euo pipefail
-          paused="$(python3 scripts/marketplace_version.py --paused)"
+          paused="$(python3 scripts/extension_version.py --paused)"
           if [ -n "$paused" ]; then
             echo "::notice::Visual Studio Marketplace publication is paused: ${paused}."
             echo "- Visual Studio Marketplace: **skipped**, publication is paused: ${paused}" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           cd apps/unfold/extensions/vscode
-          vsix="unfold-${VERSION}.vsix"
-          channel=release
-          if [ "$MARKETPLACE_VERSION" != "$VERSION" ]; then
-            vsix="unfold-marketplace-${MARKETPLACE_VERSION}.vsix"
-            channel=pre-release
-          fi
-          npx --no-install vsce publish --packagePath "$vsix" --skip-duplicate --oidc
-          echo "- Visual Studio Marketplace: published \`$(node -p "const m=require('./package.json'); m.publisher+'.'+m.name")\` ${MARKETPLACE_VERSION} for ${VERSION} as a ${channel} with Trusted Publishing" >> "$GITHUB_STEP_SUMMARY"
+          npx --no-install vsce publish --packagePath "unfold-${VERSION}.vsix" --skip-duplicate --oidc
+          echo "- Visual Studio Marketplace: published \`$(node -p "const m=require('./package.json'); m.publisher+'.'+m.name")\` ${EXTENSION_VERSION} for ${VERSION} with Trusted Publishing" >> "$GITHUB_STEP_SUMMARY"
 
   unfold-release-distribute:
     name: Unfold - Verify every destination and publish the release

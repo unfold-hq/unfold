@@ -136,8 +136,7 @@ function chatFiles(contributions) {
 }
 
 process.stdout.write(`Extension ${manifest.publisher}.${manifest.name} ${version}\n`);
-process.stdout.write(`  Open VSX            publishable${marketplaceVersion ? '' : ' as a pre-release'}\n`);
-process.stdout.write(`  Visual Studio Marketplace  publishable${marketplaceVersion ? '' : ` as a pre-release under the major.minor.patch scripts/marketplace_version.py derives from ${version}`}\n`);
+process.stdout.write(`  Open VSX and Visual Studio Marketplace  publishable${marketplaceVersion ? '' : ` as a pre-release, once the release packages it under the major.minor.patch scripts/extension_version.py derives from ${version}`}\n`);
 for (const note of notes) process.stdout.write(`  note: ${note}\n`);
 
 if (failures.length) {

@@ -7,7 +7,7 @@ import time
 import urllib.parse
 from pathlib import Path
 
-from marketplace_version import PAUSED as MARKETPLACE_PAUSED, marketplace_version
+from extension_version import PAUSED as MARKETPLACE_PAUSED, extension_version
 from release_floors import refuse_occupied
 from release_registry import GITHUB_SOURCE, Registry, command, digest, request, require_same, verify_image, verify_keyless, verify_keyless_signature
 
@@ -61,6 +61,7 @@ def extension_identity():
 
 def open_vsx_extension(version):
     namespace, name = extension_identity()
+    version = extension_version(version)
     url = f'https://open-vsx.org/api/{namespace}/{name}/{version}'
     deadline = time.monotonic() + OPEN_VSX_SCAN_DEADLINE
     while True:
@@ -82,7 +83,7 @@ def marketplace_versions():
 
 def marketplace_extension(version):
     namespace, name = extension_identity()
-    wanted = marketplace_version(version)
+    wanted = extension_version(version)
     deadline = time.monotonic() + MARKETPLACE_VALIDATION_DEADLINE
     while True:
         listed = next((v for v in marketplace_versions() if v['version'] == wanted and not v.get('targetPlatform')), None)
@@ -144,13 +145,9 @@ def attach_github(release, name, content, token, repository=HOME):
     request(upload + '?' + urllib.parse.urlencode({'name': name}), method='POST', data=content, headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/octet-stream'})
 
 
-def verify_marketplace(version, tag, release, token, evidence):
+def verify_marketplace(version, asset, release, token, evidence):
     listed = marketplace_extension(version)
     require_same(marketplace_prerelease(listed), listed['version'] != version, 'Marketplace pre-release flag')
-    name = f'unfold-{version}.vsix' if listed['version'] == version else f'unfold-marketplace-{listed["version"]}.vsix'
-    asset = next((a for a in release['assets'] if a['name'] == name), None)
-    if asset is None:
-        raise RuntimeError(f'{tag} has no {name}; the extension job attaches it before the Marketplace gets it')
     url = marketplace_download(listed)
     data, _ = request(url)
     require_same(digest(data), digest(fetch_github_asset(asset, token, release['draft'], HOME)), 'Marketplace VSIX')
@@ -177,15 +174,15 @@ def publish(application, version):
     verify_keyless(f'{HOME_REGISTRY}/{chart}@{reference}')
     evidence['charts'].append({'name': 'unfold', 'reference': f'{HOME_REGISTRY}/{chart}@{reference}'})
     extension = open_vsx_extension(version)
-    require_same(extension['version'], version, 'Open VSX version')
+    require_same(extension['version'], extension_version(version), 'Open VSX version')
     vsix = next((a for a in release['assets'] if a['name'] == f'unfold-{version}.vsix'), None)
     if vsix is None:
         raise RuntimeError(f'{tag} has no unfold-{version}.vsix; the extension job attaches it before Open VSX gets it')
     data, _ = request(extension['files']['download'])
     require_same(digest(data), digest(fetch_github_asset(vsix, token, release['draft'], HOME)), 'Open VSX VSIX')
-    evidence['extension'] = {'id': '.'.join(extension_identity()), 'version': version, 'sha256': hashlib.sha256(data).hexdigest(), 'url': extension['files']['download']}
+    evidence['extension'] = {'id': '.'.join(extension_identity()), 'version': extension['version'], 'sha256': hashlib.sha256(data).hexdigest(), 'url': extension['files']['download']}
     if not MARKETPLACE_PAUSED:
-        verify_marketplace(version, tag, release, token, evidence)
+        verify_marketplace(version, vsix, release, token, evidence)
     attach_github(release, f'release-artifacts-{application}.json', (json.dumps(evidence, indent=2) + '\n').encode(), token, HOME)
     if release['draft']:
         release = api(f'{HOME}/releases/{release["id"]}', token, 'PATCH', {'draft': False, 'make_latest': 'false'})
