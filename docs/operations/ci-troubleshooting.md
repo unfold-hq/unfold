@@ -3,7 +3,7 @@ type: how-to
 audience: [contributor, operator, agent]
 owner: unfold
 last_verified: 2026-11-19
-verified_by: "Visual Studio Marketplace parts updated on 2026-11-19 against .github/workflows/on_release_published.yml, scripts/marketplace_version.py, scripts/publish_release.py and scripts/release_preflight.py; no Marketplace publication observed yet. Rewritten for GitHub Actions on 2026-11-16 against .github/workflows, .github/actions, scripts/release_train_pin.py and scripts/verify-gate.mjs. The rows kept from the previous forge describe failures of scripts, tools and tests that still run the same way; their run and pull request numbers refer to the archived Forgejo repository. No GitHub Actions run had failed in these ways yet."
+verified_by: "Visual Studio Marketplace parts updated on 2026-11-19 against .github/workflows/on_release_published.yml, scripts/extension_version.py, scripts/publish_release.py and scripts/release_preflight.py; no Marketplace publication observed yet. Rewritten for GitHub Actions on 2026-11-16 against .github/workflows, .github/actions, scripts/release_train_pin.py and scripts/verify-gate.mjs. The rows kept from the previous forge describe failures of scripts, tools and tests that still run the same way; their run and pull request numbers refer to the archived Forgejo repository. No GitHub Actions run had failed in these ways yet."
 ---
 # Troubleshoot CI and releases
 

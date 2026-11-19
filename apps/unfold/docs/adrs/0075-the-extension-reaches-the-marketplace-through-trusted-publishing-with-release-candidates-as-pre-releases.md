@@ -33,7 +33,7 @@ The Marketplace still accepts only `major.minor.patch`, so a candidate needs a M
 
 Chosen option: "Every candidate as a Marketplace pre-release under a derived version", because it reaches plain VS Code users now without changing the product's version scheme.
 
-1. **Version rule.** [`scripts/marketplace_version.py`](../../../../scripts/marketplace_version.py) maps `X.Y.Z-rc.N` to `X.Y.((Z+1)×10000+N)`: `0.4.0-rc.152` becomes `0.4.10152`, `0.4.1-rc.3` becomes `0.4.20003`. A stable `X.Y.Z` stays as it is. A stable patch below 10000 can never meet a candidate, every later candidate sorts higher, and a candidate number of 10000 or more is refused.
+1. **Version rule.** [`scripts/marketplace_version.py`](../../../../scripts/extension_version.py) maps `X.Y.Z-rc.N` to `X.Y.((Z+1)×10000+N)`: `0.4.0-rc.152` becomes `0.4.10152`, `0.4.1-rc.3` becomes `0.4.20003`. A stable `X.Y.Z` stays as it is. A stable patch below 10000 can never meet a candidate, every later candidate sorts higher, and a candidate number of 10000 or more is refused.
 2. **A second VSIX.** For a candidate the extension job packages `unfold-marketplace-<marketplace version>.vsix` with `--pre-release` from the same tagged tree, verifies it, signs it keyless, attests it and attaches it with its checksum and bundle to the draft release, next to `unfold-<version>.vsix`. A rerun reuses both from the release.
 3. **Publication.** The job publishes that VSIX with `vsce publish --oidc`, after Open VSX. The policy on the `unfold-hq` publisher names `unfold-hq/unfold` and `on_release_published.yml`. No `VSCE_PAT` or Entra secret is used.
 4. **Verification.** `scripts/publish_release.py` waits until the Marketplace lists the derived version as validated, checks its pre-release flag, and compares the downloaded VSIX byte for byte with the attached one, as it does for Open VSX. The evidence file records it under `marketplace`.
@@ -78,3 +78,7 @@ Until the extension has a name of its own, `PAUSED` in `scripts/marketplace_vers
 ## Update, 2026-11-19: renamed, pause lifted
 
 [ADR 0076](0076-the-extension-is-unfold-hq-unfold-workbench-on-every-registry.md) renames the extension to `unfold-hq.unfold-workbench` on every registry and lifts the pause. Where this decision names `unfold-hq.unfold`, read the new identifier.
+
+## Update, 2026-11-19: one VSIX for every registry
+
+The second VSIX is gone. Every release now packages its one `unfold-<version>.vsix` under the extension version `scripts/extension_version.py` derives (renamed from `marketplace_version.py`), marked a pre-release for a candidate, and sends those same bytes to Open VSX and the Marketplace; the distributor compares both registries with that file. Open VSX therefore shows `0.4.10162` rather than `0.4.0-rc.162`. That is how rust-analyzer, GitLens and Red Hat Java publish: one plain `major.minor.patch` on both registries, the pre-release state in a flag rather than in the version, checked on 2026-11-19. It removes the repackaging, the second signed artifact and the bad consequence above that the two registries carried different bytes.

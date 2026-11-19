@@ -3,7 +3,7 @@ type: reference
 audience: [operator, contributor]
 owner: unfold
 last_verified: 2026-11-19
-verified_by: "Visual Studio Marketplace parts updated on 2026-11-19 against .github/workflows/on_release_published.yml, scripts/marketplace_version.py, scripts/publish_release.py and scripts/release_preflight.py; no Marketplace publication observed yet. Rewritten on 2026-11-16 for the move to GitHub against .github/workflows/on_release_published.yml, scripts/publish_release.py, scripts/publish_chart.py, scripts/release_registry.py and scripts/release_preflight.py. Pre-move identities are from the 2026-10-03 audit record; no artifact was published from GitHub yet, so the GitHub identities are what the workflow publishes, not what a registry was seen to serve."
+verified_by: "Visual Studio Marketplace parts updated on 2026-11-19 against .github/workflows/on_release_published.yml, scripts/extension_version.py, scripts/publish_release.py and scripts/release_preflight.py; no Marketplace publication observed yet. Rewritten on 2026-11-16 for the move to GitHub against .github/workflows/on_release_published.yml, scripts/publish_release.py, scripts/publish_chart.py, scripts/release_registry.py and scripts/release_preflight.py. Pre-move identities are from the 2026-10-03 audit record; no artifact was published from GitHub yet, so the GitHub identities are what the workflow publishes, not what a registry was seen to serve."
 ---
 
 # Source mirrors and release artifacts

@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import publish_chart
-import marketplace_version
+import extension_version
 import publish_release
 import release_registry
 from release_registry import GITHUB_SOURCE, SafeRedirect, digest, verify_image
@@ -180,7 +180,7 @@ class DistributionTests(unittest.TestCase):
 
     def test_open_vsx_that_never_serves_the_version_fails_after_the_deadline(self):
         with patch.object(publish_release, 'api', lambda *a, **k: None), patch.object(publish_release, 'OPEN_VSX_SCAN_DEADLINE', 0), patch.object(publish_release.time, 'sleep') as sleep:
-            with self.assertRaisesRegex(RuntimeError, 'still does not serve unfold-hq.unfold-workbench 0.4.0-rc.41'):
+            with self.assertRaisesRegex(RuntimeError, 'still does not serve unfold-hq.unfold-workbench 0.4.10041'):
                 publish_release.open_vsx_extension('0.4.0-rc.41')
         sleep.assert_not_called()
 
@@ -192,7 +192,7 @@ class GitHubHomeTests(unittest.TestCase):
             publish_release.open_vsx_extension('0.4.0-rc.41')
         namespace, name = publish_release.extension_identity()
         self.assertEqual((namespace, name), ('unfold-hq', 'unfold-workbench'))
-        self.assertEqual(urls, ['https://open-vsx.org/api/unfold-hq/unfold-workbench/0.4.0-rc.41'])
+        self.assertEqual(urls, ['https://open-vsx.org/api/unfold-hq/unfold-workbench/0.4.10041'])
 
     def test_the_keyless_identity_is_the_publication_workflow_on_a_release_tag(self):
         signer = re.compile(release_registry.GITHUB_SIGNER)
@@ -236,8 +236,7 @@ class GitHubHomeTests(unittest.TestCase):
 
     def run_publication(self, paused):
         draft = {'id': 11, 'tag_name': 'unfold-v0.4.0-rc.9', 'draft': True, 'html_url': 'draft', 'upload_url': 'https://uploads.github.com/repos/unfold-hq/unfold/releases/11/assets{?name,label}',
-                 'assets': [{'name': 'unfold-0.4.0-rc.9.vsix', 'url': publish_release.HOME + '/releases/assets/1'},
-                            {'name': 'unfold-marketplace-0.4.10009.vsix', 'url': publish_release.HOME + '/releases/assets/2'}]}
+                 'assets': [{'name': 'unfold-0.4.0-rc.9.vsix', 'url': publish_release.HOME + '/releases/assets/1'}]}
         calls, attached = [], []
 
         def api(url, token, method='GET', data=None, missing=False):
@@ -257,7 +256,7 @@ class GitHubHomeTests(unittest.TestCase):
                 patch.object(publish_release, 'verify_keyless', signed.append), \
                 patch.object(publish_release, 'digest', lambda data: 'sha256:' + 'd' * 64), \
                 patch.object(MemoryRegistry, 'manifest', lambda self, repository, reference, missing=False: b'chart'), \
-                patch.object(publish_release, 'open_vsx_extension', lambda version: {'version': version, 'files': {'download': 'https://open-vsx.org/vsix'}}), \
+                patch.object(publish_release, 'open_vsx_extension', lambda version: {'version': extension_version.extension_version(version), 'files': {'download': 'https://open-vsx.org/vsix'}}), \
                 patch.object(publish_release, 'MARKETPLACE_PAUSED', paused), \
                 patch.object(publish_release, 'marketplace_extension', lambda version: self.fail('a paused Marketplace was asked') if paused else marketplace_listing('0.4.10009', prerelease=True)), \
                 patch.object(publish_release, 'request', lambda url, **k: (b'vsix', {})), \
@@ -290,12 +289,12 @@ def marketplace_listing(version, prerelease, flags='validated', target=None):
 
 
 class MarketplaceTests(unittest.TestCase):
-    def test_a_release_candidate_gets_a_unique_rising_marketplace_version_that_never_meets_a_stable_one(self):
-        self.assertEqual(marketplace_version.marketplace_version('0.4.0-rc.152'), '0.4.10152')
-        self.assertEqual(marketplace_version.marketplace_version('0.4.1-rc.3'), '0.4.20003')
-        self.assertEqual(marketplace_version.marketplace_version('0.4.0'), '0.4.0')
+    def test_a_release_candidate_gets_a_unique_rising_extension_version_that_never_meets_a_stable_one(self):
+        self.assertEqual(extension_version.extension_version('0.4.0-rc.152'), '0.4.10152')
+        self.assertEqual(extension_version.extension_version('0.4.1-rc.3'), '0.4.20003')
+        self.assertEqual(extension_version.extension_version('0.4.0'), '0.4.0')
         candidates = [f'0.{minor}.{patch}-rc.{number}' for minor in (4, 5) for patch in (0, 1, 2) for number in (1, 2, 151, 9999)]
-        derived = [marketplace_version.marketplace_version(version) for version in candidates]
+        derived = [extension_version.extension_version(version) for version in candidates]
         as_tuple = lambda version: tuple(int(part) for part in version.split('.'))
         self.assertEqual(derived, sorted(derived, key=as_tuple), 'every later candidate sorts higher')
         self.assertEqual(len(set(derived)), len(derived))
@@ -305,7 +304,7 @@ class MarketplaceTests(unittest.TestCase):
     def test_a_version_the_rule_cannot_place_is_refused(self):
         for version in ['0.4.0-rc.10000', '0.4.0-beta.1', '0.4.0-rc.0', '0.04.0-rc.1', '0.4', '0.4.0-rc.1;echo']:
             with self.subTest(version=version), self.assertRaises(ValueError):
-                marketplace_version.marketplace_version(version)
+                extension_version.extension_version(version)
 
     def test_the_marketplace_is_awaited_until_it_has_validated_the_derived_version(self):
         answers = [[], [marketplace_listing('0.4.10041', True, flags='none')], [marketplace_listing('0.4.10041', True, target='linux-x64'), marketplace_listing('0.4.10041', True)]]
