@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { agentHostConnectionAddress, agentsWindowLink } from '../public/core/vscode.js';
 
 test('Connect VS Code opens the extension\'s connect-agents-window link for this workbench', () => {
-  assert.equal(agentsWindowLink('https://unfold.example'), 'vscode://unfold-hq.unfold/connect-agents-window?origin=https%3A%2F%2Funfold.example');
-  assert.equal(agentsWindowLink(''), 'vscode://unfold-hq.unfold/connect-agents-window');
+  assert.equal(agentsWindowLink('https://unfold.example'), 'vscode://unfold-hq.unfold-workbench/connect-agents-window?origin=https%3A%2F%2Funfold.example');
+  assert.equal(agentsWindowLink(''), 'vscode://unfold-hq.unfold-workbench/connect-agents-window');
 });
 
 test('the manual address carries the token as tkn, and only for a WebSocket address', () => {

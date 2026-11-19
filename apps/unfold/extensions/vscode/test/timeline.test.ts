@@ -195,7 +195,7 @@ test('VS Code 1.145 and later get the Unfold Timeline source for files', () => {
 });
 
 test('VS Code before 1.145 gets no Timeline source and no error, even though it carries the old proposed function', () => {
-  const proposal = () => { throw new Error('Extension \'unfold-hq.unfold\' CANNOT use API proposal: timeline.'); };
+  const proposal = () => { throw new Error('Extension \'unfold-hq.unfold-workbench\' CANNOT use API proposal: timeline.'); };
   for (const version of ['1.99.3', '1.144.2', '1.9.0']) {
     const { host } = modern({ version, workspace: { registerTimelineProvider: proposal } });
     assert.equal(timelineApi(host), undefined, `${version} has no Timeline source`);

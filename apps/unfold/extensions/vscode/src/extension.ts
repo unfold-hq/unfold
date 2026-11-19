@@ -768,7 +768,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private async registerEditorWindow(target = this.current): Promise<void> {
     if (this.inAgentsWindow || this.configurationError || this.cachedBootstrap?.user.role === 'viewer') return;
     try {
-      const external = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://unfold-hq.unfold/`));
+      const external = await vscode.env.asExternalUri(vscode.Uri.parse(`${vscode.env.uriScheme}://unfold-hq.unfold-workbench/`));
       const window = editorWindowOf(external.toString(true));
       if (window) await target.request('/api/agent-host/editor-window', 'PUT', window);
     } catch {}

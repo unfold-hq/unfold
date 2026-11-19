@@ -74,3 +74,7 @@ Reconsider when the product moves to calendar versions, a candidate number nears
 The first publication, the rerun of `unfold-v0.4.0-rc.156`, exchanged its OIDC token, so the Trusted Publishing policy works, and then failed: "The extension 'unfold' already exists in the Marketplace". `ThatsAThoughOne.unfold` has held the name since 2026-03-01. Unlike Open VSX, the Marketplace keeps extension names unique across publishers: of 2875 extensions returned for three broad searches on 2026-11-19, none shared a name with another publisher's. This decision did not check that.
 
 Until the extension has a name of its own, `PAUSED` in `scripts/marketplace_version.py` holds the reason, the publish step skips with a notice and the distributor skips the Marketplace check, so releases are no longer stranded as drafts. The owner chose to rename the extension on every registry, so that one identifier serves both; that rename is a decision of its own and ends the pause.
+
+## Update, 2026-11-19: renamed, pause lifted
+
+[ADR 0076](0076-the-extension-is-unfold-hq-unfold-workbench-on-every-registry.md) renames the extension to `unfold-hq.unfold-workbench` on every registry and lifts the pause. Where this decision names `unfold-hq.unfold`, read the new identifier.

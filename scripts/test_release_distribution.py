@@ -180,7 +180,7 @@ class DistributionTests(unittest.TestCase):
 
     def test_open_vsx_that_never_serves_the_version_fails_after_the_deadline(self):
         with patch.object(publish_release, 'api', lambda *a, **k: None), patch.object(publish_release, 'OPEN_VSX_SCAN_DEADLINE', 0), patch.object(publish_release.time, 'sleep') as sleep:
-            with self.assertRaisesRegex(RuntimeError, 'still does not serve unfold-hq.unfold 0.4.0-rc.41'):
+            with self.assertRaisesRegex(RuntimeError, 'still does not serve unfold-hq.unfold-workbench 0.4.0-rc.41'):
                 publish_release.open_vsx_extension('0.4.0-rc.41')
         sleep.assert_not_called()
 
@@ -191,8 +191,8 @@ class GitHubHomeTests(unittest.TestCase):
         with patch.object(publish_release, 'api', lambda url, *a, **k: urls.append(url) or {'version': '0.4.0-rc.41'}):
             publish_release.open_vsx_extension('0.4.0-rc.41')
         namespace, name = publish_release.extension_identity()
-        self.assertEqual((namespace, name), ('unfold-hq', 'unfold'))
-        self.assertEqual(urls, ['https://open-vsx.org/api/unfold-hq/unfold/0.4.0-rc.41'])
+        self.assertEqual((namespace, name), ('unfold-hq', 'unfold-workbench'))
+        self.assertEqual(urls, ['https://open-vsx.org/api/unfold-hq/unfold-workbench/0.4.0-rc.41'])
 
     def test_the_keyless_identity_is_the_publication_workflow_on_a_release_tag(self):
         signer = re.compile(release_registry.GITHUB_SIGNER)
@@ -271,8 +271,8 @@ class GitHubHomeTests(unittest.TestCase):
         self.assertEqual(signed, ['ghcr.io/unfold-hq/unfold@sha256:' + 'c' * 64, 'ghcr.io/unfold-hq/unfold-agent@sha256:' + 'c' * 64, 'ghcr.io/unfold-hq/charts/unfold@sha256:' + 'd' * 64])
         self.assertEqual([name for name, _ in attached], ['release-artifacts-unfold.json'])
         evidence = attached[0][1]
-        self.assertEqual((evidence['source'], evidence['extension']['id']), ('https://github.com/unfold-hq/unfold', 'unfold-hq.unfold'))
-        self.assertEqual({k: evidence['marketplace'][k] for k in ('id', 'version', 'pre_release', 'url')}, {'id': 'unfold-hq.unfold', 'version': '0.4.10009', 'pre_release': True, 'url': 'https://unfold-hq.gallerycdn.vsassets.io/vsix'})
+        self.assertEqual((evidence['source'], evidence['extension']['id']), ('https://github.com/unfold-hq/unfold', 'unfold-hq.unfold-workbench'))
+        self.assertEqual({k: evidence['marketplace'][k] for k in ('id', 'version', 'pre_release', 'url')}, {'id': 'unfold-hq.unfold-workbench', 'version': '0.4.10009', 'pre_release': True, 'url': 'https://unfold-hq.gallerycdn.vsassets.io/vsix'})
         self.assertEqual(calls[-1], ('PATCH', '/releases/11', {'draft': False, 'make_latest': 'false'}))
 
     def test_a_paused_marketplace_is_neither_awaited_nor_recorded(self):
@@ -315,7 +315,7 @@ class MarketplaceTests(unittest.TestCase):
 
     def test_a_marketplace_that_never_lists_the_version_fails_after_the_deadline(self):
         with patch.object(publish_release, 'marketplace_versions', lambda: []), patch.object(publish_release, 'MARKETPLACE_VALIDATION_DEADLINE', 0), patch.object(publish_release.time, 'sleep') as sleep:
-            with self.assertRaisesRegex(RuntimeError, 'still does not serve a validated unfold-hq.unfold 0.4.10041 for 0.4.0-rc.41'):
+            with self.assertRaisesRegex(RuntimeError, 'still does not serve a validated unfold-hq.unfold-workbench 0.4.10041 for 0.4.0-rc.41'):
                 publish_release.marketplace_extension('0.4.0-rc.41')
         sleep.assert_not_called()
 
@@ -325,7 +325,7 @@ class MarketplaceTests(unittest.TestCase):
             self.assertEqual(publish_release.marketplace_versions(), [])
         url, query = sent[0]
         self.assertEqual(url, 'https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery')
-        self.assertEqual(query['filters'][0]['criteria'], [{'filterType': 7, 'value': 'unfold-hq.unfold'}])
+        self.assertEqual(query['filters'][0]['criteria'], [{'filterType': 7, 'value': 'unfold-hq.unfold-workbench'}])
 
     def test_the_download_is_the_vsix_package_and_the_flag_reads_the_pre_release_property(self):
         self.assertEqual(publish_release.marketplace_download(marketplace_listing('0.4.10041', True)), 'https://unfold-hq.gallerycdn.vsassets.io/vsix')
