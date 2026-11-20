@@ -23,6 +23,7 @@ The groups carry no part names: the first group is the work itself, the second f
 | (top) | Now | `#now` | Home: what waits on you, what runs, what finished | Items waiting on you |
 | Work | Work | `#work`, `#work/<id>` | Work Items by lane, for one Team or all, and one Work Item's page | — |
 | Work | Proposed | `#proposed` | Work Items agents proposed, across Teams, with Approve and Reject | Proposed items |
+| Work | Take on | `#take-on` | Proposed, taken-over and running or queued work as one list for a phone, with Approve, Hand back and Stop | — |
 | Work | Tasks | `#tasks` | Tracker tasks to preview and import | — |
 | Work | Teams | `#teams`, `#teams/agents`, `#teams/assign` | The Team builder, while the `teams.builder` Labs flag is on: build an agent, compose Teams with a record per version, rehearse the assignment gate | — |
 | Follow | Runs | `#runs` | Run history | — |
@@ -36,7 +37,7 @@ The groups are drawn without headings, separated by a rule. **Your cards** (Bind
 
 * Sessions shows only in demo mode, when shared execution is configured, when sessions exist, or while a session page is open ([`showsSessions`](../public/shell.js)).
 * A count is hidden when it is zero or unknown. Unknown is `null`, never `0`.
-* From 720 px to 1100 px of viewport the sidebar is a 4 rem icon rail. Below 720 px it is hidden: the top bar's menu button opens it as a `<dialog>` drawer, and a bottom bar holds Now, Work, Runs and More.
+* From 720 px to 1100 px of viewport the sidebar is a 4 rem icon rail. Below 720 px it is hidden: the top bar's menu button opens it as a `<dialog>` drawer, and a bottom bar holds Now, Work, Take on, Runs and More.
 * `#design`, the [living style guide](#living-style-guide), is not in the navigation. Preferences and the command palette link to it.
 
 Every page also has:
@@ -59,6 +60,7 @@ A hash is `#<path>?<query>`. [`route.js`](../public/core/route.js) splits it wit
 | `now` | [`now`](../public/views/now.js) | — |
 | `work`, `work/<id>` | [`work`](../public/views/work.js) | `lane` (`awaiting_review`, `needs_human`, `stale`, `leased`, `queued`, `open`, `closed`; the retired `all` opens `open`), `team`. With no `team`, the last Team chosen in this browser, or all Teams. A row's link carries both, so the Work Item page keeps its list; Copy link gives the bare `#work/<id>` |
 | `proposed` | [`proposed`](../public/views/proposed.js) | `id` scrolls to that proposal and focuses it |
+| `take-on` | [`take-on`](../public/views/take-on.js) | — |
 | `runs` | [`runs`](../public/views/runs.js) | `team`, `state`, `outcome` |
 | `activity` | [`activity`](../public/views/activity.js) | `team`, `kind` |
 | `insights` | [`insights`](../public/views/insights.js) | `window` (`24h`, `7d`, `30d`). `24h` is the default and is left out of the address |
@@ -149,6 +151,15 @@ The Work Item page, `#work/<id>`, reads from top to bottom:
 On phones the primary button also sits in a sticky bar above the bottom bar, hidden while the status panel's own button is on screen.
 
 **Cancel Work Item** shows only to operators and administrators, and only when Ploeg would stop something: the Work Item is `ingested`, `queued` or `leased`, its latest Shift is still open, or one of its Runs has not finished. A stopped Work Item with a closed Shift has nothing to cancel, so it gets no button. It opens a confirmation that lists what Ploeg then does (withdraws the Work Item and closes its open Shift, stops running Runs and cancels waiting ones, blocks their model keys, revokes their forge tokens, comments on the tracker task, and leaves an open pull request on the forge), the spend so far, and that only the tracker can start it again. Focus starts on **Keep it**. Confirming posts `POST /api/ploeg/work-items/<id>/cancel` and shows Ploeg's answer: Runs stopped, Runs cancelled before they started, and whether the model keys are blocked, with "not reported" for a figure Ploeg left out. In the demo the dialog says nothing runs, so there is nothing to cancel; its confirm button is disabled and Unfold never sends the request.
+
+### Take on
+
+Take on is the phone's list of work a person can act on with one thumb ([`take-on.js`](../public/take-on.js), [`views/take-on.js`](../public/views/take-on.js)). It is a page of its own, not a Work lane: a lane holds one Ploeg state and gives way to the Work Item page, while Take on gathers three kinds of work from one `GET /api/ploeg/now` read, and Proposed's cards carry the full brief that a phone row leaves out. It sits in the Work group and in the phone's bottom bar, and works at every width.
+
+* **To approve**: proposed Work Items, in Ploeg's order. **Taken over**: Work Items a person took over (Needs you with the `taken_over` reason). **Running and queued**: leased and queued Work Items. A section with nothing in it is not drawn; with nothing at all the page says "Nothing to take on". A part Ploeg could not read says so in its section.
+* **Each row** names the Team, the kind of work and how it stands, the title (a link to `#work/<id>`, wrapped, never cut), the tracker reference and age, and the cost before anything is spent: for a proposal the sentence the approval dialog uses (it spends from the Team's budget, which Ploeg does not report, so no amount); for the other rows the Shift's spend meter, "Not reported" when Ploeg sent none. The demo reads "Demo · nothing is dispatched and nothing is spent." and "Demo · no model calls".
+* **One action per row**, full width and at least 44 px tall, for operators and administrators: **Approve** opens Proposed's confirmation and calls `POST /api/ploeg/work-items/<id>/approve`; **Hand back** reads the Work Item, asks for an optional note with what Ploeg resumes and on which budget, and calls `POST …/hand-back`, disabled with Ploeg's reason for anyone but the taker or an administrator and in the demo; **Stop** opens the Work Item page's cancel confirmation and calls `POST …/cancel`, disabled in the demo. Escape or Keep returns focus to the button. Viewers read the list and are told who decides.
+* **Refresh.** Every 30 seconds, never while a confirmation is open.
 
 ### Proposed, Runs, Activity and Insights
 
@@ -357,7 +368,7 @@ The tones mean: `live` running, `attention` needs you, `review` ready for review
 * **Motion.** The live dot, the skeleton shimmer and the loading line are the only continuous animations. They, and the entrance of dialogs, drawers and toasts, run only under `prefers-reduced-motion: no-preference`. A busy button's spinner keeps turning under reduced motion because it is status.
 * **Live regions.** `#announcement` is polite. Announce a change once; never announce streamed tokens or every refresh.
 * **Labels are never cut off.** A label Unfold writes itself, such as a stage, a status, a figure, a failure reason or a time, wraps or is reworded shorter; it is never clipped with an ellipsis or `overflow: hidden`, because the clipped part is usually the fact the reader came for ("1 lost to in…"). A column too narrow for its label grows, or the layout stacks. Only unbounded text a person or tracker wrote, such as a title, a branch or a path, may be clipped, and then its full text stays in the element's `title` and its accessible name.
-* **Layout.** No horizontal scroll at 390 px. Targets are at least 24 px, and larger on touch.
+* **Layout.** No horizontal scroll at 390 px, and at 360 px on Take on. Targets are at least 24 px, and larger on touch; Take on's row actions and the bottom bar are at least 44 px.
 * **Money.** Format amounts with `format.js` and draw them with the `ui.js` meters and stats: unknown spend then reads "Not reported" and demo spend "Demo · no model calls", and neither is drawn or written as zero.
 
 ## Content Security Policy
@@ -413,6 +424,7 @@ Run them in `apps/unfold` with `mise exec -- npm test` and `mise exec -- npm run
 | [`test/states.test.mjs`](../test/states.test.mjs), [`test/reasons.test.mjs`](../test/reasons.test.mjs), [`test/format.test.mjs`](../test/format.test.mjs) | Vocabulary, reasons and formats |
 | [`test/prefs.test.mjs`](../test/prefs.test.mjs), [`test/live.test.mjs`](../test/live.test.mjs), [`test/keys.test.mjs`](../test/keys.test.mjs), [`test/counts.test.mjs`](../test/counts.test.mjs) | Preferences, the scheduler, shortcuts and navigation counts |
 | [`test/ui-components.test.mjs`](../test/ui-components.test.mjs), [`test/markdown-renderer.test.mjs`](../test/markdown-renderer.test.mjs) | Escaping, safe links, meters, badges and icons; hostile Markdown staying inert |
+| [`test/take-on-view.test.mjs`](../test/take-on-view.test.mjs) | The Take on lists, rows, costs, actions for each role, the demo and the hand-back dialog |
 | [`test/now-view.test.mjs`](../test/now-view.test.mjs), [`test/ploeg-view.test.mjs`](../test/ploeg-view.test.mjs), [`test/ploeg-activity.test.mjs`](../test/ploeg-activity.test.mjs), [`test/session-view.test.mjs`](../test/session-view.test.mjs) | The markup of Now, Work and the Work Item page, the four feed pages, and the session page |
 | [`test/linked-attention.test.mjs`](../test/linked-attention.test.mjs) | Waiting Linked Sessions on Now and the fleet board, and collision warnings |
 | [`test/session-tracks.test.mjs`](../test/session-tracks.test.mjs) | Where a session sits among the attempts and Rounds, hand-overs, the commit spine, the self-collision rules, the folded time axis and its key, the shared time cursor's scale, a session's window from its link, the dragged zoom, and the two tracks at desktop and phone width |
@@ -420,4 +432,4 @@ Run them in `apps/unfold` with `mise exec -- npm test` and `mise exec -- npm run
 | [`test/static-assets.test.ts`](../test/static-assets.test.ts) | Which paths are served, ETag, 304 and gzip |
 | [`test/forge-world.test.mjs`](../test/forge-world.test.mjs), [`test/card-worlds.test.ts`](../test/card-worlds.test.ts) | The forge's inner world: facts to time of day and things, the theme's choice, the controls under the CSP, the world's front shader, and private, earned, holder-only decorations with their routes |
 | [`test/collection-model.test.mjs`](../test/collection-model.test.mjs) | The words and numbers of the binder and packs: nl-NL odds, anticipation by pull only, copies drawn with the forge, and cards as they stood at a moment |
-| [`scripts/browser/`](../scripts/browser/) | One flow per area, run in this order: `now`, `tasks`, `sessions`, `shell`, `palette`, `settings`, `feeds`, `work`, `forge`, `world`, `collection`, `login`. [`shell.mjs`](../scripts/browser/shell.mjs) covers redirects, title, focus, theme, live updates, shortcuts, the skip link and the phone layout; [`work.mjs`](../scripts/browser/work.mjs) covers the demo Cancel Work Item dialog and a mocked live cancel; [`collection.mjs`](../scripts/browser/collection.mjs) covers card logins, the binder, a demo pack ripped by keyboard, the odds, the reduced-motion ceremony and the season page |
+| [`scripts/browser/`](../scripts/browser/) | One flow per area, run in this order: `now`, `tasks`, `sessions`, `shell`, `palette`, `settings`, `take-on`, `feeds`, `work`, `forge`, `world`, `collection`, `login`. [`shell.mjs`](../scripts/browser/shell.mjs) covers redirects, title, focus, theme, live updates, shortcuts, the skip link and the phone layout; [`work.mjs`](../scripts/browser/work.mjs) covers the demo Cancel Work Item dialog and a mocked live cancel; [`collection.mjs`](../scripts/browser/collection.mjs) covers card logins, the binder, a demo pack ripped by keyboard, the odds, the reduced-motion ceremony and the season page |
