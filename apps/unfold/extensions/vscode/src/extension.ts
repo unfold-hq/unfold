@@ -503,7 +503,10 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       }
       if (raise) throw error;
     }
-    finally { this.refreshBusy = false; }
+    finally {
+      this.refreshBusy = false;
+      if (generation !== this.generation && !this.disposed) void this.refresh();
+    }
   }
 
   private lastNow?: { value?: PloegNow; message?: string };
