@@ -48,6 +48,7 @@ export type McpHttpOptions = {
 };
 
 const maxBodyBytes = 1_048_576;
+const maxDiscardedBytes = 8 * maxBodyBytes;
 const delegationMs = 120_000;
 const appsMemoryMs = 86_400_000;
 const appsMemoryEntries = 10_000;
@@ -65,8 +66,8 @@ function problem(res: ServerResponse, status: number, code: string, message: str
   send(res, status, { error: { code, message } }, headers);
 }
 
-function rpcError(res: ServerResponse, status: number, id: unknown, code: number, message: string, data?: unknown): void {
-  send(res, status, { jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data === undefined ? {} : { data }) } });
+function rpcError(res: ServerResponse, status: number, id: unknown, code: number, message: string, data?: unknown, headers: Record<string, string> = {}): void {
+  send(res, status, { jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data === undefined ? {} : { data }) } }, headers);
 }
 
 function acceptsStream(req: IncomingMessage): boolean {
@@ -96,10 +97,10 @@ async function readBody(req: IncomingMessage): Promise<Buffer | undefined> {
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > maxBodyBytes) return undefined;
-    chunks.push(chunk as Buffer);
+    if (size > maxBodyBytes + maxDiscardedBytes) return undefined;
+    if (size <= maxBodyBytes) chunks.push(chunk as Buffer);
   }
-  return Buffer.concat(chunks);
+  return size > maxBodyBytes ? undefined : Buffer.concat(chunks);
 }
 
 /**
@@ -167,7 +168,7 @@ export function createMcpHttp(options: McpHttpOptions) {
     const user: User = { ...account, role, memberships: narrowedMemberships(account.memberships ?? [], options.memberships?.(token.claims) ?? [], role) };
     if (!header(req, 'content-type')?.toLowerCase().startsWith('application/json')) return problem(res, 415, 'unsupported_media_type', 'Send one JSON-RPC message as application/json.');
     const raw = await readBody(req);
-    if (!raw) return rpcError(res, 413, null, -32600, 'Message exceeds 1 MiB.');
+    if (!raw) return rpcError(res, 413, null, -32600, 'Message exceeds 1 MiB.', undefined, { Connection: 'close' });
     let message: any;
     try { message = JSON.parse(raw.toString('utf8')); } catch { return rpcError(res, 400, null, -32700, 'Parse error.'); }
     if (!message || typeof message !== 'object' || Array.isArray(message)) return rpcError(res, 400, null, -32600, 'Expected one JSON-RPC request object.');

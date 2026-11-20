@@ -128,7 +128,7 @@ GET and DELETE on the endpoint get 405: there is no standalone server-to-client 
 * Every tool reads with the person's own account and Teams, at the lower of the stored role and the role the token's groups entitle. Its credential reaches only the API calls the tools make; it cannot approve editor sign-ins, manage credentials or reach the agent host.
 * Every action is recorded in Unfold's Action Records and at Ploeg with the channel `mcp:<client name and version>` and, for a spend, the hash of the confirmation text the person agreed to ([ADR-0037](../adr/adr-0037-people-act-on-work-through-either-mcp-server-and-every-action-names-its-person-channel-and-confirmation.md)). A 2025 client over HTTP names no client on its calls and shows as `mcp:unnamed client`.
 * The confirmation key, its replay ledger and the calls that wait for a 2025 client's answer live in the one Unfold process. A restart, or a second replica, refuses a pending confirmation, so the person is asked again and nothing is spent twice.
-* A message is at most 1 MiB, and receiving it may take at most 15 seconds (the server's `requestTimeout`).
+* A message is at most 1 MiB, and receiving it may take at most 15 seconds (the server's `requestTimeout`). A larger message is answered with 413 "Message exceeds 1 MiB." once Unfold has read the rest of it, up to 8 MiB more; past that the connection is dropped.
 
 ## Follow a hand-off as a task
 
