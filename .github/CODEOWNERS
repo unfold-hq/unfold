@@ -12,5 +12,7 @@ CLAUDE.md @ryangr0
 /.apm/ @ryangr0
 /.codex/ @ryangr0
 /scripts/stage-explicit-paths.py @ryangr0
+/scripts/openspec-skills.py @ryangr0
+/apm.yml @ryangr0
 /scripts/release-config/ @ryangr0
 /SECURITY.md @ryangr0

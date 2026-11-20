@@ -6,3 +6,10 @@ includes: auto
 compilation:
   exclude:
     - "apps/*/*/**"
+
+lifecycle:
+  pre-install:
+    - type: command
+      description: Generate the openspec-* skills in .apm/skills with the OpenSpec version pinned in mise.toml
+      command: mise exec -- python3 scripts/openspec-skills.py
+      timeoutSec: 120

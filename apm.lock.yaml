@@ -147,6 +147,114 @@ deployments:
   active_owner: .
   content_hash: sha256:1ae547ce32e0b77f2f2e48313cfd361597fb00cf303e817f590e136c0e90c973
 - kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-apply-change
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-apply-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a4f53ace311a53f682d5322643a3e16891edc91cef4d59813d5050deeaf1e7ac
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-archive-change
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-archive-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:bba37512531e22e74ddde685f85ef13f58246d8dc6f0d5a8af67f582029fcbe6
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-explore
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-explore/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:46c08b3cf63e3f53ed63ff436a43acf4fee41cf6b8e9dcef8ce1d71fea798461
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-propose
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-propose/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:28bd064223cf575e7fe91a38809fd0719ccfbc3880db5bcd89beb53628b6dbd0
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-sync-specs
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-sync-specs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e8e8ea7d95be96114f14974710624a7fe12b1d7fb1a92b0369a3c3721053f5f4
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-update-change
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: claude
+  value: .claude/skills/openspec-update-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e261f65954eca0fb3bfdc2ba192f1d471b349ddb6bbd516fcbc938cc5bf62614
+- kind: project-relative
   target: codex
   value: .agents/skills/explain-a-dependency-update
   runtime: null
@@ -237,6 +345,114 @@ deployments:
   active_owner: .
   content_hash: sha256:1ae547ce32e0b77f2f2e48313cfd361597fb00cf303e817f590e136c0e90c973
 - kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-apply-change
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-apply-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:a4f53ace311a53f682d5322643a3e16891edc91cef4d59813d5050deeaf1e7ac
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-archive-change
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-archive-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:bba37512531e22e74ddde685f85ef13f58246d8dc6f0d5a8af67f582029fcbe6
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-explore
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-explore/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:46c08b3cf63e3f53ed63ff436a43acf4fee41cf6b8e9dcef8ce1d71fea798461
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-propose
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-propose/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:28bd064223cf575e7fe91a38809fd0719ccfbc3880db5bcd89beb53628b6dbd0
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-sync-specs
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-sync-specs/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e8e8ea7d95be96114f14974710624a7fe12b1d7fb1a92b0369a3c3721053f5f4
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-update-change
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: null
+- kind: project-relative
+  target: codex
+  value: .agents/skills/openspec-update-change/SKILL.md
+  runtime: null
+  scope: project
+  owners:
+  - .
+  active_owner: .
+  content_hash: sha256:e261f65954eca0fb3bfdc2ba192f1d471b349ddb6bbd516fcbc938cc5bf62614
+- kind: project-relative
   target: opencode
   value: .opencode/commands/unfold-review.md
   runtime: null
@@ -257,6 +473,18 @@ local_deployed_files:
 - .agents/skills/investigate-session
 - .agents/skills/investigate-session/SKILL.md
 - .agents/skills/investigate-session/scripts/investigate.py
+- .agents/skills/openspec-apply-change
+- .agents/skills/openspec-apply-change/SKILL.md
+- .agents/skills/openspec-archive-change
+- .agents/skills/openspec-archive-change/SKILL.md
+- .agents/skills/openspec-explore
+- .agents/skills/openspec-explore/SKILL.md
+- .agents/skills/openspec-propose
+- .agents/skills/openspec-propose/SKILL.md
+- .agents/skills/openspec-sync-specs
+- .agents/skills/openspec-sync-specs/SKILL.md
+- .agents/skills/openspec-update-change
+- .agents/skills/openspec-update-change/SKILL.md
 - .claude/commands/unfold-review.md
 - .claude/rules/apps-site.md
 - .claude/rules/apps-unfold.md
@@ -273,6 +501,18 @@ local_deployed_files:
 - .claude/skills/investigate-session
 - .claude/skills/investigate-session/SKILL.md
 - .claude/skills/investigate-session/scripts/investigate.py
+- .claude/skills/openspec-apply-change
+- .claude/skills/openspec-apply-change/SKILL.md
+- .claude/skills/openspec-archive-change
+- .claude/skills/openspec-archive-change/SKILL.md
+- .claude/skills/openspec-explore
+- .claude/skills/openspec-explore/SKILL.md
+- .claude/skills/openspec-propose
+- .claude/skills/openspec-propose/SKILL.md
+- .claude/skills/openspec-sync-specs
+- .claude/skills/openspec-sync-specs/SKILL.md
+- .claude/skills/openspec-update-change
+- .claude/skills/openspec-update-change/SKILL.md
 - .opencode/commands/unfold-review.md
 local_deployed_file_hashes:
   .agents/skills/explain-a-dependency-update/SKILL.md: sha256:6c83d02a114c2b6515c93c3b28ac8d9ab559e90c76b2fb1f2a5b6cc2878ed98b
@@ -282,6 +522,12 @@ local_deployed_file_hashes:
   .agents/skills/expressive-product-sites/references/unfold-case-study.md: sha256:1eada03c51fe5d23e6952c252a5a4a3a1f24ebfed9ca3e5d0c9f86645475afac
   .agents/skills/investigate-session/SKILL.md: sha256:624217e42b73ca7c103f830d1aae7a013403283f8b2620442a6676437ac84e9a
   .agents/skills/investigate-session/scripts/investigate.py: sha256:1ae547ce32e0b77f2f2e48313cfd361597fb00cf303e817f590e136c0e90c973
+  .agents/skills/openspec-apply-change/SKILL.md: sha256:a4f53ace311a53f682d5322643a3e16891edc91cef4d59813d5050deeaf1e7ac
+  .agents/skills/openspec-archive-change/SKILL.md: sha256:bba37512531e22e74ddde685f85ef13f58246d8dc6f0d5a8af67f582029fcbe6
+  .agents/skills/openspec-explore/SKILL.md: sha256:46c08b3cf63e3f53ed63ff436a43acf4fee41cf6b8e9dcef8ce1d71fea798461
+  .agents/skills/openspec-propose/SKILL.md: sha256:28bd064223cf575e7fe91a38809fd0719ccfbc3880db5bcd89beb53628b6dbd0
+  .agents/skills/openspec-sync-specs/SKILL.md: sha256:e8e8ea7d95be96114f14974710624a7fe12b1d7fb1a92b0369a3c3721053f5f4
+  .agents/skills/openspec-update-change/SKILL.md: sha256:e261f65954eca0fb3bfdc2ba192f1d471b349ddb6bbd516fcbc938cc5bf62614
   .claude/commands/unfold-review.md: sha256:ceda8bf0253792d6be1d8d5022f6c437e3c7c91cf0930592254738bdb33cb700
   .claude/rules/apps-site.md: sha256:773c4b5d7e744cf1513aa98fee0e56c8e7db09f9af0c31fab76dd6f92eaf397b
   .claude/rules/apps-unfold.md: sha256:e29cee8b4c493f866155363897264c5dff260fa18bdcdae08d1442d7226c3f17
@@ -295,4 +541,10 @@ local_deployed_file_hashes:
   .claude/skills/expressive-product-sites/references/unfold-case-study.md: sha256:1eada03c51fe5d23e6952c252a5a4a3a1f24ebfed9ca3e5d0c9f86645475afac
   .claude/skills/investigate-session/SKILL.md: sha256:624217e42b73ca7c103f830d1aae7a013403283f8b2620442a6676437ac84e9a
   .claude/skills/investigate-session/scripts/investigate.py: sha256:1ae547ce32e0b77f2f2e48313cfd361597fb00cf303e817f590e136c0e90c973
+  .claude/skills/openspec-apply-change/SKILL.md: sha256:a4f53ace311a53f682d5322643a3e16891edc91cef4d59813d5050deeaf1e7ac
+  .claude/skills/openspec-archive-change/SKILL.md: sha256:bba37512531e22e74ddde685f85ef13f58246d8dc6f0d5a8af67f582029fcbe6
+  .claude/skills/openspec-explore/SKILL.md: sha256:46c08b3cf63e3f53ed63ff436a43acf4fee41cf6b8e9dcef8ce1d71fea798461
+  .claude/skills/openspec-propose/SKILL.md: sha256:28bd064223cf575e7fe91a38809fd0719ccfbc3880db5bcd89beb53628b6dbd0
+  .claude/skills/openspec-sync-specs/SKILL.md: sha256:e8e8ea7d95be96114f14974710624a7fe12b1d7fb1a92b0369a3c3721053f5f4
+  .claude/skills/openspec-update-change/SKILL.md: sha256:e261f65954eca0fb3bfdc2ba192f1d471b349ddb6bbd516fcbc938cc5bf62614
   .opencode/commands/unfold-review.md: sha256:ceda8bf0253792d6be1d8d5022f6c437e3c7c91cf0930592254738bdb33cb700
