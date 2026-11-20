@@ -14,6 +14,7 @@ export const insidersProposals = [
   'chatStatusItem',
   'remoteAgentHost',
 ];
+export const insidersActivationEvents = ['onChatArtifactIntegration'];
 export const feedbackCommand = { command: 'unfold.insiders.sendFeedback', title: 'Send Feedback', category: 'Unfold Insiders', icon: '$(feedback)' };
 export const chatSessionsContribution = { type: 'unfold-work', name: 'unfold', displayName: 'Unfold', description: 'Proposed Work Items you may take on and, if you choose, the Work Items and sessions that need you, from your Unfold workbench. Unfold runs no model here.' };
 export const sessionsListSetting = {
@@ -37,6 +38,7 @@ export function insidersManifest(manifest) {
   next.displayName = insidersDisplayName;
   next.description = `${manifest.description} Insiders build with VS Code's proposed APIs; installed from a GitHub release VSIX only.`;
   next.enabledApiProposals = [...insidersProposals];
+  next.activationEvents = [...(next.activationEvents ?? []), ...insidersActivationEvents.filter(event => !next.activationEvents?.includes(event))];
   const configuration = next.contributes?.configuration ?? {};
   next.contributes = {
     ...next.contributes,

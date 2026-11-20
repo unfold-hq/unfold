@@ -33,6 +33,7 @@ import { followHandOffsInTerminal, vscodeTerminalHost } from './claude-terminal.
 import { mcpInstallUri, mcpJsonEntry, mcpProviderApi, ploegMcpProviderId, ploegMcpServer, provideServersSetting, type RemoteMcpServer } from './mcp-servers.js';
 import { UnfoldTimeline, timelineApi, timelineItemContext } from './timeline.js';
 import { parseRemote } from './git-remotes.js';
+import { registerChatArtifacts } from './chat-artifacts.js';
 import { SessionsList } from './sessions-list.js';
 import { InsidersGlance, glanceTreeProvider, nowRules } from './insiders-glance.js';
 import { statusHover } from './what-waits.js';
@@ -215,6 +216,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.registerLanguageModelTools(context);
     this.registerTimeline(context);
     this.registerSessionsList(context);
+    context.subscriptions.push(...registerChatArtifacts(vscode, this.proposals, { core: this.core, reader: () => this.configurationError ? undefined : this.current, configurationError: () => this.configurationError, signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)), secrets: context.secrets }));
     if (this.proposals.insiders) context.subscriptions.push(vscode.commands.registerCommand(sendFeedbackCommand, () => this.perform(() => this.sendFeedback())));
     void this.noticeProposalsOff();
     this.timer = this.poll();

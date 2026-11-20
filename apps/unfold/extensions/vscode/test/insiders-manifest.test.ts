@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chatSessionsContribution, feedbackCommand, insidersManifest, insidersProposals, stageInsiders, stagedFiles } from '../scripts/insiders.mjs';
+import { chatSessionsContribution, feedbackCommand, insidersActivationEvents, insidersManifest, insidersProposals, stageInsiders, stagedFiles } from '../scripts/insiders.mjs';
 import { insidersExtensionId, insidersProposals as guardedProposals } from '../src/proposals.ts';
 import { sessionsListSetting, workSessionType } from '../src/work-sessions.ts';
 
@@ -17,8 +17,15 @@ const source = readFileSync(join(root, 'src/extension.ts'), 'utf8');
 test('the Insiders manifest is the same extension under its own identifier and name', () => {
   assert.equal(`${insiders.publisher}.${insiders.name}`, insidersExtensionId);
   assert.equal(insiders.displayName, 'Unfold Insiders — Remote Agent Workbench');
-  for (const key of ['version', 'main', 'engines', 'activationEvents', 'capabilities', 'extensionKind', 'icon', 'repository', 'license']) assert.deepEqual(insiders[key], manifest[key], `${key} is unchanged`);
+  for (const key of ['version', 'main', 'engines', 'capabilities', 'extensionKind', 'icon', 'repository', 'license']) assert.deepEqual(insiders[key], manifest[key], `${key} is unchanged`);
   for (const key of Object.keys(manifest.contributes)) if (key !== 'commands' && key !== 'configuration') assert.deepEqual(insiders.contributes[key], manifest.contributes[key], `contributes.${key} is unchanged`);
+});
+
+test('only the Insiders manifest activates when chat observes an artifact, on top of every regular activation event', () => {
+  assert.deepEqual(insiders.activationEvents, [...manifest.activationEvents, ...insidersActivationEvents]);
+  assert.deepEqual(insidersActivationEvents, ['onChatArtifactIntegration']);
+  assert.equal(manifest.activationEvents.includes('onChatArtifactIntegration'), false);
+  assert.deepEqual(insidersManifest(insiders).activationEvents, insiders.activationEvents);
 });
 
 test('it lists exactly the round 1 proposals of the design, which the guard knows by the same names', () => {

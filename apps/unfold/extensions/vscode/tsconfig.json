@@ -8,6 +8,7 @@
     "outDir": "dist",
     "sourceMap": true,
     "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true,
     "types": ["node", "vscode"]
   },
   "include": ["src/**/*.ts", "proposed/*.d.ts"]

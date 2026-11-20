@@ -158,7 +158,7 @@ export function assemble(blocks: string[], max = defaultMaxChars, more = 'Open i
 const tracker = (item: { provider?: string; externalId?: string }) => item.provider || item.externalId ? `${item.provider ?? ''}:${item.externalId ?? ''}` : '';
 const demoLine = 'This is the illustrative demo: nothing ran and nothing was spent.';
 
-function fallbackReason(state: string): { chip: string; sentence: string; action: string } | null {
+export function fallbackReason(state: string): { chip: string; sentence: string; action: string } | null {
   if (state === 'awaiting_review') return { chip: 'Review the pull request', sentence: 'A pull request waits for a person to review it.', action: 'Review and merge or request changes in the forge.' };
   if (state === 'proposed') return { chip: 'Approve or reject', sentence: 'Proposed work waits for approval before Ploeg spends anything.', action: 'Approve or reject it in Unfold.' };
   return null;
@@ -181,7 +181,7 @@ function runLine(core: Core, run: PloegRunRow, demo: boolean, origin: string, at
   return `- Work Item ${run.workItemId} · Team ${run.team} · ${[run.role, run.round ? `Round ${run.round}` : '', elapsed ? `for ${elapsed}` : '', cost].filter(Boolean).join(', ')}: ${quote(run.workItemTitle || `Work Item ${run.workItemId}`)} · ${workLink(origin, run.workItemId)}`;
 }
 
-const workLink = (origin: string, id: string) => `${origin}/#work/${encodeURIComponent(id)}`;
+export const workLink = (origin: string, id: string) => `${origin}/#work/${encodeURIComponent(id)}`;
 
 type Refusal = { provider?: string; externalId?: string; team?: string; code?: string; reason?: string; title?: string; url?: string };
 
@@ -545,17 +545,25 @@ export async function prepareAction(name: LmActionToolName, input: unknown, cont
  * refusal in plain text; never throws.
  */
 export async function invokeAction(name: LmActionToolName, input: unknown, context: ActionContext, offered: OfferedConfirmations, token?: Cancellation): Promise<string> {
+  return (await carryOutAction(name, input, context, offered, token)).text;
+}
+
+/** Whether Unfold carried out an action, refused it so nothing changed, or could not say. */
+export type ActionOutcome = { kind: 'done' | 'not-done' | 'unknown'; text: string };
+
+/** What {@link invokeAction} answers, together with whether anything changed. */
+export async function carryOutAction(name: LmActionToolName, input: unknown, context: ActionContext, offered: OfferedConfirmations, token?: Cancellation): Promise<ActionOutcome> {
   const key = confirmationKey(name, input);
   const plan = await planAction(name, input, context);
-  if (plan.kind === 'refusal') { offered.take(key, '', context.now?.()); return plan.text; }
+  if (plan.kind === 'refusal') { offered.take(key, '', context.now?.()); return { kind: 'not-done', text: plan.text }; }
   const agreed = offered.take(key, plan.message, context.now?.());
-  if (agreed === 'missing') return `Not done: you were not asked to confirm this in chat, or the confirmation expired, so nothing was changed. Call ${name} again to be asked.`;
-  if (agreed === 'changed') return `Not done: what ${name} would do changed since you confirmed, so nothing was changed. Call it again to see what it would do now.`;
-  if (token?.isCancellationRequested) return `${cancelled} Nothing was changed.`;
+  if (agreed === 'missing') return { kind: 'not-done', text: `Not done: you were not asked to confirm this in chat, or the confirmation expired, so nothing was changed. Call ${name} again to be asked.` };
+  if (agreed === 'changed') return { kind: 'not-done', text: `Not done: what ${name} would do changed since you confirmed, so nothing was changed. Call it again to see what it would do now.` };
+  if (token?.isCancellationRequested) return { kind: 'not-done', text: `${cancelled} Nothing was changed.` };
   const nonce = (context.nonce ?? defaultNonce)();
   const confirmation = `vscode-${nonce}:${createHash('sha256').update(plan.message).digest('hex')}`;
-  try { return plan.done(await context.actor!.workItemAction(plan.id, plan.action, plan.body, { client: actionChannel, confirmation })); }
-  catch (error) { return actionFailure(error, plan.id, context.actor!.origin); }
+  try { return { kind: 'done', text: plan.done(await context.actor!.workItemAction(plan.id, plan.action, plan.body, { client: actionChannel, confirmation })) }; }
+  catch (error) { return actionFailureOutcome(error, plan.id, context.actor!.origin); }
 }
 
 /** The channel a take-on from the Sessions list names in `X-Unfold-Client`, so its Action Record reads `<editor sign-in> (VS Code Sessions list)`. */
@@ -603,12 +611,17 @@ export async function takeOn(id: string, context: ActionContext, confirm: Confir
 
 /** One sentence for an action Unfold did not carry out, in Unfold's own words when it refused. */
 export function actionFailure(error: unknown, id: string, origin: string): string {
+  return actionFailureOutcome(error, id, origin).text;
+}
+
+function actionFailureOutcome(error: unknown, id: string, origin: string): ActionOutcome {
+  const unknown = (why: string): ActionOutcome => ({ kind: 'unknown', text: `Unfold could not confirm whether Work Item ${id} changed: ${why} Read it with unfold_get_work before asking again: ${workLink(origin, id)}` });
   if (answered(error)) {
-    if (error.status === 401) return `${signedOut} Nothing was changed.`;
-    if (error.code === 'unreachable' || error.code === 'gateway_unavailable') return `Unfold could not confirm whether Work Item ${id} changed: ${clip(error.message, 300)} Read it with unfold_get_work before asking again: ${workLink(origin, id)}`;
-    if (error.status >= 400 && error.status < 500) return `Unfold refused: ${clip(error.message, 400)} Nothing was changed.`;
+    if (error.status === 401) return { kind: 'not-done', text: `${signedOut} Nothing was changed.` };
+    if (error.code === 'unreachable' || error.code === 'gateway_unavailable') return unknown(clip(error.message, 300));
+    if (error.status >= 400 && error.status < 500) return { kind: 'not-done', text: `Unfold refused: ${clip(error.message, 400)} Nothing was changed.` };
   }
-  return `Unfold could not confirm whether Work Item ${id} changed: ${error instanceof Error ? clip(error.message, 300) : 'it did not say why.'} Read it with unfold_get_work before asking again: ${workLink(origin, id)}`;
+  return unknown(error instanceof Error ? clip(error.message, 300) : 'it did not say why.');
 }
 
 const defaultNonce = () => randomBytes(12).toString('base64url');
