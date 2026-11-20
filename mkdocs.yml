@@ -47,6 +47,7 @@ nav:
       - Connect GitLab (mostly planned): how-to/connect-gitlab.md
       - Run a pilot batch: how-to/run-a-pilot-batch.md
       - Link your Claude Code sessions: how-to/link-claude-code-sessions.md
+      - Send every Claude Code session in your organisation to Unfold: how-to/send-every-claude-code-session-to-unfold.md
       - Connect your Claude routine: how-to/connect-your-claude-routine.md
       - Install the Unfold plugin in other clients: how-to/install-the-unfold-plugin.md
       - Follow hand-offs as tasks in a terminal: how-to/follow-hand-offs-as-tasks-in-a-terminal.md

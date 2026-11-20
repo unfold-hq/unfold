@@ -95,7 +95,7 @@ sh -c 'P="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/marketplaces/unfold/apps/u
 
 ## More Information
 
-* [Link your Claude Code sessions](../../../../docs/how-to/link-claude-code-sessions.md#send-claude-codes-usage-metrics-with-your-identity-the-telemetry-helper) carries the managed settings an organisation pastes and what the person sees; the [plugin README](../../extensions/claude-code/README.md#telemetry-headers) the exit codes.
+* [Send every Claude Code session in your organisation to Unfold](../../../../docs/how-to/send-every-claude-code-session-to-unfold.md#how-identity-is-attached-the-telemetry-helper) carries the managed settings an organisation pastes and what the person sees; the [plugin README](../../extensions/claude-code/README.md#telemetry-headers) the exit codes.
 * RFC 8628, OAuth 2.0 Device Authorization Grant: <https://www.rfc-editor.org/rfc/rfc8628>. RFC 8693, OAuth 2.0 Token Exchange: <https://www.rfc-editor.org/rfc/rfc8693>. OpenID Connect Discovery 1.0: <https://openid.net/specs/openid-connect-discovery-1_0.html>.
 
 ### History
