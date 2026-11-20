@@ -151,6 +151,46 @@ jobs:
       - name: Typecheck Unfold
         run: mise -C apps/unfold exec -- npm run typecheck
 
+  vscode-integration:
+    if: github.repository == 'unfold-hq/unfold'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MISE_AUTO_INSTALL: 'false'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run the suite only when the change touches the VS Code extension or this workflow
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] || git diff --name-only "${BASE:-origin/development}...${HEAD_SHA:-HEAD}" -- apps/unfold/extensions/vscode .github/workflows/on_pull_request.yml | grep -q .; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No change under apps/unfold/extensions/vscode; the VS Code integration suite does not run."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.scope.outputs.run == 'true'
+        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        with:
+          version: 2026.10.25
+          install_args: node
+          cache: false
+      - if: steps.scope.outputs.run == 'true'
+        name: Install Unfold's and the extension's packages
+        run: |
+          mise trust apps/unfold/mise.toml
+          mise -C apps/unfold exec -- npm ci --no-audit --no-fund
+          mise -C apps/unfold exec -- npm ci --no-audit --no-fund --prefix extensions/vscode
+      - if: steps.scope.outputs.run == 'true'
+        name: Run the extension in VS Code Stable and Insiders against the deterministic demo, headless
+        run: xvfb-run -a mise run vscode-integration
+
   build-contexts:
     if: github.repository == 'unfold-hq/unfold' && (github.event_name != 'pull_request' || github.base_ref != 'development' || contains(github.event.pull_request.labels.*.name, 'full-ci'))
     runs-on: ubuntu-24.04
@@ -257,7 +297,7 @@ jobs:
           git /repo --config /repo/.gitleaks.toml --log-opts="${BASE:-origin/development}..${HEAD_SHA:-HEAD}" --no-banner --redact
 
   gate:
-    needs: [checks, checks-unfold, build-contexts, gitleaks, agents-check, opencode-contract, typecheck, ploeg-pin, ploeg-docs, release-policy, release-notes]
+    needs: [checks, checks-unfold, build-contexts, gitleaks, agents-check, opencode-contract, typecheck, vscode-integration, ploeg-pin, ploeg-docs, release-policy, release-notes]
     if: github.repository == 'unfold-hq/unfold' && always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
