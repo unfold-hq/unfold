@@ -22,6 +22,7 @@ const groups = [
   { id: 'work', items: [
     { id: 'work', href: '#work', glyph: 'work', label: 'Work' },
     { id: 'proposed', href: '#proposed', glyph: 'proposed', label: 'Proposed', count: 'proposed', describe: n => `${n} proposed`, tone: 'neutral' },
+    { id: 'take-on', href: '#take-on', glyph: 'check-circle', label: 'Take on' },
     { id: 'tasks', href: '#tasks', glyph: 'tasks', label: 'Tasks' },
     { id: 'teams', href: '#teams', glyph: 'layers', label: 'Teams', when: () => enabled('teams.builder') },
   ] },
@@ -35,7 +36,7 @@ const groups = [
   { id: 'settings', items: [{ id: 'settings', href: '#settings/preferences', glyph: 'settings', label: 'Settings' }] },
 ];
 const cardPages = [['binder', '#binder', 'cards', 'Binder'], ['packs', '#packs', 'pack', 'Packs'], ['season', '#season', 'calendar', 'Season']];
-const quick = ['now', 'work', 'runs'];
+const quick = ['now', 'take-on', 'work', 'runs'];
 const settingsGroups = [
   { id: 'yours', label: 'Yours', pages: [['preferences', '#settings/preferences', 'Preferences'], ['notifications', '#settings/notifications', 'Notifications'], ['labs', '#settings/labs', 'Labs'], ['account', '#settings/accounts', 'Linked accounts'], ['editors', '#settings/editors', 'Signed-in editors'], ['linked-sessions', '#settings/agent-sessions', 'Agent sessions'], ['usage', '#settings/usage', 'Your usage'], ['connect-claude', '#settings/claude', 'Connect Claude'], ['card-identity', '#settings/cards', 'Card logins']] },
   { id: 'workbench', label: 'Workbench', pages: [['system', '#settings/environment', 'Environment'], ['connections', '#settings/connections', 'Connections'], ['task-setup', '#settings/task-setup', 'Connect a tracker'], ['connect-clickup', '#settings/connect-clickup', 'Connect ClickUp', 'admin'], ['webhooks', '#settings/webhooks', 'Webhooks', 'admin'], ['intake', '#settings/intake', 'Request intake', 'admin'], ['billing', '#settings/billing', 'Billing', 'admin'], ['admin', '#settings/admin', 'Administration', 'admin'], ['designer', '#settings/card-designer', 'Card designer']] },
