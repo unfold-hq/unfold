@@ -128,6 +128,17 @@ test('a side chat on a workbench without Ask says so on the first message and sp
   assert.equal((await f.answered(refused)).params.rejectionReason, sideChatText.readOnly);
 });
 
+test('a question the record answers is answered in the side chat with no model call and no confirmation, and the reply says it came from the Work Item\'s record and spent nothing', { timeout: testTimeout(20_000) }, async t => {
+  const f = await sideChatting(t, 'wi-205');
+  await f.open();
+  f.ask(standingQuestion, 'side-turn-1');
+  const reply = await f.client.until(message => action(message, f.chat, 'chat/responsePart') && message.params.action.turnId === 'side-turn-1');
+  await f.done('side-turn-1');
+  assert.match(reply.params.action.part.content, /\*Answered from the Work Item's record · no model call, nothing spent\*$/);
+  assert.ok(!f.client.inbox.some(message => action(message, f.chat, 'chat/inputRequested')), 'no spend confirmation is asked');
+  assert.deepEqual(f.asked.map(entry => entry.request), [{ recordOnly: true }]);
+});
+
 test('what the person had selected when opening a side chat goes to Ask with each question as its context', { timeout: testTimeout(20_000) }, async t => {
   const f = await sideChatting(t, 'wi-205');
   const selection = 'Rounded half up in the order totals.';

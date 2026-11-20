@@ -94,7 +94,7 @@ test('an Ask reads as an Ask in the chat: its badge, the answer or why there is 
   const answered = askMarkdown(ask({ answer: 'It stopped.', costUsd: 0.0123 }), entry());
   assert.match(answered, /^\*\*Ask\*\* · not sent to the team\n\nIt stopped\.\n\n\*US\$\s0,01 \(not final yet\) · US\$\s4,58 of US\$\s5,00 left this month, until 1 November\*$/);
   assert.match(askMarkdown(ask({ answer: 'It stopped.' }), entry()), /\*cost not known yet · /);
-  assert.match(askMarkdown(ask({ answer: 'It stopped.', ploegAskId: null, model: null, costUsd: 0, costStatus: 'settled', source: 'record', intent: 'why' }), entry()), /\*Answered from the record · no model call\*$/);
+  assert.match(askMarkdown(ask({ answer: 'It stopped.', ploegAskId: null, model: null, costUsd: 0, costStatus: 'settled', source: 'record', intent: 'why' }), entry()), /\*Answered from the Work Item's record · no model call, nothing spent\*$/);
   assert.match(askMarkdown(ask({ answer: 'It stopped.', demo: true, costStatus: 'demo', ploegAskId: null, source: 'record' }), entry()), /\*Demo · answered from the record · no model call, nothing spent\*$/);
   assert.match(askMarkdown(ask({ status: 'refused', demo: true, costStatus: 'demo', ploegAskId: null, failure: 'This is a demo: there is no model to ask, so nothing was asked or spent.' }), entry()), /\*Demo · no model call, nothing spent\*$/);
   const refused = askMarkdown(ask({ status: 'refused', ploegAskId: null, costUsd: 0, costStatus: 'settled', failure: 'Ask Allowance used up. It resets on 1 November.' }), entry());
@@ -229,7 +229,7 @@ test('a standing question is answered from the record: no Ploeg admission, no mo
   send(client, chat, 'Why did it stop?', 1, 'record-turn');
   const part = await client.until(message => action(message, chat, 'chat/responsePart') && message.params.action.turnId === 'record-turn');
   assert.match(part.params.action.part.content, /^\*\*Ask\*\* · not sent to the team\n\n/);
-  assert.match(part.params.action.part.content, /\*Answered from the record · no model call\*$/);
+  assert.match(part.params.action.part.content, /\*Answered from the Work Item's record · no model call, nothing spent\*$/);
   assert.deepEqual(fakes.admitted, []);
   assert.equal(fakes.prompts.length, 0);
 });

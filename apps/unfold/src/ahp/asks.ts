@@ -71,7 +71,7 @@ export const resetDay = (iso: string) => { const at = new Date(iso); return Numb
 
 function spendLine(ask: Ask, entry: ChatAskEntry): string {
   const source = ask.source ?? (ask.demo ? 'record' : 'model');
-  if (ask.status === 'answered' && source === 'record') return ask.demo ? 'Demo · answered from the record · no model call, nothing spent' : 'Answered from the record · no model call';
+  if (ask.status === 'answered' && source === 'record') return ask.demo ? 'Demo · answered from the record · no model call, nothing spent' : 'Answered from the Work Item\'s record · no model call, nothing spent';
   if (ask.demo) return 'Demo · no model call, nothing spent';
   if (ask.status === 'refused') return !ask.failureCode || ask.failureCode === 'allowance_used_up' ? 'Nothing was charged. An administrator can raise the allowance.' : 'Nothing was charged.';
   if (ask.status !== 'answered' && ask.costStatus === 'settled' && ask.costUsd === 0) return 'Nothing was charged.';
