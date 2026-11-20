@@ -123,6 +123,10 @@ export function safeHttpsUrl(value: string | undefined): string | undefined {
 
 export function plural(count: number, noun: string): string { return `${count} ${noun}${count === 1 ? '' : 's'}`; }
 export function teamDescription(team: PloegTeam): string { return `${team.paused ? 'paused · ' : ''}${plural(team.roles.length, 'role')} · ${team.queueDepth} queued`; }
+/** A Work Item or session title as a plain-text label: Markdown backslash escapes from a tracker or an agent are dropped, since a tree label never renders Markdown. */
+export function plainTitle(value: string): string {
+  return value.replace(/\\([\\`*_{}[\]()#+\-.!|<>~&$])/g, '$1');
+}
 /** Reduces tracker HTML to readable single-spaced text for tooltips. */
 export function plainText(value: string): string {
   return value.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/(p|div|li|h[1-6]|tr|blockquote)>/gi, '\n').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/\\([\\`*_[\]{}()#+\-.!<>~|&])/g, '$1').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{2,}/g, '\n').trim();

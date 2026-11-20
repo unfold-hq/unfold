@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ploegLanes as lanes, type PloegItem, type PloegLane, type PloegOverview, type PloegTeam } from './ploeg-types.js';
-import { plainText, plural, teamDescription } from './status.js';
+import { plainText, plainTitle, plural, teamDescription } from './status.js';
 import type { Core } from './core.js';
 import { icon } from './now-tree.js';
 
@@ -49,14 +49,15 @@ export class PloegTree implements vscode.TreeDataProvider<PloegEntry>, vscode.Di
     }
     const meta = this.core.workItemState(entry.item.state);
     const reason = this.core.listReason(entry.item, { demo: entry.demo });
-    const item = new vscode.TreeItem(entry.item.title || `Work Item ${entry.item.id}`);
+    const title = plainTitle(entry.item.title) || `Work Item ${entry.item.id}`;
+    const item = new vscode.TreeItem(title);
     item.id = `ploeg:item:${entry.item.id}`;
     item.description = [reason?.chip, `${entry.item.provider} #${entry.item.externalId || entry.item.id}`, entry.demo ? 'illustration' : ''].filter(Boolean).join(' · ');
-    item.tooltip = `${entry.item.title}\n${entry.item.team} · ${meta.label}${reason ? ` · ${reason.chip}` : ''} · ${plural(entry.item.attempts, 'attempt')}\n${reason ? `${reason.sentence}\n${reason.action}\n` : ''}${plainText(entry.item.description).slice(0, 600)}`;
+    item.tooltip = `${title}\n${entry.item.team} · ${meta.label}${reason ? ` · ${reason.chip}` : ''} · ${plural(entry.item.attempts, 'attempt')}\n${reason ? `${reason.sentence}\n${reason.action}\n` : ''}${plainText(entry.item.description).slice(0, 600)}`;
     item.iconPath = icon(meta);
     item.contextValue = 'ploeg:item';
     item.command = { command: 'unfold.openPloegItem', title: 'Open Work Item', arguments: [entry] };
-    item.accessibilityInformation = { label: `${entry.item.title}, ${meta.label}, ${entry.item.team}` };
+    item.accessibilityInformation = { label: `${title}, ${meta.label}, ${entry.item.team}` };
     return item;
   }
   async getChildren(entry?: PloegEntry): Promise<PloegEntry[]> {
