@@ -275,6 +275,12 @@ test('the Now list shows what waits with its reason and links, and opens a card 
   assert.deepEqual(view.workItemModel({ item: { state: 'active' } }).actions, ['ask', 'note']);
 });
 
+test('the view names itself in appInfo when it initializes, as MCP Apps 2026-01-26 and its SDK hosts require', () => {
+  assert.deepEqual(Object.keys(view.initializeParams).sort(), ['appCapabilities', 'appInfo', 'protocolVersion']);
+  assert.equal(view.initializeParams.protocolVersion, '2026-01-26');
+  assert.deepEqual(view.initializeParams.appInfo, { name: 'unfold-view', version: '1' });
+});
+
 test('the view answers host requests and ignores replies it did not ask for', async () => {
   const host = bridgedHost();
   host.bridge.onRequest('ui/resource-teardown', () => ({}));

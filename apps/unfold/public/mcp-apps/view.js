@@ -1,6 +1,9 @@
 /** The MCP Apps protocol revision this view speaks in `ui/initialize`. */
 export const appProtocolVersion = '2026-01-26';
 
+/** The `ui/initialize` params: MCP Apps names the view in `appInfo`, and a host that validates them refuses any other shape. */
+export const initializeParams = { protocolVersion: appProtocolVersion, appCapabilities: { availableDisplayModes: ['inline'], tools: { listChanged: true } }, appInfo: { name: 'unfold-view', version: '1' } };
+
 const usd = new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const changesWork = new Set(['unfold_ask', 'unfold_answer_question', 'unfold_add_note', 'unfold_approve_work']);
 const stateWords = { needs_human: 'Needs you', awaiting_review: 'Ready for review', proposed: 'Proposed', ingested: 'Ingested', queued: 'Queued', leased: 'Running', active: 'Running', stale: 'Stale', done: 'Done', withdrawn: 'Withdrawn' };
@@ -526,7 +529,7 @@ export async function boot(win) {
       return result;
     } finally { acting -= 1; }
   });
-  const init = await bridge.request('ui/initialize', { protocolVersion: appProtocolVersion, appCapabilities: { availableDisplayModes: ['inline'], tools: { listChanged: true } }, clientInfo: { name: 'unfold-view', version: '1' } });
+  const init = await bridge.request('ui/initialize', initializeParams);
   tellsModel = Boolean(init?.hostCapabilities?.updateModelContext);
   theme(init?.hostContext);
   bridge.notify('ui/notifications/initialized', {});
