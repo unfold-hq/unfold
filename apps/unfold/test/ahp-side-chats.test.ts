@@ -31,7 +31,7 @@ async function sideChatting(t: TestContext, publicId: string) {
   const session = `unfold:/${publicId}`;
   const chat = `ahp-chat://side-1/${Buffer.from(session).toString('base64url')}`;
   await f.client.rpc('subscribe', { channel: session });
-  const open = () => f.client.rpc('createChat', { channel: session, chat, source: { kind: 'sideChat', chat: defaultChatOf(session), turnId: `${publicId}-round-1-1` }, _meta: { [sideChatWithoutContextMeta]: true } });
+  const open = (selection?: Json) => f.client.rpc('createChat', { channel: session, chat, source: { kind: 'sideChat', chat: defaultChatOf(session), turnId: `${publicId}-round-1-1`, ...(selection ? { selection } : {}) }, _meta: { [sideChatWithoutContextMeta]: true } });
   const ask = (text: string, turnId: string) => f.dispatch(chat, { type: 'chat/turnStarted', turnId, message: { text, origin: { kind: 'user' } } });
   const done = (turnId: string) => f.client.until(message => action(message, chat, 'chat/turnComplete') && message.params.action.turnId === turnId);
   return { ...f, asked, session, chat, open, ask, done };
@@ -126,6 +126,25 @@ test('a side chat on a workbench without Ask says so on the first message and sp
   assert.deepEqual(f.state.writes, []);
   const refused = f.dispatch(f.chat, { type: 'chat/turnResume', turnId: 'side-turn-1' });
   assert.equal((await f.answered(refused)).params.rejectionReason, sideChatText.readOnly);
+});
+
+test('what the person had selected when opening a side chat goes to Ask with each question as its context', { timeout: testTimeout(20_000) }, async t => {
+  const f = await sideChatting(t, 'wi-205');
+  const selection = 'Rounded half up in the order totals.';
+  await f.open({ text: selection, responsePartId: 'part-7' });
+  f.ask(standingQuestion, 'side-turn-1');
+  await f.done('side-turn-1');
+  const question = 'Why half up and not to even?';
+  f.ask(question, 'side-turn-2');
+  const requested = await f.requested(f.chat);
+  f.dispatch(f.chat, { type: 'chat/inputCompleted', requestId: requested.params.action.request.id, response: 'accept', answers: picked('ask') });
+  await f.done('side-turn-2');
+  assert.deepEqual(f.asked, [
+    { workItemId: '205', question: standingQuestion, request: { recordOnly: true, selection } },
+    { workItemId: '205', question, request: { recordOnly: true, selection } },
+    { workItemId: '205', question, request: { model: true, selection } },
+  ]);
+  assert.deepEqual(f.state.writes, [], 'the selection reaches Ask only, never the Team');
 });
 
 test('a side chat kept across a restart opens before the session list, and only for a person Ploeg and the team map still let see its Work Item', { timeout: testTimeout(40_000) }, async t => {

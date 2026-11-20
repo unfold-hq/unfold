@@ -13,8 +13,8 @@ export interface ChatAskService {
   about(user: User, workItemId: string): Promise<{ asks: Ask[]; allowance: PloegAskAllowance | null }>;
 }
 
-/** How the Ask service may answer: `recordOnly` from the record alone, refused with `ask_needs_model` when only a model could; `model` with a model call. */
-export type ChatAskRequest = { model?: boolean; recordOnly?: boolean };
+/** How the Ask service may answer: `recordOnly` from the record alone, refused with `ask_needs_model` when only a model could; `model` with a model call. `selection` is what the person had selected, passed as context of the question. */
+export type ChatAskRequest = { model?: boolean; recordOnly?: boolean; selection?: string };
 
 /** The two chat commands: `/ask` answers a question without reaching the team, `/steer` sends the message towards the team. */
 export type ChatIntent = 'ask' | 'steer';
