@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node", "vscode"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "proposed/*.d.ts"]
 }

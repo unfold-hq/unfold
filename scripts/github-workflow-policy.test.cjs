@@ -374,6 +374,30 @@ test('the chart follows every image, the extension verifies before Open VSX and 
   }
 });
 
+test('Unfold Insiders is packaged, verified, signed, attested and attached to the release, and goes to no registry', () => {
+  const extension = publisher.jobs['unfold-release-publish-extension'];
+  const at = predicate => extension.steps.findIndex(predicate);
+  const pack = at(step => /npm run package -- --out/.test(step.run ?? ''));
+  const insiders = at(step => /npm run package:insiders -- --out "\$PWD\/\$insiders"/.test(step.run ?? ''));
+  const verify = at(step => step.env?.VSIX_PATH === 'extensions/vscode/unfold-insiders-${{ needs.parse-release-tag.outputs.version }}.vsix');
+  const sign = at(step => /cosign verify-blob --bundle/.test(step.run ?? ''));
+  const attest = at(step => (step.uses ?? '').startsWith('actions/attest-build-provenance@'));
+  const attach = at(step => /gh release upload/.test(step.run ?? ''));
+  assert.ok(pack >= 0 && pack < insiders && insiders < verify && verify < sign && sign < attest && attest < attach, 'the Insiders VSIX follows the regular one through every step up to the release');
+  assert.match(extension.steps[insiders].run, /npm pkg set version="\$EXTENSION_VERSION"\n\s+npm run package:insiders/);
+  assert.match(extension.steps[verify].run, /scripts\/insiders\.mjs --manifest[\s\S]+extension:verify/);
+  assert.match(extension.steps[sign].run, /for vsix in "unfold-\$\{VERSION\}\.vsix" "unfold-insiders-\$\{VERSION\}\.vsix"; do/);
+  assert.match(extension.steps[attest].with['subject-path'], /unfold-insiders-\$\{\{ needs\.parse-release-tag\.outputs\.version \}\}\.vsix/);
+  assert.match(extension.steps[attach].run, /"\$insiders" "\$\{insiders\}\.sha256" "\$\{insiders\}\.sigstore\.json"/);
+  const publications = githubTree().map(text).flatMap(workflow => [...workflow.matchAll(/(?:ovsx|vsce)\s+publish\b[^\n]*/g)].map(match => match[0]));
+  assert.ok(publications.length >= 2, 'both registry publications are found');
+  for (const publication of publications) {
+    assert.match(publication, /--packagePath "unfold-\$\{VERSION\}\.vsix"/, `${publication} names the regular VSIX`);
+    assert.doesNotMatch(publication, /insiders/i, `${publication} never takes the Insiders VSIX`);
+  }
+  for (const index of [at(step => /ovsx publish/.test(step.run ?? '')), at(step => /vsce publish/.test(step.run ?? ''))]) assert.doesNotMatch(extension.steps[index].run, /insiders/i);
+});
+
 test('a site or Unfold release candidate deploys to staging and a stable site release to unfoldhq.dev, with wrangler and the live checks', () => {
   const gate = publisher.jobs['site-release-tag'].steps[0];
   const run = (tag, extra = {}) => runShell(gate.run, { WORKFLOW_EVENT: 'release', RELEASE_TAG: tag, RELEASES_ENABLED: 'true', CLOUDFLARE_API_TOKEN: 'token', CLOUDFLARE_ACCOUNT_ID: 'account', ...extra });

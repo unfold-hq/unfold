@@ -356,29 +356,61 @@ jobs:
         env:
           VSIX_PATH: extensions/vscode/unfold-${{ needs.parse-release-tag.outputs.version }}.vsix
         run: npm --prefix apps/unfold run extension:verify
-      - name: Sign the VSIX keyless and verify the signature with cosign verify-blob
+      - name: Reuse the Unfold Insiders VSIX already on the release, or package it from the same tree; it goes to no registry
         shell: bash
         working-directory: apps/unfold/extensions/vscode
         run: |
           set -euo pipefail
-          vsix="unfold-${VERSION}.vsix"
+          insiders="unfold-insiders-${VERSION}.vsix"
+          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$insiders" --pattern "${insiders}.sha256" --clobber 2>/dev/null && [ -s "$insiders" ]; then
+            sha256sum -c "${insiders}.sha256"
+            echo "Reusing $insiders from $TAG, so a retry attaches the same bytes."
+          else
+            rm -f "$insiders" "${insiders}.sha256"
+            prerelease=()
+            [[ "$VERSION" == *-* ]] && prerelease=(--pre-release)
+            npm pkg set version="$EXTENSION_VERSION"
+            npm run package:insiders -- --out "$PWD/$insiders" "${prerelease[@]}"
+            test -s "$insiders"
+            sha256sum "$insiders" > "${insiders}.sha256"
+          fi
+          test "$(unzip -p "$insiders" extension/package.json | node -p 'const m = JSON.parse(require("fs").readFileSync(0)); m.publisher + "." + m.name + " " + m.version')" = "unfold-hq.unfold-workbench-insiders $EXTENSION_VERSION"
+      - name: Verify the Unfold Insiders listing and packaged contents
+        shell: bash
+        env:
+          VSIX_PATH: extensions/vscode/unfold-insiders-${{ needs.parse-release-tag.outputs.version }}.vsix
+        run: |
+          set -euo pipefail
+          EXTENSION_MANIFEST="$(node apps/unfold/extensions/vscode/scripts/insiders.mjs --manifest "${RUNNER_TEMP}/unfold-insiders-package.json")"
+          export EXTENSION_MANIFEST
+          npm --prefix apps/unfold run extension:verify
+      - name: Sign both VSIX files keyless and verify the signatures with cosign verify-blob
+        shell: bash
+        working-directory: apps/unfold/extensions/vscode
+        run: |
+          set -euo pipefail
           tools=(mise exec cosign@2.6.5 --)
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${vsix}.sigstore.json" --clobber 2>/dev/null || "${tools[@]}" cosign sign-blob --yes --bundle "${vsix}.sigstore.json" "$vsix"
-          "${tools[@]}" cosign verify-blob --bundle "${vsix}.sigstore.json" \
-            --certificate-identity-regexp '^https://github\.com/unfold-hq/unfold/\.github/workflows/on_release_published\.yml@refs/tags/unfold-v0\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$vsix"
-      - name: Attest the VSIX's build provenance
+          for vsix in "unfold-${VERSION}.vsix" "unfold-insiders-${VERSION}.vsix"; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${vsix}.sigstore.json" --clobber 2>/dev/null || "${tools[@]}" cosign sign-blob --yes --bundle "${vsix}.sigstore.json" "$vsix"
+            "${tools[@]}" cosign verify-blob --bundle "${vsix}.sigstore.json" \
+              --certificate-identity-regexp '^https://github\.com/unfold-hq/unfold/\.github/workflows/on_release_published\.yml@refs/tags/unfold-v0\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$' \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$vsix"
+          done
+      - name: Attest the build provenance of both VSIX files
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: apps/unfold/extensions/vscode/unfold-${{ needs.parse-release-tag.outputs.version }}.vsix
-      - name: Attach the VSIX, its checksum and its signature bundle to the draft release
+          subject-path: |
+            apps/unfold/extensions/vscode/unfold-${{ needs.parse-release-tag.outputs.version }}.vsix
+            apps/unfold/extensions/vscode/unfold-insiders-${{ needs.parse-release-tag.outputs.version }}.vsix
+      - name: Attach both VSIX files, their checksums and their signature bundles to the draft release
         shell: bash
         working-directory: apps/unfold/extensions/vscode
         run: |
           set -euo pipefail
           vsix="unfold-${VERSION}.vsix"
+          insiders="unfold-insiders-${VERSION}.vsix"
           attached="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
-          for asset in "$vsix" "${vsix}.sha256" "${vsix}.sigstore.json"; do
+          for asset in "$vsix" "${vsix}.sha256" "${vsix}.sigstore.json" "$insiders" "${insiders}.sha256" "${insiders}.sigstore.json"; do
             if grep -qx "$asset" <<< "$attached"; then
               echo "$asset is already on $TAG."
             else

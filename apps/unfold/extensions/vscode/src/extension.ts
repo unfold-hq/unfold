@@ -20,7 +20,7 @@ import { SessionPanels, type PanelHost, type PanelTab, type InstructionOutcome }
 import { presentation, situation, safeHttpsUrl, spendLabel, isolatedPlacement, placementLabel, presentationFor, plainText, providerNames } from './status.js';
 import { setApproval as chooseApproval, type ApprovalChoice } from './approval.js';
 import { linkedAccounts, type AccountChoice } from './accounts.js';
-import { SettingsFileError, agentHostStore, agentHostTokenId, agentsWindowPlan, agentsWindowState, agentsWindowFolder, agentsWindowStatusText, agentsWindowSubject, foldersByLastPick, type AgentHostFolder, attachAgentHost, type AgentsWindowLinkView, type AgentsWindowState, type AttachedClient, connectionAddress, detachAgentHost, editorWindowOf, isAgentsWindowWorkspace, probeAgentHostToken, userSettingsFile, type AgentHostStore, type AttachOutcome, type IssuedAgentHost } from './agent-host.js';
+import { SettingsFileError, agentHostStore, agentHostTokenId, agentsWindowPlan, agentsWindowState, agentsWindowFolder, agentsWindowStatusText, agentsWindowSubject, foldersByLastPick, type AgentHostFolder, attachAgentHost, type AgentsWindowLinkView, type AgentsWindowState, type AttachedClient, connectionAddress, detachAgentHost, editorWindowOf, isAgentsWindowWorkspace, probeAgentHostToken, registeredAgentHost, userSettingsFile, type AgentHostStore, type AttachOutcome, type IssuedAgentHost } from './agent-host.js';
 import { SessionTree, TaskTree, type SessionEntry, type TaskEntry } from './tree.js';
 import { TaskPanels, type TaskPanelHost } from './task-panel.js';
 import { checkOutWorkItemBranch, gitApi } from './checkout.js';
@@ -33,6 +33,8 @@ import { followHandOffsInTerminal, vscodeTerminalHost } from './claude-terminal.
 import { mcpInstallUri, mcpJsonEntry, mcpProviderApi, ploegMcpProviderId, ploegMcpServer, provideServersSetting, type RemoteMcpServer } from './mcp-servers.js';
 import { UnfoldTimeline, timelineApi, timelineItemContext } from './timeline.js';
 import { parseRemote } from './git-remotes.js';
+import { ProposalGuard, enableProposedApiCommand, insidersExtensionId, insidersProposals, offNoticeKey, proposalsOffNotice } from './proposals.js';
+import { feedbackIssueUrl } from './feedback.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -45,6 +47,9 @@ const openAgentsWindowCommand = 'workbench.action.openAgentsWindow';
 const agentsWindowPollMs = 20_000;
 const agentsWindowTroubleshooting = 'https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/operations/live.md#troubleshooting-the-agents-window';
 const ploegMcpHintDismissed = 'unfold.ploegMcp.clientIdHintDismissed';
+const proposalsOffNoticeShown = 'unfold.insiders.proposalsOffNoticeShown';
+const insidersGuide = 'https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/README.md#unfold-insiders';
+const sendFeedbackCommand = 'unfold.insiders.sendFeedback';
 
 class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   readonly extensionUri: vscode.Uri;
@@ -70,6 +75,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private handOffsReadAt = 0;
   private claudeOutput: vscode.OutputChannel | undefined;
   private agentsWindow: AgentsWindowState = { status: 'unknown' };
+  private readonly proposals: ProposalGuard;
+  private agentHostRegistration?: { origin: string; address: string; token: string; registration: vscode.Disposable };
   private agentsWindowTimer?: ReturnType<typeof setInterval>;
   private agentsWindowCheck?: ReturnType<typeof setTimeout>;
   private readonly documents: EvidenceDocuments;
@@ -105,6 +112,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.context = context;
     this.core = core;
     this.extensionUri = context.extensionUri;
+    this.proposals = new ProposalGuard({ enabledApiProposals: context.extension.id === insidersExtensionId ? insidersProposals : [] }, context.extension.packageJSON ?? {});
     try { this.current = new UnfoldClient(settings().get('serverUrl', 'http://127.0.0.1:4080'), context.secrets); }
     catch (error) { this.current = new UnfoldClient('http://127.0.0.1:4080', context.secrets); this.configurationError = error as Error; }
     this.now = new NowTree(core);
@@ -199,6 +207,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.registerMcpServers(context);
     this.registerLanguageModelTools(context);
     this.registerTimeline(context);
+    if (this.proposals.insiders) context.subscriptions.push(vscode.commands.registerCommand(sendFeedbackCommand, () => this.perform(() => this.sendFeedback())));
+    void this.noticeProposalsOff();
     this.timer = this.poll();
     void this.refresh();
     void this.attachAgentHostOnStart().finally(() => this.watchAgentsWindow());
@@ -770,6 +780,10 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       if (when === 'always') throw new Error(`The workbench at ${new URL(target.origin).host} does not serve the Agent Host Protocol.`);
       return undefined;
     }
+    if ((when !== 'present' && this.proposals.usable('remoteAgentHost')) || this.agentHostRegistration) {
+      const registered = await this.registerAgentHost(target, address);
+      if (registered) return registered;
+    }
     const key = this.agentHostKey(target);
     return attachAgentHost({
       store: this.agentHostStore(),
@@ -781,6 +795,46 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       remember: token => this.context.secrets.store(key, token),
       retire: token => this.retireAgentHostToken(target, token),
     });
+  }
+
+  private async registerAgentHost(target: UnfoldClient, address: string): Promise<AttachOutcome | undefined> {
+    const token = await this.reusableAgentHostToken(target, address);
+    const current = this.agentHostRegistration;
+    if (current && current.origin === target.origin && current.address === address && current.token === token) return { status: 'unchanged', minted: false, registered: true };
+    const registration = this.proposals.use('remoteAgentHost', () => vscode.chat.registerRemoteAgentHost(registeredAgentHost(address, token)));
+    if (!registration) { this.unregisterAgentHost(); void this.noticeProposalsOff(); return undefined; }
+    current?.registration.dispose();
+    this.agentHostRegistration = { origin: target.origin, address, token, registration };
+    return { status: 'attached', minted: false, registered: true };
+  }
+
+  private unregisterAgentHost(): void {
+    this.agentHostRegistration?.registration.dispose();
+    this.agentHostRegistration = undefined;
+  }
+
+  private async noticeProposalsOff(): Promise<void> {
+    if (!this.proposals.insiders) return;
+    const off = this.proposals.off();
+    const message = proposalsOffNotice(off);
+    if (!message || this.context.globalState.get<string>(proposalsOffNoticeShown) === offNoticeKey(off)) return;
+    await this.context.globalState.update(proposalsOffNoticeShown, offNoticeKey(off));
+    const choice = await vscode.window.showInformationMessage(message, 'Copy Command', 'How to Enable');
+    if (choice === 'Copy Command') await vscode.env.clipboard.writeText(enableProposedApiCommand());
+    if (choice === 'How to Enable') await vscode.env.openExternal(vscode.Uri.parse(insidersGuide));
+  }
+
+  private async sendFeedback(): Promise<void> {
+    const url = feedbackIssueUrl({
+      appName: vscode.env.appName,
+      vscodeVersion: vscode.version,
+      extensionId: this.context.extension.id,
+      extensionVersion: String(this.context.extension.packageJSON?.version ?? 'unknown'),
+      platform: process.platform,
+      proposals: this.proposals.states(),
+      workbench: this.configurationError ? undefined : this.current.origin,
+    });
+    await vscode.env.openExternal(vscode.Uri.parse(url, true));
   }
 
   private async autoAttachAgentHost(): Promise<void> {
@@ -889,7 +943,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       throw error;
     }
     let entries;
-    try { entries = await this.agentHostStore().read(); }
+    const registered = this.agentHostRegistration?.origin === target.origin ? this.agentHostRegistration : undefined;
+    try { entries = registered ? [{ address: registered.address, name: 'Unfold' }] : await this.agentHostStore().read(); }
     catch (error) { if (error instanceof SettingsFileError) { await this.settingsFileProblem(target, error); return; } throw error; }
     const plan = agentsWindowPlan(view, entries, vscode.env.uriScheme, options => this.core.agentsWindowSessionLink(options));
     if (plan.kind === 'unusable') throw new Error('The workbench returned a session the Agents window cannot open.');
@@ -919,6 +974,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   }
 
   private async forgetAgentHost(target: UnfoldClient, address: string): Promise<void> {
+    if (this.agentHostRegistration?.origin === target.origin) this.unregisterAgentHost();
     try { await detachAgentHost(this.agentHostStore(), address, await this.context.secrets.get(this.agentHostKey(target))); }
     finally { await this.context.secrets.delete(this.agentHostKey(target)); }
   }
@@ -1015,7 +1071,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.watchAgentsWindow(5_000);
     const canOpen = (await vscode.commands.getCommands(true)).includes(openAgentsWindowCommand);
     const host = new URL(target.origin).host;
-    const message = outcome?.status === 'unchanged' ? `Unfold at ${host} is already in the VS Code Agents window.` : `Unfold at ${host} now appears in the VS Code Agents window. Its connection token is stored in your user settings, as VS Code keeps it.`;
+    const message = outcome?.status === 'unchanged' ? `Unfold at ${host} is already in the VS Code Agents window.` : outcome?.registered ? `Unfold at ${host} now appears in the VS Code Agents window. Unfold registered it with VS Code while it runs, so nothing was written to your settings.` : `Unfold at ${host} now appears in the VS Code Agents window. Its connection token is stored in your user settings, as VS Code keeps it.`;
     const choice = await vscode.window.showInformationMessage(message, ...(canOpen ? ['Start an Unfold Session'] : []));
     if (choice === 'Start an Unfold Session') await this.startInAgentsWindow();
   }
