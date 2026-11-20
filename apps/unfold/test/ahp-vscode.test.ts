@@ -93,7 +93,7 @@ test('VS Code main (1.142) attaches: ahp-session URIs, read and archive marks th
   assert.equal(again.type, 'snapshot', 'the host resumes the client it knows with fresh snapshots');
   assert.deepEqual(again.snapshots.map((snapshot: Json) => snapshot.resource), ['ahp-root://', session, chat]);
   const [root, sessionState, chatState] = again.snapshots.map((snapshot: Json) => snapshot.state);
-  assert.equal(root.agents[0].provider, 'unfold');
+  assert.ok(root.agents.some((agent: Json) => agent.provider === 'unfold'));
   assert.equal(sessionState.resource, session);
   assert.equal(sessionState.title, 'Rounding, reviewed');
   assert.equal(sessionState.status & (read | archived), read | archived);

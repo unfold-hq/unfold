@@ -1,5 +1,5 @@
 import { placements } from '../config.ts';
-import type { AppConfig, Team, Session, WorkspaceBackend } from '../types.ts';
+import type { AppConfig, Repository, Team, Session, WorkspaceBackend } from '../types.ts';
 import { money } from '../../public/core/format.js';
 
 type Json = Record<string, any>;
@@ -20,8 +20,41 @@ export const retiredTeamKey = 'crew';
 /** The one model the host advertises, so the composer names what runs instead of a gateway model. */
 export const composerModelId = 'unfold-team';
 
-/** The refusal a session without a repository gets, such as a folderless quick chat or one Compare Models starts: no Run starts. */
-export const noRepositoryRefusal = 'Unfold works on a repository: start the session from a repository\'s folder in the Workspace picker';
+const repositorySlug = (repository: Repository): string => {
+  try {
+    const url = new URL(repository.url);
+    if (!['http:', 'https:', 'ssh:', 'git:'].includes(url.protocol)) return repository.id;
+    return url.pathname.replace(/\/+$/, '').split('/').at(-1)?.replace(/\.git$/i, '') || repository.id;
+  } catch { return repository.id; }
+};
+
+/**
+ * The folder each repository is under `file:///unfold-repositories`, as the folder picker lists it: the forge path's last
+ * segment, followed by the id when two repositories share it, so a person can type it. VS Code labels a picked folder
+ * `<folder> [<host entry name>]`.
+ */
+export function repositoryFolderNames(repositories: readonly Repository[]): Map<string, string> {
+  const slugs = repositories.map(repository => [repository.id, repositorySlug(repository).replace(/[\\/]/g, '-')] as const);
+  const counts = new Map<string, number>();
+  for (const [, slug] of slugs) counts.set(slug.toLowerCase(), (counts.get(slug.toLowerCase()) ?? 0) + 1);
+  return new Map(slugs.map(([id, slug]) => [id, `${slug}${(counts.get(slug.toLowerCase()) ?? 0) > 1 ? ` (${id})` : ''}`]));
+}
+
+/** Where the Agents window offers this workbench's repositories, naming at most three folders; empty when it offers none. */
+export function repositoryPickHint(repositories: readonly Repository[]): string {
+  const folders = [...repositoryFolderNames(repositories).values()];
+  if (!folders.length) return '';
+  const shown = folders.length > 3 ? `${folders.slice(0, 3).join(', ')} or another` : folders.join(' or ');
+  return `open Workspace ▾ › Folders (Unfold) and pick ${shown}`;
+}
+
+/** The refusal a session without a repository gets, such as a folderless quick chat or one Compare Models starts: it names where to pick the repository's folder, and no Run starts. */
+export function noRepositoryRefusal(repositories: readonly Repository[]): string {
+  const where = repositoryPickHint(repositories);
+  return where
+    ? `A Team works on a repository: ${where}. To ask what is running or waiting instead, start a chat with the agent Unfold`
+    : 'This workbench offers no repository, so no Team can start. To ask what is running or waiting, start a chat with the agent Unfold';
+}
 
 /** Thrown when a session configuration names something this workbench does not offer. */
 export class SessionConfigError extends Error {}
@@ -89,7 +122,7 @@ function budgetOf(config: AppConfig, value: unknown): number | undefined {
 export function sessionConfigSchema(config: AppConfig, values: Json = {}, live?: Session): Json {
   const budget = budgetOf(config, values.budgetUsd);
   const properties: Json = {
-    repository: { type: 'string', title: 'Repository', description: values.repository ? 'Chosen with the Workspace picker' : noRepositoryRefusal, readOnly: true, enum: config.repositories.map(repo => repo.id), enumLabels: config.repositories.map(repo => repo.name), enumDescriptions: config.repositories.map(repo => repo.description) },
+    repository: { type: 'string', title: 'Repository', description: values.repository ? 'Chosen with the Workspace picker' : noRepositoryRefusal(config.repositories), readOnly: true, enum: config.repositories.map(repo => repo.id), enumLabels: config.repositories.map(repo => repo.name), enumDescriptions: config.repositories.map(repo => repo.description) },
     team: { type: 'string', title: 'Team', description: 'The roles that work on this session, in order', enum: config.teams.map(team => team.id), enumLabels: config.teams.map(team => team.name), enumDescriptions: config.teams.map(team => describeTeam(config, team)), default: config.teams[0]?.id },
   };
   const amounts = budgetOptions(config, budget);
@@ -134,7 +167,7 @@ function normalize(config: AppConfig, requested: Json, strict: boolean): Json {
   const refuse = (message: string) => { if (strict) throw new SessionConfigError(message); };
   const fallback = defaultSessionConfig(config);
   if (config.repositories.some(repo => repo.id === requested.repository)) values.repository = requested.repository;
-  else refuse(requested.repository === undefined ? noRepositoryRefusal : 'Choose a configured repository and team');
+  else refuse(requested.repository === undefined ? noRepositoryRefusal(config.repositories) : 'Choose a configured repository and team');
   if (config.teams.some(team => team.id === requested.team)) values.team = requested.team;
   else { refuse('Choose a configured repository and team'); values.team = fallback.team; }
   const budget = requested.budgetUsd === undefined ? defaultBudget(config) : budgetOf(config, requested.budgetUsd);

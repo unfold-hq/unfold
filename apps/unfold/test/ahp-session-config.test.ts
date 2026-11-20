@@ -114,7 +114,7 @@ test('VS Code\'s new-session flow: the advertised model names the team, a picker
   await vscode.open;
   const clientId = randomUUID();
   const initialized = await vscode.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId, clientInfo: vscodeAgentsWindow, initialSubscriptions: ['ahp-root://'] });
-  assert.deepEqual(initialized.snapshots[0].state.agents[0].models, [{ id: 'unfold-team', name: 'Demo team · no model calls', provider: 'unfold' }]);
+  assert.deepEqual(initialized.snapshots[0].state.agents.find((agent: Json) => agent.provider === 'unfold').models, [{ id: 'unfold-team', name: 'Demo team · no model calls', provider: 'unfold' }]);
 
   const picked = `${repositoriesDirectory}/${encodeURIComponent('Unfold · order-service')}`;
   const resolved = await vscode.rpc('resolveSessionConfig', { channel: 'ahp-root://', provider: 'unfold', workingDirectory: picked });

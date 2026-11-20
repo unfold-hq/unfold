@@ -551,7 +551,11 @@ export class WorkItemSessions {
     let entries: WorkItemRecord[];
     try { entries = await this.collect(user); }
     catch (error) {
-      if (error instanceof PloegError && error.status === 403) { this.seen.delete(user.id); return []; }
+      if (error instanceof PloegError && error.status === 403) {
+        console.error(JSON.stringify({ level: 'warn', event: 'agent_host.work_items_unlisted', user: user.id, reason: 'Ploeg refused to list this person\'s Teams or Work Items (403)' }));
+        this.seen.delete(user.id);
+        return [];
+      }
       if (!(error instanceof PloegError)) throw error;
       this.markStale();
       return [...(this.seen.get(user.id)?.values() ?? [])].map(({ entry }) => ({ ...entry, stale: true }));
