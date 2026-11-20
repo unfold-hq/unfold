@@ -5,12 +5,12 @@ import type { User } from './types.ts';
 export type PloegTrackerConnection = {
   id: string; kind: string; instance: string; method: string; source: 'runtime' | 'static';
   state: 'active' | 'awaiting_consent' | 'invalid' | 'token_missing' | 'unknown'; invalidReason: string | null;
-  account: { id: string; login: string; email?: string } | null; handOverAgent: boolean;
+  account: { id: string; login: string; email?: string } | null;
 };
 /** What starting a connection flow returns (Ploeg ADR-0195 section 3): the flow's `state`, kept by Unfold's server only, and where an OAuth flow sends the person. */
 export type PloegFlowStart = { flow: { id: string; method: string; expiresAt: string; state: string }; authorizeUrl?: string };
 /** One flow start: a pasted-token flow, or an OAuth flow that returns to `redirectUri`. */
-export type PloegFlowInput = { kind: string; instance: string; method: 'token' | 'oauth'; label: string; handOverAgent: boolean; redirectUri?: string };
+export type PloegFlowInput = { kind: string; instance: string; method: 'token' | 'oauth'; label: string; redirectUri?: string };
 /**
  * One container a tracker connection reaches (Ploeg ADR-0196): ClickUp's Workspace, Space, Folder or List. `ref` is
  * what a deeper read takes as `parent`; only a `bindable` one can be bound. Its name is the tracker's text, kept under
@@ -76,7 +76,6 @@ export function trackerConnection(value: unknown): PloegTrackerConnection {
     source: oneOf(data.source, ['runtime', 'static'] as const, 'runtime'), state: oneOf(data.state, ['active', 'awaiting_consent', 'invalid', 'token_missing'] as const, 'unknown'),
     invalidReason: optional(data.invalidReason, 64),
     account: account ? { id: String(account.id ?? '').slice(0, 128), login: optional(account.login, 255) ?? '', ...(typeof account.email === 'string' ? { email: account.email.slice(0, 255) } : {}) } : null,
-    handOverAgent: data.handOverAgent === true,
   };
 }
 
@@ -126,7 +125,7 @@ export class HttpPloegConnectionApi implements PloegConnectionApi {
   }
 
   async startFlow(user: User, input: PloegFlowInput): Promise<PloegFlowStart> {
-    const data = object(await this.call(user, 'connection-flows', { method: 'POST', body: { port: 'tracker', kind: input.kind, instance: input.instance, method: input.method, label: input.label, handOverAgent: input.handOverAgent, ...(input.redirectUri ? { redirectUri: input.redirectUri } : {}) } }));
+    const data = object(await this.call(user, 'connection-flows', { method: 'POST', body: { port: 'tracker', kind: input.kind, instance: input.instance, method: input.method, label: input.label, ...(input.redirectUri ? { redirectUri: input.redirectUri } : {}) } }));
     const flow = object(data.flow);
     const next = data.next && typeof data.next === 'object' ? data.next as Record<string, unknown> : {};
     return { flow: { id: text(flow.id, 128), method: text(flow.method, 64), expiresAt: text(flow.expiresAt, 64), state: text(flow.state, 512) }, ...(typeof next.authorizeUrl === 'string' ? { authorizeUrl: text(next.authorizeUrl, 4096) } : {}) };

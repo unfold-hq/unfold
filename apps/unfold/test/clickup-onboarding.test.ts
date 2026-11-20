@@ -47,7 +47,7 @@ async function fakePloeg(t: TestContext): Promise<Fake> {
     if (req.method === 'POST' && path === 'connection-flows') { fake.states.push(`state-${randomBytes(12).toString('hex')}`); return reply(201, { flow: { id: 'flow-1', method: body?.method, expiresAt: '2026-11-18T10:15:00Z', state: fake.states.at(-1) }, next: body?.method === 'oauth' ? { authorizeUrl: 'https://app.clickup.com/api?client_id=x&state=s' } : {} }); }
     if (req.method === 'POST' && path === 'connection-flows/complete') {
       const own = body?.token === adaToken;
-      return reply(201, { connection: { id: own ? 'clickup-ada' : 'clickup-unfold', kind: 'clickup', instance: 'clickup', method: body?.token ? 'token' : 'oauth', source: 'runtime', state: 'active', account: own ? { id: '7', login: 'Ada', email: 'ada@agency.example' } : { id: '42', login: 'unfold', email: 'unfold@agency.example' }, handOverAgent: true } });
+      return reply(201, { connection: { id: own ? 'clickup-ada' : 'clickup-unfold', kind: 'clickup', instance: 'clickup', method: body?.token ? 'token' : 'oauth', source: 'runtime', state: 'active', account: own ? { id: '7', login: 'Ada', email: 'ada@agency.example' } : { id: '42', login: 'unfold', email: 'unfold@agency.example' } } });
     }
     const scopes = /^tracker-connections\/([^/?]+)\/scopes(?:\?(.*))?$/.exec(path);
     if (req.method === 'GET' && scopes) {
@@ -127,7 +127,7 @@ test('the member token goes to Ploeg’s token flow once, and Unfold keeps the c
   const { clickup, fake, connections, store, file, changes } = await setup(t);
   const kept = await clickup.connectWithToken(admin, { token: memberToken });
   assert.deepEqual(writes(fake).map(entry => `${entry.method} ${entry.path}`), ['POST connection-flows', 'POST connection-flows/complete']);
-  assert.deepEqual({ ...writes(fake)[0].body }, { port: 'tracker', kind: 'clickup', instance: 'clickup', method: 'token', label: 'Unfold member', handOverAgent: true });
+  assert.deepEqual({ ...writes(fake)[0].body }, { port: 'tracker', kind: 'clickup', instance: 'clickup', method: 'token', label: 'Unfold member' });
   assert.equal(writes(fake)[1].body?.token, memberToken, 'the token reached Ploeg');
   assert.deepEqual(kept.ploeg, { connection: 'clickup-unfold', method: 'token', accountId: '42' });
   assert.equal(kept.account, 'unfold');
