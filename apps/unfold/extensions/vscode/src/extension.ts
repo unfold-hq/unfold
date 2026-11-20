@@ -33,6 +33,7 @@ import { followHandOffsInTerminal, vscodeTerminalHost } from './claude-terminal.
 import { mcpInstallUri, mcpJsonEntry, mcpProviderApi, ploegMcpProviderId, ploegMcpServer, provideServersSetting, type RemoteMcpServer } from './mcp-servers.js';
 import { UnfoldTimeline, timelineApi, timelineItemContext } from './timeline.js';
 import { parseRemote } from './git-remotes.js';
+import { SessionsList } from './sessions-list.js';
 import { ProposalGuard, enableProposedApiCommand, insidersExtensionId, insidersProposals, offNoticeKey, proposalsOffNotice } from './proposals.js';
 import { feedbackIssueUrl } from './feedback.js';
 import { execFile } from 'node:child_process';
@@ -76,6 +77,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private claudeOutput: vscode.OutputChannel | undefined;
   private agentsWindow: AgentsWindowState = { status: 'unknown' };
   private readonly proposals: ProposalGuard;
+  private sessionsList?: SessionsList;
   private agentHostRegistration?: { origin: string; address: string; token: string; registration: vscode.Disposable };
   private agentsWindowTimer?: ReturnType<typeof setInterval>;
   private agentsWindowCheck?: ReturnType<typeof setTimeout>;
@@ -207,6 +209,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.registerMcpServers(context);
     this.registerLanguageModelTools(context);
     this.registerTimeline(context);
+    this.registerSessionsList(context);
     if (this.proposals.insiders) context.subscriptions.push(vscode.commands.registerCommand(sendFeedbackCommand, () => this.perform(() => this.sendFeedback())));
     void this.noticeProposalsOff();
     this.timer = this.poll();
@@ -297,6 +300,16 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       invoke: async (options, token) => api.result(await invokeAction(name, options.input, acting(), offered, token)) as vscode.LanguageModelToolResult,
     });
     context.subscriptions.push(api.register('unfold_approve_work', action('unfold_approve_work')), api.register('unfold_reject_work', action('unfold_reject_work')), api.register('unfold_retry_work', action('unfold_retry_work')), api.register('unfold_hand_back', action('unfold_hand_back')));
+  }
+
+  private registerSessionsList(context: vscode.ExtensionContext) {
+    this.sessionsList = SessionsList.register({
+      core: this.core,
+      proposals: this.proposals,
+      acting: () => ({ core: this.core, actor: this.configurationError ? undefined : this.current, configurationError: this.configurationError, signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)) }),
+      refresh: () => { this.nowReadAt = 0; return this.refresh(false, true); },
+    });
+    if (this.sessionsList) context.subscriptions.push(this.sessionsList);
   }
 
   private registerTimeline(context: vscode.ExtensionContext) {
@@ -450,6 +463,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       const rows = sessionRows(this.core, sessions);
       this.now.update(now.value, rows, now.message);
       this.now.handOffs(handOffs);
+      this.sessionsList?.update({ now: now.value, rows, userId: bootstrap.user.id, demo: bootstrap.mode === 'demo' });
       this.paintHandOffs(handOffs);
       const demo = bootstrap.mode === 'demo';
       this.taskView.message = demo ? 'Demo fixture · No tracker account required' : undefined;

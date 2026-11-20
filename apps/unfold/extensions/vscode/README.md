@@ -37,7 +37,14 @@ What the experimental parts do today:
 | Part | Proposal | State |
 | --- | --- | --- |
 | The Agents window without editing settings | `remoteAgentHost` | Built. On sign-in the workbench is registered with `vscode.chat.registerRemoteAgentHost` while the extension runs, instead of being written to `chat.remoteAgentHosts` in your `settings.json`; the token stays in SecretStorage. If VS Code refuses the call, the extension writes the setting as the regular one does. |
-| Work in the Sessions list, Work Items in chat, what waits above the chat input, Now at a glance, the chat status menu | `chatSessionsProvider`, `chatArtifactIntegrations`, `chatInputNotification`, `treeViewMarkdownMessage`, `treeItemMarkdownLabel`, `statusBarItemTooltip`, `chatStatusItem` | Declared, not built yet. |
+| Work in the Sessions list | `chatSessionsProvider` | Built. See [Work in the Sessions list](#work-in-the-sessions-list). |
+| Work Items in chat, what waits above the chat input, Now at a glance, the chat status menu | `chatArtifactIntegrations`, `chatInputNotification`, `treeViewMarkdownMessage`, `treeItemMarkdownLabel`, `statusBarItemTooltip`, `chatStatusItem` | Declared, not built yet. |
+
+### Work in the Sessions list
+
+With `chatSessionsProvider` granted, VS Code's Sessions list has an **Unfold** group. By default it lists the proposed Work Items you may take on, each marked **Proposed** with its Team and where the proposal came from. To take one on, open it and send any message, or start a new Unfold session and name the Work Item (`184`, `#184` or its Unfold link), or leave the prompt empty to pick one. Either way you get the same approval as **Unfold: Approve Work Item** in chat: a dialog names the Work Item, the Team it is queued for and that its Runs spend from that Team's budget. Ploeg does not report that budget to Unfold yet, so the dialog says the amount is not known. Nothing is approved until you choose **Approve and queue**; Unfold then plans the approval again and approves only if nothing changed, through the browser's route with `X-Unfold-Client: VS Code Sessions list` and the hash of the text you confirmed.
+
+Set `unfold.insiders.sessionsList` to `all` to also list the Work Items and your own sessions that need you or are ready for your review, with **Needs input** when a person is asked, a short description, and the files a session changed with their line counts. It is off by default because the workbench is also an agent host, and the agent host lists the same Work Items and sessions; whether VS Code then shows them twice in the editor window's Sessions list is not verified yet. Unfold runs no model in these sessions: a session that is not an offer takes no input, and a message there is answered with a sentence saying so.
 
 **Unfold Insiders: Send Feedback** opens a new issue on [unfold-hq/unfold](https://github.com/unfold-hq/unfold/issues) with your VS Code version, the extension version, your platform, the workbench's origin and which proposals are on. It sends nothing itself: you read and edit the issue before you submit it.
 
