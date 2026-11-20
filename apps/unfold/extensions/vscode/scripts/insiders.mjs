@@ -14,6 +14,7 @@ export const insidersProposals = [
   'chatStatusItem',
   'remoteAgentHost',
 ];
+export const insidersActivationEvents = ['onChatArtifactIntegration'];
 export const feedbackCommand = { command: 'unfold.insiders.sendFeedback', title: 'Send Feedback', category: 'Unfold Insiders', icon: '$(feedback)' };
 export const stagedFiles = ['dist', 'media', 'README.md', 'CHANGELOG.md', 'LICENSE', '.vscodeignore'];
 
@@ -26,6 +27,7 @@ export function insidersManifest(manifest) {
   next.displayName = insidersDisplayName;
   next.description = `${manifest.description} Insiders build with VS Code's proposed APIs; installed from a GitHub release VSIX only.`;
   next.enabledApiProposals = [...insidersProposals];
+  next.activationEvents = [...(next.activationEvents ?? []), ...insidersActivationEvents.filter(event => !next.activationEvents?.includes(event))];
   next.contributes = { ...next.contributes, commands: [...(next.contributes?.commands ?? []), feedbackCommand] };
   return next;
 }
