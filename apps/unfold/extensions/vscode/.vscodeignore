@@ -10,3 +10,5 @@ dist/**/*.map
 .screenshots/
 **/.DS_Store
 scripts/**
+dist-insiders/**
+proposed/**

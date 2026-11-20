@@ -1240,6 +1240,7 @@
     "test": "node scripts/sync-core.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test ${UNFOLD_TEST_CONCURRENCY:+--test-concurrency=$UNFOLD_TEST_CONCURRENCY} --test-timeout=120000 --test-force-exit test/*.test.ts",
     "vscode:prepublish": "npm run compile",
     "package": "vsce package --no-dependencies",
+    "package:insiders": "npm run compile && node scripts/insiders.mjs && cd dist-insiders && vsce package --no-dependencies",
     "test:webview": "node scripts/sync-core.mjs && node test/webview.mjs && node test/task-webview.mjs"
   },
   "devDependencies": {

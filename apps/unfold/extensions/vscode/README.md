@@ -19,6 +19,30 @@ The extension was called `unfold-hq.unfold` until 2026-11-19. If you have that o
 
 A sideloaded VSIX does not receive registry updates automatically. An editor window needs VS Code 1.99 or later, and the extension runs in the Agents window from VS Code 1.143. The extension runs in the editor's Node extension host and does not require provider keys, a harness or Kubernetes tools on the client machine. A local workbench has its own runtime requirements.
 
+## Unfold Insiders
+
+**Unfold Insiders** (`unfold-hq.unfold-workbench-insiders`) is this extension built from the same source with VS Code's proposed APIs switched on, for people who run VS Code Insiders and want to try what is not in Stable VS Code yet ([design record](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/design/2026-11-20-unfold-insiders-and-the-phone.md)). It is the full extension plus the experimental parts, so it replaces the regular one rather than running next to it: sign-in and stored secrets are kept per extension identifier, and two extensions would ask for two sign-ins.
+
+It ships only as a VSIX on each [GitHub release](https://github.com/unfold-hq/unfold/releases), signed and attested like the regular one, and is on neither the Visual Studio Marketplace nor Open VSX, because VS Code asks extensions that use proposed APIs to stay off the Marketplace. To install it:
+
+1. Download `unfold-insiders-<version>.vsix` and its `.sha256` file from the release, and check it with `shasum -a 256 -c unfold-insiders-<version>.vsix.sha256`.
+2. In VS Code Insiders, disable `unfold-hq.unfold-workbench` (**Extensions → Unfold → Disable**), then choose **Extensions → … → Install from VSIX** and pick the file.
+3. Allow its proposed APIs. Either start VS Code Insiders with `code-insiders --enable-proposed-api unfold-hq.unfold-workbench-insiders`, or run **Preferences: Configure Runtime Arguments** and add `"enable-proposed-api": ["unfold-hq.unfold-workbench-insiders"]` to `argv.json`, then restart.
+4. Sign in to your workbench again.
+
+Without step 3, or in Stable VS Code, which grants proposed APIs only to extensions Microsoft lists, Unfold Insiders works exactly like the regular extension and says once which experimental parts are off and how to turn them on. It says so again only when that list changes.
+
+What the experimental parts do today:
+
+| Part | Proposal | State |
+| --- | --- | --- |
+| The Agents window without editing settings | `remoteAgentHost` | Built. On sign-in the workbench is registered with `vscode.chat.registerRemoteAgentHost` while the extension runs, instead of being written to `chat.remoteAgentHosts` in your `settings.json`; the token stays in SecretStorage. If VS Code refuses the call, the extension writes the setting as the regular one does. |
+| Work in the Sessions list, Work Items in chat, what waits above the chat input, Now at a glance, the chat status menu | `chatSessionsProvider`, `chatArtifactIntegrations`, `chatInputNotification`, `treeViewMarkdownMessage`, `treeItemMarkdownLabel`, `statusBarItemTooltip`, `chatStatusItem` | Declared, not built yet. |
+
+**Unfold Insiders: Send Feedback** opens a new issue on [unfold-hq/unfold](https://github.com/unfold-hq/unfold/issues) with your VS Code version, the extension version, your platform, the workbench's origin and which proposals are on. It sends nothing itself: you read and edit the issue before you submit it.
+
+Links the workbench opens in VS Code, such as **Connect VS Code** and **Open the Work Item in VS Code**, still name `unfold-hq.unfold-workbench`, so they do not reach Unfold Insiders yet. Not verified: nothing in Unfold Insiders has been tried in a running VS Code Insiders. That VS Code reports only the granted proposals in the extension's manifest is read from the VS Code source, not observed.
+
 ## Try the local demonstration
 
 With Node 24 and Git available through the repository's tool configuration, run this from the repository root:
@@ -265,5 +289,7 @@ mise exec -- npm run extension:verify
 ```
 
 [Client integration tests](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/client.test.ts) exercise the actual server with local fixtures. [Webview tests](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/webview.test.ts) inspect the shipped panel script; other tests cover status, authorization and account flows. These checks do not use paid providers. Node tests and browser rendering do not substitute for an actual Extension Development Host check. The [validation matrix](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/validation.md) records what has been exercised.
+
+`npm --prefix extensions/vscode run package:insiders` builds the Unfold Insiders VSIX in `extensions/vscode/dist-insiders/`. Code that calls a proposed API goes through `ProposalGuard` in `src/proposals.ts`: `usable(name)` says whether it may be tried, and `use(name, call)` runs it and returns `undefined` when VS Code refuses the proposal or lacks the API, so the caller falls back. The proposals' type definitions are the exact `vscode.proposed.<name>.d.ts` files of microsoft/vscode at one pinned commit, checked in under `extensions/vscode/proposed/`, rather than `npx @vscode/dts dev`, which downloads whatever `main` holds at that moment and reads the list from `enabledApiProposals`, which the regular manifest does not have. To move them, download the same files at a newer commit, name it in the changelog, and adjust the code to any change. Proposals change without a version number.
 
 For API maintenance, use the official [extension host](https://code.visualstudio.com/api/advanced-topics/extension-host), [webview](https://code.visualstudio.com/api/extension-guides/webview), [SecretStorage](https://code.visualstudio.com/api/references/vscode-api#SecretStorage) and [extension testing](https://code.visualstudio.com/api/working-with-extensions/testing-extension) documentation.

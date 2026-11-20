@@ -311,7 +311,12 @@ export type AttachRequest = {
   retire?(token: string): Promise<void>;
 };
 
-export type AttachOutcome = { status: 'attached' | 'unchanged' | 'skipped'; minted: boolean };
+export type AttachOutcome = { status: 'attached' | 'unchanged' | 'skipped'; minted: boolean; registered?: boolean };
+
+/** The host the `remoteAgentHost` proposal registers in place of a `chat.remoteAgentHosts` entry: the same name, address and token the entry would carry. */
+export function registeredAgentHost(address: string, connectionToken: string): { name: string; address: string; connectionToken: string } {
+  return { name: 'Unfold', address, connectionToken };
+}
 
 /**
  * Adds or refreshes the Unfold entry. The store is read first, so an unparseable or unwritable file stops before a token is minted.

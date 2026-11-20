@@ -10,9 +10,9 @@ const notes = [];
 
 const fail = message => failures.push(message);
 
-const manifestPath = resolve(extensionRoot, 'package.json');
+const manifestPath = process.env.EXTENSION_MANIFEST ? resolve(process.cwd(), process.env.EXTENSION_MANIFEST) : resolve(extensionRoot, 'package.json');
 if (!existsSync(manifestPath)) {
-  process.stderr.write('extensions/vscode/package.json is missing\n');
+  process.stderr.write(`${relative(root, manifestPath)} is missing\n`);
   process.exit(1);
 }
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
@@ -115,6 +115,15 @@ else {
       if (pattern.test(name)) fail(`${relative(root, target)} ships ${label}: ${name}`);
     }
   }
+  if (entries.length) {
+    let packaged;
+    try { packaged = JSON.parse(execFileSync('unzip', ['-p', target, 'extension/package.json'], { encoding: 'utf8' })); } catch { packaged = undefined; }
+    if (!packaged) fail(`${relative(root, target)} has no readable extension/package.json`);
+    else {
+      if (`${packaged.publisher}.${packaged.name}` !== `${manifest.publisher}.${manifest.name}`) fail(`${relative(root, target)} is ${packaged.publisher}.${packaged.name}, not ${manifest.publisher}.${manifest.name}`);
+      if (JSON.stringify(packaged.enabledApiProposals ?? []) !== JSON.stringify(manifest.enabledApiProposals ?? [])) fail(`${relative(root, target)} declares other API proposals than ${relative(root, manifestPath)}`);
+    }
+  }
   if (entries.length && manifest.icon && !entries.includes(manifest.icon)) fail(`${relative(root, target)} does not contain the icon ${manifest.icon}`);
   if (entries.length) {
     for (const name of chatFiles(manifest)) {
@@ -136,7 +145,9 @@ function chatFiles(contributions) {
 }
 
 process.stdout.write(`Extension ${manifest.publisher}.${manifest.name} ${version}\n`);
-process.stdout.write(`  Open VSX and Visual Studio Marketplace  publishable${marketplaceVersion ? '' : ` as a pre-release, once the release packages it under the major.minor.patch scripts/extension_version.py derives from ${version}`}\n`);
+const proposals = Array.isArray(manifest.enabledApiProposals) ? manifest.enabledApiProposals : [];
+if (proposals.length) process.stdout.write(`  GitHub release only  it declares API proposals (${proposals.join(', ')}), so it goes to neither Open VSX nor the Visual Studio Marketplace\n`);
+else process.stdout.write(`  Open VSX and Visual Studio Marketplace  publishable${marketplaceVersion ? '' : ` as a pre-release, once the release packages it under the major.minor.patch scripts/extension_version.py derives from ${version}`}\n`);
 for (const note of notes) process.stdout.write(`  note: ${note}\n`);
 
 if (failures.length) {
