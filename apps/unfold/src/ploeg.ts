@@ -727,6 +727,12 @@ function chatAllowance(value: unknown): PloegChatAllowance {
   return { scopeKind: field(data.scopeKind ?? 'team', 64), scopeId: field(data.scopeId ?? '', 128), periodStart: field(data.periodStart ?? '', 64), resetAt: timestamp(data.resetAt), limitUsd: numeric(data.limitUsd), settledUsd: numeric(data.settledUsd), heldUsd: numeric(data.heldUsd), remainingUsd: typeof data.remainingUsd === 'number' && Number.isFinite(data.remainingUsd) ? data.remainingUsd : 0, chatCount: typeof data.chatCount === 'number' ? numeric(data.chatCount, true) : 0, chatBudgetUsd: typeof data.chatBudgetUsd === 'number' ? numeric(data.chatBudgetUsd) : 0, chatsEnabled: data.chatsEnabled !== false };
 }
 
+/** A chat refusal that names the Team it is about, where the fix is that Team's configuration in Ploeg. */
+function namedChatRefusal(error: unknown, team: string): unknown {
+  if (error instanceof PloegError && error.code === 'chat_unconfigured') return new PloegError(error.status, error.code, `Chat is not set up for Team ${team} yet: Ploeg has no ask policy for it. An administrator adds a (${team}, ask) managed inference policy in Ploeg, or you pick another Team.`);
+  return error;
+}
+
 async function chatRefusal(response: Response): Promise<PloegError | null> {
   if (response.status !== 402 && !chatFailures[response.status]) return null;
   let data: any;
@@ -2241,7 +2247,7 @@ export class PloegClient {
     if (this.demo) throw new PloegError(409, 'ploeg_demo', 'The demo answers chat without Ploeg.');
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(user.id)) throw new PloegError(403, 'ploeg_actor', 'Your account identity cannot be recorded by Ploeg. Ask an administrator.');
     if (!this.allowed(user, team)) throw new PloegError(404, 'ploeg_not_found', 'Ploeg does not know this Team, or it is outside the Teams you may use.');
-    const data = envelope(await this.request(`teams/${encodeURIComponent(team)}/chats`, true, { actor: user.id, body: { chatId, message }, chat: true }));
+    const data = envelope(await this.request(`teams/${encodeURIComponent(team)}/chats`, true, { actor: user.id, body: { chatId, message }, chat: true }).catch(error => { throw namedChatRefusal(error, team); }));
     const chat = record(data.chat);
     if (chat.chatId !== chatId || chat.team !== team) throw invalid();
     if (data.credential === null) throw new PloegError(409, 'chat_replayed', 'Ploeg already issued a key for this chat message.');

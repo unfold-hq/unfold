@@ -81,3 +81,13 @@ On 2026-11-20 the owner found the Agents window unclear: a new session showed "N
 * When Ploeg refuses to list a person's Work Items, or listing them fails inside Unfold, the agent host logs `agent_host.work_items_unlisted` with the reason instead of returning an empty list without a trace. When Ploeg cannot be reached, the list keeps showing the Work Items last seen, marked stale, as before.
 
 Confirmation: `test/ahp-chat.test.ts` checks the order and both descriptions; `test/ahp-vscode-1-144.test.ts` checks the refusal. A desktop VS Code has not shown it yet ([VIK-1922](https://vikunja.webgrip.dev/tasks/1922)).
+
+## Update, 2026-11-20: what the first live chat showed
+
+The owner's first message from a desktop VS Code 1.147 found three things the update above did not foresee.
+
+* The Agents window sends nothing before a workspace is picked, also for the chat. The chat's description now says to pick any folder under Workspace ▾ › Folders (Unfold) and that the chat does not use it, instead of "no folder needed".
+* A chat listed under the folder "Unknown", because its summary named no project. It now groups under `Ploeg · <team>`, the Team that pays, as a Work Item without a repository does.
+* Ploeg answered 409 `inference_policy`, because no Team had a `(team, ask)` managed inference policy. The refusal now names the Team and the missing policy. Adding the policies is the deployment's change, not Unfold's.
+
+Confirmation: `test/ahp-chat.test.ts` checks the description, the project and the refusal text. Still open: the composer showed no Team to pick before the first message, which the next acceptance pass checks.

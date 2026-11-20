@@ -11,7 +11,7 @@ import type { Recovery } from '../engine.ts';
 import type { DeliveryService } from '../delivery.ts';
 import type { PersonProof } from '../person-proof.ts';
 import type { PloegAttribution } from '../ploeg-attribution.ts';
-import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfig, composerModel, repositoryFolderNames, repositoryPickHint, resolveSessionConfig, sessionConfigCompletions, sessionConfigSchema, sessionConfigState, startedConfigChange } from './session-config.ts';
+import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfig, composerModel, repositoriesDirectory, repositoryFolderNames, repositoryPickHint, resolveSessionConfig, sessionConfigCompletions, sessionConfigSchema, sessionConfigState, startedConfigChange } from './session-config.ts';
 import { TrackerAutomations, automationsChannel, autonomousAutomationsMeta, isAutomationsChannel } from './automations.ts';
 import { WebSocketConnection, connectionToken, isWebSocketUpgrade, rejectUpgrade, upgradeToWebSocket } from './websocket.ts';
 import { Heartbeats, IdleSessions, RememberedClients, ServerSequence, heartbeatCheckMs, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
@@ -44,7 +44,7 @@ import { agentHostOriginAllowed, renewedExpiry, reportUnlistedOrigin, upgradeTok
 import { catalogueMessage, publicError } from '../error-catalogue.ts';
 import { unfoldMeta } from '../unfold-keys.ts';
 
-export { repositoryFolderNames } from './session-config.ts';
+export { repositoriesDirectory, repositoryFolderNames } from './session-config.ts';
 export { MalformedVersion, negotiateProtocolVersion, protocolBaselines, protocolVersion, supportedVersions } from './versions.ts';
 export const provider = 'unfold';
 const rootChannel = 'ahp-root://';
@@ -63,9 +63,6 @@ function logUnanswered(method: string, uri?: unknown): void {
   const path = uri === undefined ? undefined : pickerPath(uri) ?? String(uri).split(/[?#]/)[0].slice(0, 300);
   console.error(JSON.stringify({ level: 'warn', event: 'agent_host.unanswered_request', method: method.slice(0, 80), ...(path !== undefined ? { path } : {}) }));
 }
-
-/** The directory the host names as `defaultDirectory`: a virtual folder whose subfolders are the configured repositories, so the Agents window's workspace picker offers them. */
-export const repositoriesDirectory = 'file:///unfold-repositories';
 
 /** Each repository's folder on this host as the Agents window's folder picker lists it, by repository id: the path a client puts after the host's connection authority to start a session there. */
 export function repositoryFolderPaths(repositories: readonly Repository[]): Map<string, string> {
