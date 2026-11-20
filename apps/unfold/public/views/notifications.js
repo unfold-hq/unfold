@@ -100,7 +100,7 @@ function render() {
   let content;
   if (view.error && !data) content = failureCallout({ title: 'Could not read your notifications', failure: view.error, action: 'notify-retry' });
   else if (!data) content = `<section class="card settings-card" aria-busy="true">${skeleton({ rows: 3 })}</section>`;
-  else if (!data.enabled) content = `<section class="card settings-card">${emptyState({ icon: 'bell', title: 'Notifications are not on for you', body: 'An administrator turns them on for the people who may use them, with the notifications.push flag in Labs.', compact: true })}</section>`;
+  else if (!data.enabled) content = `<section class="card settings-card">${emptyState({ icon: 'bell', title: 'Notifications are off for you', body: 'An administrator turned them off with the notifications.push flag. Ask them to turn it on for you.', compact: true })}</section>`;
   else {
     const demo = data.demo ? callout({ tone: 'neutral', title: 'This is the demo', body: '<p>The demo saves your choices but sends no notifications.</p>' }) : '';
     content = `${demo}<section class="card settings-card" aria-labelledby="notify-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="notify-title">What tells you</h2><p class="card-subtitle">Nothing is sent until you choose a channel. Work you handed off tells you unless you turn it off; choose the other moments yourself.</p></div></header><div class="card-body">${form(data)}</div></section>
@@ -118,16 +118,26 @@ async function load() {
 
 const show = data => { view.data = data; if (state.view === 'notifications' && state.bootstrap) render(); };
 
+/**
+ * Asks the browser for permission, which it shows only after the tap that called this, subscribes it through the
+ * service worker and registers the subscription. Returns the Notifications view, or null when the browser refused.
+ */
+export async function subscribeBrowser(publicKey) {
+  if (await Notification.requestPermission() !== 'granted') return null;
+  const registration = await navigator.serviceWorker.register('/sw.js');
+  await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription() ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(publicKey) });
+  return api(`${path}/channels/web-push/subscriptions`, { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+}
+
 async function subscribe() {
   const push = view.data?.channels.find(channel => channel.id === 'web-push');
   if (!push?.publicKey) return;
   view.busy = 'subscribe'; render();
   try {
-    if (await Notification.requestPermission() !== 'granted') { notify('The browser did not allow notifications.', true); return; }
-    const registration = await navigator.serviceWorker.register('/sw.js');
-    await navigator.serviceWorker.ready;
-    const subscription = await registration.pushManager.getSubscription() ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(push.publicKey) });
-    show(await api(`${path}/channels/web-push/subscriptions`, { method: 'POST', body: JSON.stringify(subscription.toJSON()) }));
+    const data = await subscribeBrowser(push.publicKey);
+    if (!data) { notify('The browser did not allow notifications.', true); return; }
+    show(data);
     notify('This browser is subscribed.');
   } finally { view.busy = ''; render(); }
 }
