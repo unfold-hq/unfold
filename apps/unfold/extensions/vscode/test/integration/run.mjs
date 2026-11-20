@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { createWriteStream, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createWriteStream, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -85,19 +85,31 @@ function prepareProfile(name, demoUrl) {
   return profile;
 }
 
+const refusedByVsCode = /Unknown agent: "unfold[^"]*"/;
+
+function logFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true, recursive: true }).filter(entry => entry.isFile() && entry.name.endsWith('.log')).map(entry => join(entry.parentPath, entry.name));
+}
+
+function refusals(userData) {
+  return logFiles(join(userData, 'logs')).flatMap(file => readFileSync(file, 'utf8').split('\n').filter(line => refusedByVsCode.test(line)).map(line => `${file}: ${line.trim()}`));
+}
+
 async function runTarget(name, vsix, demoUrl) {
   const target = targets[name];
   const vscodeExecutablePath = await downloadAndUnzipVSCode({ version: target.version, cachePath: join(extensionRoot, '.vscode-test') });
   const profile = prepareProfile(name, demoUrl);
   await runVSCodeCommand([...profileArgs(profile), '--install-extension', vsix, '--force'], { version: target.version, cachePath: join(extensionRoot, '.vscode-test') });
   process.stdout.write(`\n== ${name}: ${vscodeExecutablePath}\n`);
-  return runTests({
+  await runTests({
     vscodeExecutablePath,
     extensionDevelopmentPath: resolve(import.meta.dirname, 'host'),
     extensionTestsPath: resolve(import.meta.dirname, 'suite', 'index.cjs'),
     launchArgs: [profile.workspace, ...profileArgs(profile), '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', ...target.launchArgs],
     extensionTestsEnv: { UNFOLD_INTEGRATION_TARGET: name, UNFOLD_INTEGRATION_EXTENSION: target.extensionId, UNFOLD_INTEGRATION_DEMO_URL: demoUrl, UNFOLD_INTEGRATION_SETTINGS: profile.settings },
   });
+  const refused = refusals(profile.userData);
+  if (refused.length) throw new Error(`VS Code refused what the extension registered, which only its own logs show:\n${refused.join('\n')}`);
 }
 
 const names = chosenTargets();
