@@ -378,7 +378,7 @@
         "commands": [
           "install-tool uv",
           "uvx --from apm-cli=={{{newVersion}}} apm install --force --no-policy",
-          "uvx --from apm-cli=={{{newVersion}}} apm compile"
+          "uvx --from apm-cli=={{{newVersion}}} apm compile --clean"
         ],
         "fileFilters": [
           "**/*",

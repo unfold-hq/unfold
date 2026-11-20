@@ -1,11 +1,13 @@
 import json
+import os
 import subprocess
 import sys
 import unittest
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
 HOOK = Path(__file__).with_name('stage-explicit-paths.py')
-SETTINGS = Path(__file__).resolve().parent.parent / '.claude/settings.json'
+SETTINGS = ROOT / '.claude/settings.json'
 
 
 def run(event):
@@ -79,6 +81,20 @@ class Settings(unittest.TestCase):
         commands = [hook['command'] for group in groups if group['matcher'] == 'Bash' for hook in group['hooks'] if hook['type'] == 'command']
         self.assertTrue(any('scripts/stage-explicit-paths.py' in command for command in commands), commands)
 
+    def test_codex_hooks_register_the_hook_on_bash(self):
+        config = json.loads((ROOT / '.codex/hooks.json').read_text())
+        commands = [hook['command'] for group in config['hooks']['PreToolUse'] if group['matcher'] == 'Bash' for hook in group['hooks']]
+        self.assertTrue(any('scripts/stage-explicit-paths.py' in command for command in commands), commands)
+
+    def test_the_hook_command_blocks_from_a_subdirectory_without_claude_project_dir(self):
+        config = json.loads((ROOT / '.codex/hooks.json').read_text())
+        command = config['hooks']['PreToolUse'][0]['hooks'][0]['command']
+        event = json.dumps({'tool_name': 'Bash', 'tool_input': {'command': 'git add -A'}})
+        environment = {key: value for key, value in os.environ.items() if key != 'CLAUDE_PROJECT_DIR'}
+        result = subprocess.run(['sh', '-c', command], input=event, capture_output=True, text=True, cwd=ROOT / 'apps', env=environment)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('stages the whole tree', result.stderr)
+
 
 class OtherHarnesses(unittest.TestCase):
     def test_any_tool_with_a_shell_command_is_checked(self):
@@ -89,12 +105,12 @@ class OtherHarnesses(unittest.TestCase):
             self.assertEqual(run(event).returncode, 2, name)
 
     def test_openhands_hook_runs_the_guard(self):
-        config = json.loads((SETTINGS.parent.parent / '.openhands/hooks.json').read_text())
+        config = json.loads((ROOT / '.openhands/hooks.json').read_text())
         commands = [hook['command'] for group in config['pre_tool_use'] for hook in group['hooks']]
         self.assertTrue(any('scripts/stage-explicit-paths.py' in command for command in commands))
 
     def test_opencode_plugin_runs_the_guard(self):
-        plugin = (SETTINGS.parent.parent / '.opencode/plugins/stage-explicit-paths.js').read_text()
+        plugin = (ROOT / '.opencode/plugins/stage-explicit-paths.js').read_text()
         self.assertIn('scripts/stage-explicit-paths.py', plugin)
         self.assertIn("'tool.execute.before'", plugin)
 
