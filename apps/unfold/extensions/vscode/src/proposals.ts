@@ -29,6 +29,8 @@ export type ProposalOffReason = 'not-declared' | 'not-granted' | 'refused' | 'mi
 
 export type ProposalState = { name: ProposalName; on: boolean; reason?: ProposalOffReason };
 
+export type ProposalReport = { states: ProposalState[]; used: ProposalName[] };
+
 export type ExtensionManifest = { enabledApiProposals?: unknown };
 
 const refusal = /CANNOT use API proposal/i;
@@ -45,6 +47,7 @@ export class ProposalGuard {
   private readonly declared: Set<string>;
   private readonly granted: Set<string>;
   private readonly failed = new Map<ProposalName, ProposalOffReason>();
+  private readonly succeeded = new Set<ProposalName>();
 
   constructor(declared: ExtensionManifest, granted: ExtensionManifest = declared) {
     this.declared = namesOf(declared.enabledApiProposals);
@@ -57,7 +60,7 @@ export class ProposalGuard {
 
   use<T>(name: ProposalName, call: () => T): T | undefined {
     if (!this.usable(name)) return undefined;
-    try { return call(); }
+    try { const value = call(); this.succeeded.add(name); return value; }
     catch (error) {
       if (isProposalRefusal(error)) { this.failed.set(name, 'refused'); return undefined; }
       if (error instanceof TypeError) { this.failed.set(name, 'missing'); return undefined; }
@@ -68,6 +71,8 @@ export class ProposalGuard {
   states(): ProposalState[] {
     return insidersProposals.map(name => { const reason = this.reasonOff(name); return reason ? { name, on: false, reason } : { name, on: true }; });
   }
+
+  used(): ProposalName[] { return insidersProposals.filter(name => this.succeeded.has(name) && this.usable(name)); }
 
   off(): ProposalState[] { return this.states().filter(state => !state.on && state.reason !== 'not-declared'); }
 

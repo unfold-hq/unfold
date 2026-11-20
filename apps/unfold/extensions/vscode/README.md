@@ -300,8 +300,36 @@ mise exec -- npm run extension:package
 mise exec -- npm run extension:verify
 ```
 
-[Client integration tests](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/client.test.ts) exercise the actual server with local fixtures. [Webview tests](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/webview.test.ts) inspect the shipped panel script; other tests cover status, authorization and account flows. These checks do not use paid providers. Node tests and browser rendering do not substitute for an actual Extension Development Host check. The [validation matrix](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/validation.md) records what has been exercised.
+[Client integration tests](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/client.test.ts) exercise the actual server with local fixtures. [Webview tests](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/webview.test.ts) inspect the shipped panel script; other tests cover status, authorization and account flows. These checks do not use paid providers. Node tests and browser rendering do not substitute for a real VS Code, which the [integration suite](#integration-suite) starts. The [validation matrix](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/docs/validation.md) records what has been exercised.
 
 `npm --prefix extensions/vscode run package:insiders` builds the Unfold Insiders VSIX in `extensions/vscode/dist-insiders/`. Code that calls a proposed API goes through `ProposalGuard` in `src/proposals.ts`: `usable(name)` says whether it may be tried, and `use(name, call)` runs it and returns `undefined` when VS Code refuses the proposal or lacks the API, so the caller falls back. The proposals' type definitions are the exact `vscode.proposed.<name>.d.ts` files of microsoft/vscode at one pinned commit, checked in under `extensions/vscode/proposed/`, rather than `npx @vscode/dts dev`, which downloads whatever `main` holds at that moment and reads the list from `enabledApiProposals`, which the regular manifest does not have. To move them, download the same files at a newer commit, name it in the changelog, and adjust the code to any change. Proposals change without a version number.
+
+### Integration suite
+
+`mise run vscode-integration` from the repository root runs the extension in a real VS Code. It needs no secret and no account:
+
+1. It packages both VSIX builds with `npm run package` and `npm run package:insiders`.
+2. It starts the deterministic demo on a free port with a throwaway data directory.
+3. With [`@vscode/test-electron`](https://github.com/microsoft/vscode-test), it downloads VS Code Stable and VS Code Insiders into `extensions/vscode/.vscode-test/`, installs the regular VSIX into Stable and the Insiders VSIX into Insiders, each with its own throwaway user data and extensions directory, and starts Insiders with `--enable-proposed-api unfold-hq.unfold-workbench-insiders`.
+4. The [suite](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/extensions/vscode/test/integration/suite/extension.test.cjs) runs inside each VS Code with Mocha.
+
+`UNFOLD_VSCODE_TARGETS=stable` or `insiders` runs one VS Code, and `UNFOLD_VSCODE_TEST_KEEP=1` keeps the logs and profiles, which a failed run always keeps. The downloaded copies run beside a VS Code you have open. On Linux, run it under a display, such as `xvfb-run -a mise run vscode-integration`; the `vscode-integration` pull request job does that whenever a change touches this directory.
+
+In both builds the suite checks that:
+
+- the extension activates without an error and registers every command it contributes;
+- with `unfold.serverUrl` pointing at the demo, it connects as the demo's identified user, and it follows a changed server URL away from the demo and back;
+- every tool in `languageModelTools` is in `vscode.lm.tools`, and `unfold_now`, `unfold_get_work` and `unfold_find_work` answer from the demo through `vscode.lm.invokeTool`;
+- the workbench reaches the Agents window: the regular build writes its `chat.remoteAgentHosts` entry with a minted connection token, the Insiders build registers it through `remoteAgentHost` and leaves `settings.json` alone.
+
+In Stable the regular build declares no API proposal and has no `unfold.insiders.sendFeedback` command. In Insiders every declared proposal stays on and each was called without a refusal: the Sessions list, the chat artifact integration, the notice above the chat input, the tree view message and Markdown labels, the status bar hover, the chat status item and the remote agent host. The suite reads that from the extension's `exports`, whose `proposals()` returns `ProposalGuard`'s states and the proposals it used; it changes nothing.
+
+It does not cover:
+
+- a model answering in chat, which needs a Copilot sign-in;
+- **Unfold: Connect to Workbench** and its sign-in, because they ask through input boxes and a browser that a test cannot answer; the suite sets `unfold.serverUrl` instead, which the demo accepts without a sign-in;
+- the action tools (`unfold_approve_work` and the others), which ask the person to confirm first;
+- whether a person's VS Code Insiders needs `--enable-proposed-api`: the suite brings its Mocha runner in as an extension under development, and Insiders then grants declared proposals to every extension, with or without the flag;
+- what the views, panels and Agents window draw on screen.
 
 For API maintenance, use the official [extension host](https://code.visualstudio.com/api/advanced-topics/extension-host), [webview](https://code.visualstudio.com/api/extension-guides/webview), [SecretStorage](https://code.visualstudio.com/api/references/vscode-api#SecretStorage) and [extension testing](https://code.visualstudio.com/api/working-with-extensions/testing-extension) documentation.

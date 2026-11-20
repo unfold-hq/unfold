@@ -37,7 +37,7 @@ import { registerChatArtifacts } from './chat-artifacts.js';
 import { SessionsList } from './sessions-list.js';
 import { InsidersGlance, glanceTreeProvider, nowRules } from './insiders-glance.js';
 import { statusHover } from './what-waits.js';
-import { ProposalGuard, enableProposedApiCommand, insidersExtensionId, insidersProposals, offNoticeKey, proposalsOffNotice } from './proposals.js';
+import { ProposalGuard, enableProposedApiCommand, insidersExtensionId, insidersProposals, offNoticeKey, proposalsOffNotice, type ProposalReport } from './proposals.js';
 import { feedbackIssueUrl } from './feedback.js';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -216,7 +216,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.registerLanguageModelTools(context);
     this.registerTimeline(context);
     this.registerSessionsList(context);
-    context.subscriptions.push(...registerChatArtifacts(vscode, this.proposals, { core: this.core, reader: () => this.configurationError ? undefined : this.current, configurationError: () => this.configurationError, signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)), secrets: context.secrets }));
+    context.subscriptions.push(...registerChatArtifacts(vscode, this.proposals, { core: this.core, reader: () => this.configurationError ? undefined : this.current, configurationError: () => this.configurationError, signedIn: () => this.signedIn(), secrets: context.secrets }));
     if (this.proposals.insiders) context.subscriptions.push(vscode.commands.registerCommand(sendFeedbackCommand, () => this.perform(() => this.sendFeedback())));
     void this.noticeProposalsOff();
     this.timer = this.poll();
@@ -225,6 +225,11 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   }
 
   client() { return this.current; }
+  /** Whether the workbench knows who this editor acts for: a stored credential, or a demo workbench that identifies its demonstration user without one. */
+  private async signedIn(): Promise<boolean> {
+    return Boolean(await this.context.secrets.get(this.current.secretKey)) || this.cachedBootstrap?.mode === 'demo';
+  }
+  proposalReport(): ProposalReport { return { states: this.proposals.states(), used: this.proposals.used() }; }
   revision() { return this.generation; }
   liveUpdates() { return settings().get('liveUpdates', true); }
   sessionEvent(type: string) {
@@ -289,7 +294,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
         rules: { nowGroup, pullRequestNumber },
         reader: this.configurationError ? undefined : this.current,
         configurationError: this.configurationError,
-        signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)),
+        signedIn: () => this.signedIn(),
         branch: async () => { const git = await gitApi().catch(() => undefined); return git ? currentBranch(git.repositories, vscode.window.activeTextEditor?.document.uri.fsPath) : undefined; },
         maxChars: maxCharsFor(options.tokenizationOptions?.tokenBudget),
       }, token)) as vscode.LanguageModelToolResult,
@@ -300,7 +305,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       core: this.core,
       actor: this.configurationError ? undefined : this.current,
       configurationError: this.configurationError,
-      signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)),
+      signedIn: () => this.signedIn(),
     });
     const action = (name: LmActionToolName): vscode.LanguageModelTool<object> => ({
       prepareInvocation: options => prepareAction(name, options.input, acting(), offered),
@@ -313,7 +318,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.sessionsList = SessionsList.register({
       core: this.core,
       proposals: this.proposals,
-      acting: () => ({ core: this.core, actor: this.configurationError ? undefined : this.current, configurationError: this.configurationError, signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)) }),
+      acting: () => ({ core: this.core, actor: this.configurationError ? undefined : this.current, configurationError: this.configurationError, signedIn: () => this.signedIn() }),
       refresh: () => { this.nowReadAt = 0; return this.refresh(false, true); },
     });
     if (this.sessionsList) context.subscriptions.push(this.sessionsList);
@@ -499,7 +504,10 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       }
       if (raise) throw error;
     }
-    finally { this.refreshBusy = false; }
+    finally {
+      this.refreshBusy = false;
+      if (generation !== this.generation && !this.disposed) void this.refresh();
+    }
   }
 
   private lastNow?: { value?: PloegNow; message?: string };
@@ -1657,14 +1665,19 @@ export async function adoptNotificationSettings(): Promise<void> {
   }
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+/** What another extension, or the integration suite, can read from Unfold through `vscode.extensions.getExtension(id).exports`. It changes nothing. */
+export type UnfoldExtensionApi = { proposals(): ProposalReport };
+
+export async function activate(context: vscode.ExtensionContext): Promise<UnfoldExtensionApi | undefined> {
   try {
     await adoptRenamedSettings(['serverUrl', 'refreshIntervalSeconds', 'liveUpdates', 'remoteHostAliases']);
     await adoptNotificationSettings().then(undefined, () => undefined);
     const core = await loadCore(pathToFileURL(vscode.Uri.joinPath(context.extensionUri, 'media', 'core').fsPath + '/').href);
-    context.subscriptions.push(new Workbench(context, core));
+    const workbench = new Workbench(context, core);
+    context.subscriptions.push(workbench);
+    return { proposals: () => workbench.proposalReport() };
   }
-  catch (error) { void vscode.window.showErrorMessage((error as Error).message, 'Open settings').then(choice => { if (choice) void vscode.commands.executeCommand('workbench.action.openSettings', 'unfold.serverUrl'); }); }
+  catch (error) { void vscode.window.showErrorMessage((error as Error).message, 'Open settings').then(choice => { if (choice) void vscode.commands.executeCommand('workbench.action.openSettings', 'unfold.serverUrl'); }); return undefined; }
 }
 
 export function deactivate(): void {}

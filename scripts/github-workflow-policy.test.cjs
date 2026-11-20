@@ -126,7 +126,7 @@ test('the workflows use only the repository secrets the move names, and the Clou
 
 test('a pull request runs the push\'s checks without write access or secrets, and builds and scans the image contexts from a fork too', () => {
   assert.deepEqual(Object.keys(pr.on).sort(), ['merge_group', 'pull_request', 'workflow_dispatch']);
-  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-notes', 'release-policy', 'typecheck', 'warnings']);
+  assert.deepEqual(Object.keys(pr.jobs).sort(), ['agent-trace', 'agents-check', 'build-contexts', 'checks', 'checks-unfold', 'gate', 'gitleaks', 'opencode-contract', 'ploeg-docs', 'ploeg-pin', 'release-notes', 'release-policy', 'typecheck', 'vscode-integration', 'warnings']);
   const withoutCondition = ({ if: _, ...job }) => job;
   for (const name of ['checks', 'checks-unfold']) assert.deepEqual(withoutCondition(pr.jobs[name]), withoutCondition(source.jobs[name]), name);
   for (const name of ['warnings', 'ploeg-pin']) assert.deepEqual(pr.jobs[name], source.jobs[name], name);
@@ -197,6 +197,8 @@ test('a pull request to development runs the fast jobs, and the merge queue, a m
     }
   }
   assert.equal(pr.jobs.typecheck.steps.at(-1).run, 'mise -C apps/unfold exec -- npm run typecheck');
+  assert.equal(pr.jobs['vscode-integration'].steps.at(-1).run, 'xvfb-run -a mise run vscode-integration', 'the extension runs in a real, headless VS Code');
+  assert.deepEqual(pr.jobs['vscode-integration'].steps.find(step => step.id === 'scope').env, { EVENT: '${{ github.event_name }}', ...range }, 'the suite reads the same range as the other pull request checks');
 });
 
 test('the pull request gate waits for every job except the advisory ones, and passes only when each that had to run succeeded', () => {
