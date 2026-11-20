@@ -216,7 +216,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.registerLanguageModelTools(context);
     this.registerTimeline(context);
     this.registerSessionsList(context);
-    context.subscriptions.push(...registerChatArtifacts(vscode, this.proposals, { core: this.core, reader: () => this.configurationError ? undefined : this.current, configurationError: () => this.configurationError, signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)), secrets: context.secrets }));
+    context.subscriptions.push(...registerChatArtifacts(vscode, this.proposals, { core: this.core, reader: () => this.configurationError ? undefined : this.current, configurationError: () => this.configurationError, signedIn: () => this.signedIn(), secrets: context.secrets }));
     if (this.proposals.insiders) context.subscriptions.push(vscode.commands.registerCommand(sendFeedbackCommand, () => this.perform(() => this.sendFeedback())));
     void this.noticeProposalsOff();
     this.timer = this.poll();
@@ -225,6 +225,10 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   }
 
   client() { return this.current; }
+  /** Whether the workbench knows who this editor acts for: a stored credential, or a demo workbench that identifies its demonstration user without one. */
+  private async signedIn(): Promise<boolean> {
+    return Boolean(await this.context.secrets.get(this.current.secretKey)) || this.cachedBootstrap?.mode === 'demo';
+  }
   revision() { return this.generation; }
   liveUpdates() { return settings().get('liveUpdates', true); }
   sessionEvent(type: string) {
@@ -289,7 +293,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
         rules: { nowGroup, pullRequestNumber },
         reader: this.configurationError ? undefined : this.current,
         configurationError: this.configurationError,
-        signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)),
+        signedIn: () => this.signedIn(),
         branch: async () => { const git = await gitApi().catch(() => undefined); return git ? currentBranch(git.repositories, vscode.window.activeTextEditor?.document.uri.fsPath) : undefined; },
         maxChars: maxCharsFor(options.tokenizationOptions?.tokenBudget),
       }, token)) as vscode.LanguageModelToolResult,
@@ -300,7 +304,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       core: this.core,
       actor: this.configurationError ? undefined : this.current,
       configurationError: this.configurationError,
-      signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)),
+      signedIn: () => this.signedIn(),
     });
     const action = (name: LmActionToolName): vscode.LanguageModelTool<object> => ({
       prepareInvocation: options => prepareAction(name, options.input, acting(), offered),
@@ -313,7 +317,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.sessionsList = SessionsList.register({
       core: this.core,
       proposals: this.proposals,
-      acting: () => ({ core: this.core, actor: this.configurationError ? undefined : this.current, configurationError: this.configurationError, signedIn: async () => Boolean(await this.context.secrets.get(this.current.secretKey)) }),
+      acting: () => ({ core: this.core, actor: this.configurationError ? undefined : this.current, configurationError: this.configurationError, signedIn: () => this.signedIn() }),
       refresh: () => { this.nowReadAt = 0; return this.refresh(false, true); },
     });
     if (this.sessionsList) context.subscriptions.push(this.sessionsList);
