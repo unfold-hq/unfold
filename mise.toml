@@ -44,14 +44,14 @@ run = [
   "apm install --force --no-policy",
   "apm compile",
 ]
-description = "Compile .apm into AGENTS.md, .claude/rules, skills and commands with APM, and record what it wrote in apm.lock.yaml"
+description = "Compile .apm into AGENTS.md, .claude/rules, skills, commands and hooks with APM, and record what it wrote in apm.lock.yaml"
 
 [tasks.agents-check]
 run = [
   "apm audit --ci --no-policy",
   """
   set -f
-  generated="AGENTS.md */AGENTS.md apm.lock.yaml .agents .claude .opencode"
+  generated="AGENTS.md */AGENTS.md apm.lock.yaml .agents .claude .codex .opencode"
   snapshot="$(mktemp)"
   cp "$(git rev-parse --git-path index)" "$snapshot"
   trap 'rm -f "$snapshot"' EXIT

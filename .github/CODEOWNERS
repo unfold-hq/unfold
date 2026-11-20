@@ -9,6 +9,8 @@ CLAUDE.md @ryangr0
 /openspec/config.yaml @ryangr0
 /openspec/schemas/ @ryangr0
 /scripts/agents-files.py @ryangr0
+/.apm/ @ryangr0
+/.codex/ @ryangr0
 /scripts/stage-explicit-paths.py @ryangr0
 /scripts/release-config/ @ryangr0
 /SECURITY.md @ryangr0
