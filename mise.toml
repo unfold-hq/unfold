@@ -41,17 +41,18 @@ description = "Install only what Unfold's gate group reads: the Ploeg bundle and
 
 [tasks.agents-install]
 run = [
+  "apm lifecycle trust",
   "apm install --force --no-policy",
   "apm compile --clean",
 ]
-description = "Compile .apm into AGENTS.md, .claude/rules, skills, commands and hooks with APM, and record what it wrote in apm.lock.yaml"
+description = "Generate the OpenSpec skills into .apm/skills, compile .apm into AGENTS.md, .claude/rules, skills, commands and hooks with APM, and record what it wrote in apm.lock.yaml"
 
 [tasks.agents-check]
 run = [
   "apm audit --ci --no-policy",
   """
   set -f
-  generated="AGENTS.md */AGENTS.md apm.lock.yaml .agents .claude .codex .opencode"
+  generated="AGENTS.md */AGENTS.md apm.lock.yaml .apm/skills .agents .claude .codex .opencode"
   snapshot="$(mktemp)"
   cp "$(git rev-parse --git-path index)" "$snapshot"
   trap 'rm -f "$snapshot"' EXIT
@@ -68,7 +69,7 @@ run = [
   echo 'agents-check: the generated agent files match .apm'
   """,
 ]
-description = "Fail when apm audit finds hidden Unicode or a deployed file that differs from apm.lock.yaml, or when compiling .apm again changes a generated agent file"
+description = "Fail when apm audit finds hidden Unicode or a deployed file that differs from apm.lock.yaml, or when generating the OpenSpec skills and compiling .apm again changes a generated agent file"
 
 [tasks.verify]
 run = "node scripts/verify.mjs"
