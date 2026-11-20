@@ -127,3 +127,33 @@ test('a side chat on a workbench without Ask says so on the first message and sp
   const refused = f.dispatch(f.chat, { type: 'chat/turnResume', turnId: 'side-turn-1' });
   assert.equal((await f.answered(refused)).params.rejectionReason, sideChatText.readOnly);
 });
+
+test('a side chat kept across a restart opens before the session list, and only for a person Ploeg and the team map still let see its Work Item', { timeout: testTimeout(40_000) }, async t => {
+  const f = await sideChatting(t, 'wi-205');
+  await f.open();
+  f.ask(standingQuestion, 'side-turn-1');
+  await f.done('side-turn-1');
+  await f.server.restart();
+  const host = f.server.app.agentHost;
+  host.workItems.pollMs = 3_600_000;
+  host.workItems.reconcileMs = 3_600_000;
+  host.runLive.pollMs = 3_600_000;
+  const person = { id: 'op-1', name: 'op-1', role: 'operator' } as const;
+  const client = connect(`${f.server.url.replace(/^http/, 'ws')}/?tkn=${host.issueToken(person)}`);
+  t.after(() => client.close());
+  await client.open;
+  await client.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: 'side-chat-after-restart', clientInfo: { name: 'vscode-agents-window' }, _meta: { 'vscode.ahpSessionUris': true, 'vscode.ahpChatUris': true }, initialSubscriptions: ['ahp-root://'] });
+  assert.equal(host.workItems.remembered(person, 'wi-205'), undefined, 'the restarted host has not listed the Work Item to this person');
+
+  const kept = f.state.details.get('205')!;
+  f.state.details.delete('205');
+  await assert.rejects(client.rpc('subscribe', { channel: f.chat }), /no such chat, or it is not yours/, 'a Work Item Ploeg no longer shows this person hides its side chat');
+  f.state.details.set('205', kept);
+  f.userTeams['op-1'] = [];
+  await assert.rejects(client.rpc('subscribe', { channel: f.chat }), /no such chat, or it is not yours/, 'a person no longer in the Work Item\'s Team cannot open its side chat');
+  f.userTeams['op-1'] = ['delivery'];
+
+  const state = (await client.rpc('subscribe', { channel: f.chat })).snapshot.state;
+  assert.equal(state.title, sideChatText.title('205'));
+  assert.deepEqual(state.turns.map((turn: Json) => [turn.message.text, turn.state]), [[standingQuestion, 'complete']], 'the side chat opens with its Asks before any session list');
+});
