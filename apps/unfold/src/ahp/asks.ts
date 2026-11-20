@@ -9,9 +9,12 @@ type Json = Record<string, any>;
 
 /** The part of the Ask service a session's chat calls (system ADR-0031). The host never answers a question itself. */
 export interface ChatAskService {
-  ask(user: User, workItemId: string, question: unknown): Promise<Ask>;
+  ask(user: User, workItemId: string, question: unknown, audience?: 'internal', request?: ChatAskRequest): Promise<Ask>;
   about(user: User, workItemId: string): Promise<{ asks: Ask[]; allowance: PloegAskAllowance | null }>;
 }
+
+/** How the Ask service may answer: `recordOnly` from the record alone, refused with `ask_needs_model` when only a model could; `model` with a model call. */
+export type ChatAskRequest = { model?: boolean; recordOnly?: boolean };
 
 /** The two chat commands: `/ask` answers a question without reaching the team, `/steer` sends the message towards the team. */
 export type ChatIntent = 'ask' | 'steer';
@@ -63,7 +66,8 @@ export function commandCompletions(text: string, offset: number, askByDefault: b
     .map(entry => ({ insertText: `/${entry.command} `, rangeStart: start, rangeEnd: before.length, attachment: { type: 'simple', label: `/${entry.command}`, _meta: { command: entry.command, description: entry.description(askByDefault), argumentHint: entry.argumentHint } } }));
 }
 
-const resetDay = (iso: string) => { const at = new Date(iso); return Number.isFinite(at.getTime()) ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(at) : 'an unknown date'; };
+/** The day an Ask Allowance resets, as the chat writes it. */
+export const resetDay = (iso: string) => { const at = new Date(iso); return Number.isFinite(at.getTime()) ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(at) : 'an unknown date'; };
 
 function spendLine(ask: Ask, entry: ChatAskEntry): string {
   const source = ask.source ?? (ask.demo ? 'record' : 'model');
@@ -120,10 +124,15 @@ export class ChatAsks {
   async ask(user: User, session: Session, question: string): Promise<{ ask: Ask; allowance: ChatAskEntry['allowance'] }> {
     const refusal = askRefusal(this.service, session);
     if (refusal) throw new Error(`Asking is not possible: ${refusal}`);
-    const workItemId = session.execution!.workItemId;
-    const ask = await this.service!.ask(user, workItemId, question);
+    return this.askAbout(user, session.execution!.workItemId, question);
+  }
+
+  /** Asks a question about a Work Item through the Ask service, as `request` allows, and reads the allowance left after it. */
+  async askAbout(user: User, workItemId: string, question: string, request?: ChatAskRequest): Promise<{ ask: Ask; allowance: ChatAskEntry['allowance'] }> {
+    if (!this.service) throw new Error('Asking is not possible: this workbench does not answer Asks.');
+    const ask = await (request ? this.service.ask(user, workItemId, question, 'internal', request) : this.service.ask(user, workItemId, question));
     if (ask.demo || ask.status === 'refused' || !ask.ploegAskId) return { ask, allowance: null };
-    const about = await this.service!.about(user, workItemId).catch(() => undefined);
+    const about = await this.service.about(user, workItemId).catch(() => undefined);
     const fresh = about?.asks.find(item => item.id === ask.id) ?? ask;
     const allowance = about?.allowance ? { remainingUsd: about.allowance.remainingUsd, limitUsd: about.allowance.limitUsd, resetAt: about.allowance.resetAt } : null;
     return { ask: fresh, allowance };
