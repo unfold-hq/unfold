@@ -19,12 +19,17 @@ function body() {
   if (state.ploegStatus === 'unconfigured') return ploegUnconfigured();
   if (view.error && !view.data) return callout({ tone: 'danger', title: 'Could not read your Claude routines', body: `<p>${escape(view.error)}</p>`, actions: button({ label: 'Try again', icon: 'refresh', size: 'sm', action: 'claude-refresh' }) });
   if (!view.data) return skeleton({ rows: 3 });
-  const data = view.data;
+  return routinesMarkup(view.data, state.bootstrap?.user?.role, view.busy);
+}
+
+/** What Connect Claude shows for the overview Unfold read, for a person with `role`; `busy` names the Team being changed. */
+export function routinesMarkup(data, role, busy = '') {
   if (data.demo) return `${demoNote('Nothing on this page connects anything.')}${callout({ tone: 'neutral', title: 'Demo', body: '<p>The demo has no Ploeg to keep a routine’s token, and starts no Run.</p>' })}`;
   if (data.served !== true) return unavailable(data);
-  if (state.bootstrap?.user?.role === 'viewer') return callout({ tone: 'neutral', title: 'Not for viewers', body: '<p>Viewers start no work, so there is no routine to connect.</p>' });
+  if (role === 'viewer') return callout({ tone: 'neutral', title: 'Not for viewers', body: '<p>Viewers start no work, so there is no routine to connect.</p>' });
+  if (data.refused?.code === 'routines_not_accepted') return callout({ tone: 'neutral', title: 'Not turned on in this installation', body: `<p>${escape(data.refused.message)}</p><p>Until then there is nothing to connect here. Your Teams start their Runs the way the person who installed Ploeg set them up.</p>`, actions: button({ label: 'Check again', icon: 'refresh', size: 'sm', action: 'claude-refresh' }) });
   const refused = data.refused ? callout({ tone: 'danger', title: 'Ploeg refused', body: `<p>${escape(data.refused.message)} (${escape(data.refused.code)})</p>`, actions: button({ label: 'Check again', icon: 'refresh', size: 'sm', action: 'claude-refresh' }) }) : '';
-  const rows = data.teams.map(entry => teamMarkup(entry, view.busy)).join('');
+  const rows = data.teams.map(entry => teamMarkup(entry, busy)).join('');
   const teams = data.refused ? '' : rows ? `<section class="card settings-card" aria-labelledby="claude-teams-title"><header class="card-header"><div class="card-heading"><h2 class="card-title" id="claude-teams-title">Your Teams</h2></div></header><ol class="health-list">${rows}</ol></section>` : '<p class="meta">You have no Team in Ploeg yet.</p>';
   return `${refused}${howToMarkup()}${teams}`;
 }
