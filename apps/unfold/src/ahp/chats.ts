@@ -5,6 +5,7 @@ import { ChatStore } from '../chat/store.ts';
 import type { ChatRecord, ChatTurn } from '../chat/types.ts';
 import type { ChatHistoryEntry, ChatService, ToolAnswer, ToolView, TurnOutcome, TurnView } from '../chat/service.ts';
 import { sessionChatCatalog } from './versions.ts';
+import { repositoriesDirectory } from './session-config.ts';
 import { money } from '../../public/core/format.js';
 import { unfoldMeta } from '../unfold-keys.ts';
 
@@ -23,6 +24,9 @@ export type ChatPort = {
   view(userId: string, publicId: string): AgentHostView;
   activeClients(publicId: string): Json[];
 };
+
+/** The project a chat groups under in the sessions list: the Team that pays for it, as a Work Item without a repository groups. */
+export const chatProject = (team: string): Json => team ? { project: { uri: `${repositoriesDirectory}/${encodeURIComponent(`team-${team}`)}`, displayName: `Ploeg · ${team}` } } : {};
 
 /** A chat session's channel in a client's spelling: `unfold-chat:/<id>` for a VS Code 1.141 window, `ahp-session:/<id>` for every other client. */
 export const chatSessionUri = (id: string, scheme: string) => `${scheme === 'ahp-session' ? 'ahp-session' : chatProvider}:/${id}`;
@@ -79,11 +83,11 @@ export class ChatSessions {
   /** Whether `user` may see and use the chat: only the person who started it. */
   owns(user: User, id: string): boolean { return (this.pending.get(id)?.owner.id ?? this.chats.get(id)?.owner.id) === user.id; }
 
-  /** The chat agent's entry in the root state, listed first because it needs no folder and is where a person starts. */
+  /** The chat agent's entry in the root state, listed first because it is where a person starts; the Agents window asks for a folder before any session, and the chat ignores which one. */
   agent(): Json {
     const cost = this.service?.demo ? 'This is the demo: every answer is a fixed reply and nothing is spent.' : 'Each message is paid from your Team\'s chat allowance.';
     return {
-      provider: chatProvider, displayName: 'Unfold', description: `Start here, no folder needed: ask what is running, what waits for you or why work stopped, then start, answer, retry or stop work after you confirm. ${cost}`,
+      provider: chatProvider, displayName: 'Unfold', description: `Start here: pick any folder under Workspace ▾ › Folders (Unfold), which the chat does not use, then ask what is running, what waits for you or why work stopped, and start, answer, retry or stop work after you confirm. ${cost}`,
       models: [{ id: chatModelId, name: this.service?.demo ? 'Demo · no model calls' : 'Your Team\'s Ask model', provider: chatProvider }],
       protectedResources: [],
     };
@@ -170,6 +174,7 @@ export class ChatSessions {
       resource: chatSessionUri(id, view.scheme), provider: chatProvider, title: this.title(id), status: this.activityBits(id) | flags.session, ...(activity ? { activity } : {}),
       createdAt: pending?.createdAt ?? chat!.createdAt, modifiedAt: pending?.createdAt ?? chat!.updatedAt,
       ...sessionChatCatalog(view.protocolVersion, this.chatSummary(id, view)),
+      ...chatProject(pending?.team ?? chat!.team),
       _meta: unfoldMeta({ kind: 'chat', team: pending?.team ?? chat!.team }),
     };
   }

@@ -74,7 +74,7 @@ test('the Agents window lists the Unfold chat first, before Unfold teams, for 0.
     const agents = client.initialized.snapshots[0].state.agents;
     assert.deepEqual(agents.map((agent: Json) => agent.provider), ['unfold-chat', 'unfold']);
     assert.deepEqual(agents.map((agent: Json) => agent.displayName), ['Unfold', 'Unfold teams']);
-    assert.match(agents[0].description, /^Start here, no folder needed: /, 'the chat says it is where a person starts');
+    assert.match(agents[0].description, /^Start here: pick any folder under Workspace ▾ › Folders \(Unfold\), which the chat does not use, /, 'the chat says it is where a person starts and that the window asks for a folder it ignores');
     assert.match(agents[1].description, /First open Workspace ▾ › Folders \(Unfold\) and pick /, 'Unfold teams names the folder step it needs');
     assert.deepEqual(agents[1].models, [{ id: 'unfold-team', name: 'Demo team · no model calls', provider: 'unfold' }], 'Unfold teams keeps its model');
     assert.deepEqual(agents[0].protectedResources, [], 'no GitHub sign-in gate');
@@ -115,6 +115,7 @@ test('a short "test" gets an answer in a 0.9 chat, paid by one admission whose k
   assert.equal(listed.provider, 'unfold-chat');
   assert.equal(listed.title, 'test', 'the title is the first message');
   assert.equal(listed._meta['dev.unfoldhq.unfold'].kind, 'chat');
+  assert.deepEqual(listed.project, { uri: 'file:///unfold-repositories/team-delivery', displayName: 'Ploeg · delivery' }, 'a chat groups under the Team that pays for it, not under an unknown folder');
   assert.deepEqual(listed._meta['dev.webgrip.unfold'], listed._meta['dev.unfoldhq.unfold'], 'the retiring key carries the same facts for one release');
   assert.match(listed.activity, /4,55 of Team delivery's chat allowance left/);
 });
@@ -362,7 +363,7 @@ test('Unfold\'s Ploeg client speaks Ploeg ADR-0115\'s chat routes', { timeout: t
   admission = () => [402, { error: { code: 'allowance_exhausted' }, allowance: { purpose: 'chat', ...allowance, remainingUsd: 0 } }];
   await assert.rejects(client.admitChat(user, 'delivery', 'chat-3', 'hi'), (error: unknown) => error instanceof ChatAllowanceUsedUp && error.resetAt === '2026-11-01T00:00:00Z' && error.allowance?.remainingUsd === 0);
   admission = () => [409, { error: { code: 'inference_policy' } }];
-  await assert.rejects(client.admitChat(user, 'delivery', 'chat-4', 'hi'), (error: unknown) => error instanceof PloegError && error.code === 'chat_unconfigured');
+  await assert.rejects(client.admitChat(user, 'delivery', 'chat-4', 'hi'), (error: unknown) => error instanceof PloegError && error.code === 'chat_unconfigured' && /Team delivery/.test(error.message) && /\(delivery, ask\)/.test(error.message), 'the refusal names the Team and the policy that is missing');
   admission = () => [409, { error: { code: 'chat_conflict' } }];
   await assert.rejects(client.admitChat(user, 'delivery', 'chat-5', 'hi'), (error: unknown) => error instanceof PloegError && error.code === 'chat_conflict');
   admission = () => [503, { error: { code: 'inference_unavailable' } }];

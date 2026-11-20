@@ -3,6 +3,9 @@ import type { AppConfig, Repository, Team, Session, WorkspaceBackend } from '../
 import { money } from '../../public/core/format.js';
 
 type Json = Record<string, any>;
+
+/** The directory the host names as `defaultDirectory`: a virtual folder whose subfolders are the configured repositories, so the Agents window's workspace picker offers them. */
+export const repositoriesDirectory = 'file:///unfold-repositories';
 type Approval = 'manual' | 'auto';
 
 /** The AHP spelling of each engine approval: VS Code recognises `approvalMode` with `manual` and `allow-all` and renders its own approvals picker for it. */
