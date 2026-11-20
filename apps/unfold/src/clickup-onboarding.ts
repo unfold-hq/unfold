@@ -125,7 +125,7 @@ export class ClickUpOnboarding {
     const token = input.token;
     if (typeof token !== 'string' || token.length > 4096 || /[^\x21-\x7e]/.test(token) || !guide?.tokenPattern.test(token)) throw fail(400, 'connection_token_invalid', `That is not ${guide?.tokenShape ?? 'a ClickUp token'}. Copy the whole token again from ClickUp.`);
     await this.options.steps.admit(user, 'connect-clickup');
-    const flow = await this.ploeg(user, 'connect-clickup', () => this.options.api.startFlow(user, { kind: provider, instance: ploegSteps.pair.tracker, method: 'token', label: 'Unfold member', handOverAgent: true }));
+    const flow = await this.ploeg(user, 'connect-clickup', () => this.options.api.startFlow(user, { kind: provider, instance: ploegSteps.pair.tracker, method: 'token', label: 'Unfold member' }));
     const done = await this.complete(user, { state: flow.flow.state, token });
     return this.keep(user, done, 'token');
   }
@@ -137,7 +137,7 @@ export class ClickUpOnboarding {
     if (!this.options.config.baseUrl) throw fail(409, 'onboarding_base_url_missing', 'Unfold does not know its own public address, so ClickUp could not send you back. Set baseUrl in the server configuration.');
     await this.options.steps.admit(user, 'connect-clickup');
     const redirectUri = `${this.options.config.baseUrl.replace(/\/+$/, '')}/api/onboarding/clickup/callback`;
-    const flow = await this.ploeg(user, 'connect-clickup', () => this.options.api.startFlow(user, { kind: provider, instance: ploegSteps.pair.tracker, method: 'oauth', label: 'Unfold member', handOverAgent: true, redirectUri }));
+    const flow = await this.ploeg(user, 'connect-clickup', () => this.options.api.startFlow(user, { kind: provider, instance: ploegSteps.pair.tracker, method: 'oauth', label: 'Unfold member', redirectUri }));
     if (!flow.authorizeUrl || !this.clickUpPage(flow.authorizeUrl)) throw fail(502, 'ploeg_response', 'Ploeg started the ClickUp sign-in without an address to send you to.');
     this.options.store.setSecret(pendingId(flow.flow.state), { user: user.id, signIn, at: this.now().toISOString() } satisfies Pending);
     return { authorizeUrl: flow.authorizeUrl };
