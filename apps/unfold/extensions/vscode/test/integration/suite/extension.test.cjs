@@ -56,6 +56,11 @@ describe(`Unfold in VS Code ${target} ${vscode.version}`, function () {
     assert.equal(now.demo, true, 'the workbench under test is the deterministic demo');
   });
 
+  it('runs in the VS Code build it was started for', function () {
+    assert.equal(vscode.version.endsWith('-insider'), insiders, `VS Code ${vscode.version} (${vscode.env.appName}) is the ${target} build`);
+    assert.equal(vscode.env.appName.includes('Insiders'), insiders, `${vscode.env.appName} names the ${target} build`);
+  });
+
   it('activates without an error and hands over its read-only API', async function () {
     api = await extension().activate();
     assert.equal(extension().isActive, true);
