@@ -11,7 +11,7 @@ import type { Recovery } from '../engine.ts';
 import type { DeliveryService } from '../delivery.ts';
 import type { PersonProof } from '../person-proof.ts';
 import type { PloegAttribution } from '../ploeg-attribution.ts';
-import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfig, composerModel, resolveSessionConfig, sessionConfigCompletions, sessionConfigSchema, sessionConfigState, startedConfigChange } from './session-config.ts';
+import { SessionConfigError, acceptSessionConfig, approvalOf, changePendingConfig, composerModel, repositoryFolderNames, repositoryPickHint, resolveSessionConfig, sessionConfigCompletions, sessionConfigSchema, sessionConfigState, startedConfigChange } from './session-config.ts';
 import { TrackerAutomations, automationsChannel, autonomousAutomationsMeta, isAutomationsChannel } from './automations.ts';
 import { WebSocketConnection, connectionToken, isWebSocketUpgrade, rejectUpgrade, upgradeToWebSocket } from './websocket.ts';
 import { Heartbeats, IdleSessions, RememberedClients, ServerSequence, heartbeatCheckMs, maxProvisionalSessions, provisionalSessionMs, restoreActiveClients, saveActiveClients } from './continuity.ts';
@@ -44,6 +44,7 @@ import { agentHostOriginAllowed, renewedExpiry, reportUnlistedOrigin, upgradeTok
 import { catalogueMessage, publicError } from '../error-catalogue.ts';
 import { unfoldMeta } from '../unfold-keys.ts';
 
+export { repositoryFolderNames } from './session-config.ts';
 export { MalformedVersion, negotiateProtocolVersion, protocolBaselines, protocolVersion, supportedVersions } from './versions.ts';
 export const provider = 'unfold';
 const rootChannel = 'ahp-root://';
@@ -65,26 +66,6 @@ function logUnanswered(method: string, uri?: unknown): void {
 
 /** The directory the host names as `defaultDirectory`: a virtual folder whose subfolders are the configured repositories, so the Agents window's workspace picker offers them. */
 export const repositoriesDirectory = 'file:///unfold-repositories';
-
-const repositorySlug = (repository: Repository): string => {
-  try {
-    const url = new URL(repository.url);
-    if (!['http:', 'https:', 'ssh:', 'git:'].includes(url.protocol)) return repository.id;
-    return url.pathname.replace(/\/+$/, '').split('/').at(-1)?.replace(/\.git$/i, '') || repository.id;
-  } catch { return repository.id; }
-};
-
-/**
- * The folder each repository is under {@link repositoriesDirectory}, as the folder picker lists it: the forge path's last
- * segment, followed by the id when two repositories share it, so a person can type it. VS Code labels a picked folder
- * `<folder> [<host entry name>]`.
- */
-export function repositoryFolderNames(repositories: readonly Repository[]): Map<string, string> {
-  const slugs = repositories.map(repository => [repository.id, repositorySlug(repository).replace(/[\\/]/g, '-')] as const);
-  const counts = new Map<string, number>();
-  for (const [, slug] of slugs) counts.set(slug.toLowerCase(), (counts.get(slug.toLowerCase()) ?? 0) + 1);
-  return new Map(slugs.map(([id, slug]) => [id, `${slug}${(counts.get(slug.toLowerCase()) ?? 0) > 1 ? ` (${id})` : ''}`]));
-}
 
 /** Each repository's folder on this host as the Agents window's folder picker lists it, by repository id: the path a client puts after the host's connection authority to start a session there. */
 export function repositoryFolderPaths(repositories: readonly Repository[]): Map<string, string> {
@@ -729,13 +710,20 @@ export class AgentHost {
     return session;
   }
 
+  /** What "Unfold teams" does and the one step it needs first, so the Agents window's agent list says it before a session is refused. */
+  private teamsDescription(): string {
+    const where = repositoryPickHint(this.config.repositories);
+    return `Hands a repository to a Team that works in an isolated workspace and ends in a pull request for your review.${where ? ` First ${where}.` : ''}`;
+  }
+
   rootState(user: User, offersSideChats = false): Json {
+    const teams = {
+      provider, displayName: 'Unfold teams', description: this.teamsDescription(),
+      models: [{ ...composerModel(this.config), provider }],
+      protectedResources: [], ...(offersSideChats ? { capabilities: sideChatCapabilities } : {}),
+    };
     return {
-      agents: [{
-        provider, displayName: 'Unfold teams', description: 'Operator-led agent teams in isolated workspaces; every session ends in a reviewable candidate.',
-        models: [{ ...composerModel(this.config), provider }],
-        protectedResources: [], ...(offersSideChats ? { capabilities: sideChatCapabilities } : {}),
-      }, ...(this.chats.available ? [this.chats.agent()] : [])],
+      agents: this.chats.available ? [this.chats.agent(), teams] : [teams],
       activeSessions: this.activeSessionCount(user),
     };
   }
@@ -1886,7 +1874,11 @@ export class AgentHost {
 
   /** The person's Work Item sessions for `listSessions`. Whatever Ploeg does, Unfold's own sessions still list. */
   private async workItemSummaries(client: Client): Promise<Json[]> {
-    try { return (await this.workItems.list(client.user)).map(entry => this.workItemSummary(entry, client)); } catch { return []; }
+    try { return (await this.workItems.list(client.user)).map(entry => this.workItemSummary(entry, client)); }
+    catch (error) {
+      console.error(JSON.stringify({ level: 'warn', event: 'agent_host.work_items_unlisted', user: client.user.id, reason: error instanceof Error ? error.message.slice(0, 300) : 'unknown' }));
+      return [];
+    }
   }
 
   private async workItemSnapshot(client: Client, channel: string, parsed: { kind: ChannelKind; id: string; run?: string }): Promise<Json> {

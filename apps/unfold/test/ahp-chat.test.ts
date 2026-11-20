@@ -66,16 +66,18 @@ const send = (client: ReturnType<typeof connect>, chat: string, text: string, tu
   client.notify('dispatchAction', { channel: chat, clientSeq: ++seq, action: { type: 'chat/turnStarted', turnId, startedAt: new Date().toISOString(), message: { text, origin: { kind: 'user' } } } });
 const ended = (chat: string, turnId: string) => (message: Json) => message.method === 'action' && message.params.channel === chat && ['chat/turnComplete', 'chat/error', 'chat/turnCancelled'].includes(message.params.action.type) && message.params.action.turnId === turnId;
 
-test('the Agents window lists the Unfold chat beside Unfold teams, for 0.9 and 1.0 clients alike', { timeout: testTimeout(30_000) }, async t => {
+test('the Agents window lists the Unfold chat first, before Unfold teams, for 0.9 and 1.0 clients alike', { timeout: testTimeout(30_000) }, async t => {
   const server = await application(); t.after(() => server.close());
   fakes(server);
   for (const spelling of ['0.9', '1.0'] as const) {
     const client = await attach(t, server, spelling);
     const agents = client.initialized.snapshots[0].state.agents;
-    assert.deepEqual(agents.map((agent: Json) => agent.provider), ['unfold', 'unfold-chat']);
-    assert.deepEqual(agents.map((agent: Json) => agent.displayName), ['Unfold teams', 'Unfold']);
-    assert.deepEqual(agents[0].models, [{ id: 'unfold-team', name: 'Demo team · no model calls', provider: 'unfold' }], 'Unfold teams is unchanged');
-    assert.deepEqual(agents[1].protectedResources, [], 'no GitHub sign-in gate');
+    assert.deepEqual(agents.map((agent: Json) => agent.provider), ['unfold-chat', 'unfold']);
+    assert.deepEqual(agents.map((agent: Json) => agent.displayName), ['Unfold', 'Unfold teams']);
+    assert.match(agents[0].description, /^Start here, no folder needed: /, 'the chat says it is where a person starts');
+    assert.match(agents[1].description, /First open Workspace ▾ › Folders \(Unfold\) and pick /, 'Unfold teams names the folder step it needs');
+    assert.deepEqual(agents[1].models, [{ id: 'unfold-team', name: 'Demo team · no model calls', provider: 'unfold' }], 'Unfold teams keeps its model');
+    assert.deepEqual(agents[0].protectedResources, [], 'no GitHub sign-in gate');
     const resolved = await client.rpc('resolveSessionConfig', { channel: 'ahp-root://', provider: 'unfold-chat' });
     assert.deepEqual(resolved.schema.properties.team.enum, ['delivery', 'research']);
     assert.match(resolved.schema.properties.team.enumDescriptions[0], /4,55 of .*5,00 left until 1 November/);
@@ -262,7 +264,8 @@ test('the demo answers with a fixed reply that says so, and makes no admission o
   const server = await application(); t.after(() => server.close());
   const fake = fakes(server, { demo: true });
   const client = await attach(t, server, '1.0');
-  assert.equal(client.initialized.snapshots[0].state.agents[1].models[0].name, 'Demo · no model calls');
+  assert.equal(client.initialized.snapshots[0].state.agents[0].models[0].name, 'Demo · no model calls');
+  assert.match(client.initialized.snapshots[0].state.agents[0].description, /This is the demo: every answer is a fixed reply and nothing is spent\./);
   const { chat, snapshot } = await newChat(client, '1.0');
   send(client, chat, 'hello', 'turn-demo');
   await client.until(ended(chat, 'turn-demo'));

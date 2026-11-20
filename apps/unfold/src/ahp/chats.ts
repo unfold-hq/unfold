@@ -79,10 +79,11 @@ export class ChatSessions {
   /** Whether `user` may see and use the chat: only the person who started it. */
   owns(user: User, id: string): boolean { return (this.pending.get(id)?.owner.id ?? this.chats.get(id)?.owner.id) === user.id; }
 
-  /** The chat agent's entry in the root state. */
+  /** The chat agent's entry in the root state, listed first because it needs no folder and is where a person starts. */
   agent(): Json {
+    const cost = this.service?.demo ? 'This is the demo: every answer is a fixed reply and nothing is spent.' : 'Each message is paid from your Team\'s chat allowance.';
     return {
-      provider: chatProvider, displayName: 'Unfold', description: 'Chat with Unfold: ask what waits for you, and act on Work Items after you confirm. Each message is paid from your Team\'s chat allowance.',
+      provider: chatProvider, displayName: 'Unfold', description: `Start here, no folder needed: ask what is running, what waits for you or why work stopped, then start, answer, retry or stop work after you confirm. ${cost}`,
       models: [{ id: chatModelId, name: this.service?.demo ? 'Demo · no model calls' : 'Your Team\'s Ask model', provider: chatProvider }],
       protectedResources: [],
     };

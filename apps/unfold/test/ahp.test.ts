@@ -34,7 +34,7 @@ test('the agent host speaks AHP 0.9: initialize, create a session from a chat, s
   await alice.open;
   const initialized = await alice.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.10.0', '0.9.0', '0.9.3', '0.7.0'], clientId: 'alice', clientInfo: vscodeAgentsWindow, initialSubscriptions: ['ahp-root://'] });
   assert.equal(initialized.protocolVersion, '0.9.3', 'the highest offered 0.9.x, as offered');
-  assert.equal(initialized.snapshots[0].state.agents[0].provider, 'unfold');
+  assert.deepEqual(initialized.snapshots[0].state.agents.map((agent: Json) => agent.provider), ['unfold-chat', 'unfold'], 'the chat comes first, as where a person starts');
   assert.deepEqual(await alice.rpc('ping', { channel: 'ahp-root://' }), {});
   const resolved = await alice.rpc('resolveSessionConfig', { channel: 'ahp-root://' });
   assert.ok(resolved.schema.properties.repository.enum.includes('order-service'));
@@ -73,7 +73,7 @@ test('the agent host speaks AHP 0.9: initialize, create a session from a chat, s
   const listed = await bob.rpc('listSessions', { channel: 'ahp-root://' });
   assert.ok(listed.items.some((item: Json) => item.resource === realSession && item.title === 'Agent host demo'));
   assert.ok(!alice.inbox.some(message => message.method === 'root/sessionRemoved'), 'the first turn keeps the session the client created');
-  assert.equal(initialized.snapshots[0].state.agents[0].capabilities, undefined, 'no multi-chat or multi-folder capability is advertised');
+  assert.equal(initialized.snapshots[0].state.agents.find((agent: Json) => agent.provider === 'unfold').capabilities, undefined, 'no multi-chat or multi-folder capability is advertised');
   assert.ok(listed.items.every((item: Json) => item.workingDirectories === undefined), 'no host filesystem path is exposed');
   const subscribed = await bob.rpc('subscribe', { channel: realChat });
   assert.equal(subscribed.snapshot.state.turns.at(-1).state, 'complete');

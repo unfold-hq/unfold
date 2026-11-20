@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { application, configuration, login, request } from './api-support.ts';
 import { action, connect, defaultChatOf, vscodeAgentsWindow, type Json } from './ahp-support.ts';
 import { repositoriesDirectory } from '../src/ahp/host.ts';
-import { acceptSessionConfig, noRepositoryRefusal, resolveSessionConfig, sessionConfigState, startedConfigChange } from '../src/ahp/session-config.ts';
+import { acceptSessionConfig, noRepositoryRefusal, repositoryFolderNames, resolveSessionConfig, sessionConfigState, startedConfigChange } from '../src/ahp/session-config.ts';
 import { testTimeout } from './timeframes.ts';
 import type { AgentRuntime, AppConfig, RuntimeKind, Session } from '../src/types.ts';
 
@@ -105,8 +105,9 @@ test('a folderless quick chat, also as N Compare Models drafts, is refused with 
   const { server, client } = await attached(t);
   const resolved = await client.rpc('resolveSessionConfig', { channel: 'ahp-root://', provider: 'unfold' });
   assert.equal(resolved.values.repository, undefined, 'no repository is invented for a session without a folder');
-  assert.equal(resolved.schema.properties.repository.description, noRepositoryRefusal);
-  const refused = (error: Json) => error.code === -32602 && error.message === noRepositoryRefusal;
+  const refusal = String(resolved.schema.properties.repository.description);
+  assert.match(refusal, /^A Team works on a repository: open Workspace ▾ › Folders \(Unfold\) and pick .+\. To ask what is running or waiting instead, start a chat with the agent Unfold$/);
+  const refused = (error: Json) => error.code === -32602 && error.message === refusal;
   const drafts = [randomUUID(), randomUUID(), randomUUID()].map(id => `ahp-session:/${id}`);
   for (const session of drafts) await assert.rejects(client.rpc('createSession', { channel: session, provider: 'unfold', config: resolved.values, progressToken: randomUUID() }), refused);
   await assert.rejects(client.rpc('createSession', { channel: `ahp-session:/${randomUUID()}`, provider: 'unfold' }), refused, 'no configuration at all');
@@ -139,4 +140,13 @@ test('authenticate with an MCP server target, and a changeset review carrying no
   assert.equal(reviewed.params.rejectionReason, undefined, reviewed.params.rejectionReason);
   assert.equal(reviewed.params.action.type, 'changeset/filesReviewChanged');
   assert.ok(action(reviewed, changeset, 'changeset/filesReviewChanged'));
+});
+
+test('the no-repository refusal names the folders to pick, at most three, and points to the chat when there are none', () => {
+  const repository = (id: string) => ({ id, name: id, description: '', url: `https://forge.example/team/${id}.git`, baseBranch: 'main', verify: [] });
+  assert.equal(noRepositoryRefusal([repository('orders')]), 'A Team works on a repository: open Workspace ▾ › Folders (Unfold) and pick orders. To ask what is running or waiting instead, start a chat with the agent Unfold');
+  const four = ['a', 'b', 'c', 'd'].map(repository);
+  assert.deepEqual([...repositoryFolderNames(four).values()], ['a', 'b', 'c', 'd']);
+  assert.match(noRepositoryRefusal(four), /pick a, b, c or another\./);
+  assert.equal(noRepositoryRefusal([]), 'This workbench offers no repository, so no Team can start. To ask what is running or waiting, start a chat with the agent Unfold');
 });

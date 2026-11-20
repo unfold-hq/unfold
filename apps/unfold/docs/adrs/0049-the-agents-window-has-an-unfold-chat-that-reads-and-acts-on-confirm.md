@@ -70,3 +70,14 @@ Chosen option: a second agent, because the owner decided it on 2026-10-18 and it
 ## More Information
 
 The agent-host contract is in [api.md](../contracts/api.md#chatting-with-unfold). Ploeg's side is Ploeg ADR-0115 (ploeg-hq pull request #165, unreleased).
+
+## Update, 2026-11-20: the chat comes first
+
+On 2026-11-20 the owner found the Agents window unclear: a new session showed "No workspace" and a Team picker, and nothing said that a Team needs a repository folder or that the chat needs none. The owner chose the chat as the front door for following and fixing work, at the level of Work Items, Shifts and Runs.
+
+* The root state lists `unfold-chat` ("Unfold") first and `unfold` ("Unfold teams") second, which amends decision 1. Each agent's description says what it is for: the chat's starts with "Start here, no folder needed", and the Teams agent's names the folder to pick first.
+* A Team session without a folder is refused with the folders to pick and a pointer to the chat, instead of a general sentence.
+* The chat routes are Ploeg ADR-0128 in the released numbering, served by the pinned Ploeg; the Bad consequence about an unreleased Ploeg no longer holds.
+* When Ploeg refuses to list a person's Work Items, or listing them fails inside Unfold, the agent host logs `agent_host.work_items_unlisted` with the reason instead of returning an empty list without a trace. When Ploeg cannot be reached, the list keeps showing the Work Items last seen, marked stale, as before.
+
+Confirmation: `test/ahp-chat.test.ts` checks the order and both descriptions; `test/ahp-vscode-1-144.test.ts` checks the refusal. A desktop VS Code has not shown it yet ([VIK-1922](https://vikunja.webgrip.dev/tasks/1922)).
