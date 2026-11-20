@@ -316,3 +316,31 @@ test('every code Connect GitLab answers with is in the error catalogue', () => {
     assert(errorCatalogue[code].status.includes(status), `${code} lists ${status}`);
   }
 });
+
+test('listing a connection’s repositories asks Ploeg with the slow timeout, because a group-wide grant pages through many projects', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'unfold-gitlab-'));
+  const store = new Store(join(directory, 'gitlab.sqlite'));
+  ensureIntegrationSchema(store.db, '2026-11-20T10:00:00.000Z');
+  t.after(async () => { try { store.close(); } catch {} await rm(directory, { recursive: true, force: true }); });
+  const calls: { path: string; slow: boolean | undefined; method: string | undefined }[] = [];
+  const gitlab = new GitlabConnections({
+    db: store.db, store,
+    ploeg: {
+      isDemo: false,
+      connections: async () => ({ demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: [], boards: [], unrouted: [], fetchedAt: '' }),
+      operatorCall: async (_user, path, options) => {
+        calls.push({ path, slow: options?.slow, method: options?.method });
+        if (path.startsWith('forge-connections/gitlab-acme/repositories')) return { repositories: [{ id: '5', fullName: 'acme/web/shop', private: true, canWrite: true, registered: false, key: null }], nextCursor: null };
+        throw new PloegOperatorRefusal(404, 'not_found', 'not found', {});
+      },
+    },
+    steps: { manages: () => true, admit: async () => undefined, available: async () => ({ served: true }), notOptedIn: () => undefined },
+    repositories: { admitRegistration: () => undefined, register: () => { throw new Error('unused'); }, repositories: () => [] },
+    stored: async () => true, audit: () => undefined, pinned: '0.2.0-rc.130', plan: ploegSteps, gitlabUrl: 'https://gitlab.example.com/',
+  });
+  const listed = await gitlab.granted({ id: 'admin-1', name: 'Admin', role: 'admin' as const }, 'gitlab-acme');
+  assert.deepEqual(listed.repositories.map(entry => entry.repository), ['acme/web/shop']);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].slow, true, 'the listing gets the 45 second timeout, not the default 5');
+  assert.equal(calls[0].method, undefined, 'the listing stays a GET');
+});

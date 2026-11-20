@@ -213,14 +213,14 @@ export class ForgeConnections {
   }
 
   protected async call(user: User, path: string, body?: Record<string, unknown>, slow = false): Promise<Record<string, unknown>> {
-    return object(await this.options.ploeg.operatorCall(user, path, body === undefined ? {} : { method: 'POST', body, ...(slow ? { slow } : {}) }));
+    return object(await this.options.ploeg.operatorCall(user, path, { ...(body === undefined ? {} : { method: 'POST' as const, body }), ...(slow ? { slow } : {}) }));
   }
 
   protected async pages(user: User, path: string, field: string, max: number): Promise<Record<string, unknown>[]> {
     const found: Record<string, unknown>[] = [];
     let after: string | null = null;
     do {
-      const data = await this.call(user, `${path}?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`);
+      const data = await this.call(user, `${path}?limit=100${after ? `&after=${encodeURIComponent(after)}` : ''}`, undefined, true);
       found.push(...items(data[field], 100));
       after = typeof data.nextCursor === 'string' && data.nextCursor && data.nextCursor !== after ? data.nextCursor : null;
     } while (after && found.length < max);
