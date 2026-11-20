@@ -16,7 +16,7 @@ export const insidersProposals = [
 ];
 export const insidersActivationEvents = ['onChatArtifactIntegration'];
 export const feedbackCommand = { command: 'unfold.insiders.sendFeedback', title: 'Send Feedback', category: 'Unfold Insiders', icon: '$(feedback)' };
-export const chatSessionsContribution = { type: 'unfold-work', name: 'unfold', displayName: 'Unfold', description: 'Proposed Work Items you may take on and, if you choose, the Work Items and sessions that need you, from your Unfold workbench. Unfold runs no model here.' };
+export const chatSessionsContribution = { type: 'unfold-work', name: 'unfold', displayName: 'Unfold', description: 'Proposed Work Items you may take on and, if you choose, the Work Items and sessions that need you, from your Unfold workbench. Unfold runs no model here.', canDelegate: true };
 export const sessionsListSetting = {
   'unfold.insiders.sessionsList': {
     type: 'string',
