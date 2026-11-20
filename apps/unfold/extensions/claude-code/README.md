@@ -66,7 +66,7 @@ With `UNFOLD_URL` set and no credential, the `SessionStart` hook starts Unfold's
 
 ## Telemetry headers
 
-[`scripts/otel-headers.mjs`](scripts/otel-headers.mjs) is for Claude Code's `otelHeadersHelper` setting ([ADR 0073](../../docs/adrs/0073-the-plugin-carries-the-opentelemetry-headers-helper-that-signs-usage-metrics-with-the-identity-provider.md)): Claude Code runs it at start and about every 29 minutes, and sends the headers it prints with every metrics and logs export. It signs the person in at an OpenID Connect issuer with the device authorization grant (RFC 8628) and prints `{"Authorization": "Bearer <access token>"}`. How an organisation points Claude Code at it, with the managed-settings line that finds the helper inside the marketplace clone, is in [the how-to](../../../../docs/how-to/link-claude-code-sessions.md#send-claude-codes-usage-metrics-with-your-identity-the-telemetry-helper).
+[`scripts/otel-headers.mjs`](scripts/otel-headers.mjs) is for Claude Code's `otelHeadersHelper` setting ([ADR 0073](../../docs/adrs/0073-the-plugin-carries-the-opentelemetry-headers-helper-that-signs-usage-metrics-with-the-identity-provider.md)): Claude Code runs it at start and about every 29 minutes, and sends the headers it prints with every metrics and logs export. It signs the person in at an OpenID Connect issuer with the device authorization grant (RFC 8628) and prints `{"Authorization": "Bearer <access token>"}`. How an organisation points Claude Code at it, with the managed-settings line that finds the helper inside the marketplace clone, is in [the how-to](../../../../docs/how-to/send-every-claude-code-session-to-unfold.md#how-identity-is-attached-the-telemetry-helper).
 
 | Variable | Meaning |
 | --- | --- |

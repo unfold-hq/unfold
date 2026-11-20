@@ -23,21 +23,7 @@ Unfold never holds your Claude sign-in. Anthropic does not allow third-party app
 
 Nobody generates or pastes a token. The plugin needs only `UNFOLD_URL`, and it signs each person in through the browser by itself (step 2).
 
-**For a whole organisation**, an administrator adds this once to Claude Code's [managed settings](https://code.claude.com/docs/en/managed-settings), as a `managed-settings.json` file on each machine or as [server-managed settings](https://code.claude.com/docs/en/server-managed-settings) in the claude.ai admin console:
-
-```json
-{
-  "env": { "UNFOLD_URL": "https://unfold.example.org" },
-  "extraKnownMarketplaces": {
-    "unfold": {
-      "source": { "source": "git", "url": "https://github.com/unfold-hq/unfold.git" }
-    }
-  },
-  "enabledPlugins": { "unfold@unfold": true }
-}
-```
-
-Replace the address with your own Unfold. Managed settings need no workspace trust step, and no person can override them. To allow only approved marketplaces, add `strictKnownMarketplaces` with the same source. Your Unfold needs single sign-on configured: the browser sign-in is Unfold's editor sign-in ([ADR 0037](../../apps/unfold/docs/adrs/0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md)).
+**For a whole organisation**, an administrator puts the plugin, `UNFOLD_URL` and the telemetry settings in Claude Code's managed settings once, and nobody installs anything: see [Send every Claude Code session in your organisation to Unfold](send-every-claude-code-session-to-unfold.md).
 
 **For yourself only**, add `"env": { "UNFOLD_URL": "https://unfold.example.org" }` to `~/.claude/settings.json` and run in Claude Code:
 
@@ -65,11 +51,11 @@ To give every person who works in a repository the plugin without the two comman
 
 Claude Code registers the marketplace and offers the plugin once a person accepts the workspace trust dialog for the folder; in a folder nobody trusted it ignores both keys. VS Code 1.143 reads the same file for its Copilot, Claude and Codex harnesses, also only after trust, and installs the plugin for the session without writing it to the person's settings. GitHub Copilot reads `.github/copilot/settings.json` with the same two keys; when both files name the plugin, the `.claude` one wins. Copilot and VS Code install the plugin's skill from version 0.3.0 on; the hooks that report sessions run in Claude Code only.
 
-The repository file can carry `"env": { "UNFOLD_URL": "https://unfold.example.org" }` too; like the two keys, it applies once the person trusts the folder. Without `UNFOLD_URL` the hooks print nothing and exit; with it, the first session asks the person to approve the sign-in (step 2). Point the `url` at your own mirror if you build Unfold from one.
+The repository file can carry `"env": { "UNFOLD_URL": "https://unfold.example.org" }` too; like the two keys, it applies once the person trusts the folder. It cannot switch telemetry on, so sessions link but show no cost until each person or the organisation enables it (step 3). Without `UNFOLD_URL` the hooks print nothing and exit; with it, the first session asks the person to approve the sign-in (step 2). Point the `url` at your own mirror if you build Unfold from one.
 
 #### GitHub Copilot and VS Code across an organisation
 
-For Claude Code, use the managed settings of step 1. For GitHub Copilot in Copilot CLI, VS Code and JetBrains IDEs, the enterprise-managed settings take the same `extraKnownMarketplaces` and `enabledPlugins`, and `allowedMcpServers` can allow Unfold's two MCP servers by address:
+For Claude Code, use the [managed settings](send-every-claude-code-session-to-unfold.md#the-settings). For GitHub Copilot in Copilot CLI, VS Code and JetBrains IDEs, the enterprise-managed settings take the same `extraKnownMarketplaces` and `enabledPlugins`, and `allowedMcpServers` can allow Unfold's two MCP servers by address:
 
 ```json
 {
@@ -115,51 +101,17 @@ Two things end a credential early. If you do not use Claude Code for 14 days, th
 
 ### One sign-in for every tool
 
-An organisation whose machines already hold a token from the identity provider Unfold uses can skip the browser approval. The plugin's own [telemetry helper](#send-claude-codes-usage-metrics-with-your-identity-the-telemetry-helper) is one source: with `UNFOLD_TELEMETRY_ISSUER` set, the plugin runs its `token` subcommand, and no other setting is needed. A command-line helper that keeps the sign-in in the Keychain for other company tools is another: the operator turns the exchange on in Unfold ([live operation](../../apps/unfold/docs/operations/live.md#one-sign-in-for-editors)) and sets `UNFOLD_IDP_TOKEN_COMMAND` in Claude Code's managed settings to the command that prints the token, which wins over the telemetry helper. When the plugin has no credential, or its family is about to end, it runs that command and trades the token at Unfold for its own credential ([ADR 0070](../../apps/unfold/docs/adrs/0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). It sends the token only to `UNFOLD_URL` over HTTPS and never stores it. When the command prints nothing within five seconds, or Unfold refuses the token, the plugin falls back to the browser approval. Unfold refuses a token when it does not know your account yet, so sign in through the browser once the first time, unless the operator turned on `provision`, which creates your account from the token.
+An organisation whose machines already hold a token from the identity provider Unfold uses can skip the browser approval. The plugin's own [telemetry helper](send-every-claude-code-session-to-unfold.md#how-identity-is-attached-the-telemetry-helper) is one source: with `UNFOLD_TELEMETRY_ISSUER` set, the plugin runs its `token` subcommand, and no other setting is needed. A command-line helper that keeps the sign-in in the Keychain for other company tools is another: the operator turns the exchange on in Unfold ([live operation](../../apps/unfold/docs/operations/live.md#one-sign-in-for-editors)) and sets `UNFOLD_IDP_TOKEN_COMMAND` in Claude Code's managed settings to the command that prints the token, which wins over the telemetry helper. When the plugin has no credential, or its family is about to end, it runs that command and trades the token at Unfold for its own credential ([ADR 0070](../../apps/unfold/docs/adrs/0070-an-editor-trades-an-identity-provider-token-for-its-credential.md)). It sends the token only to `UNFOLD_URL` over HTTPS and never stores it. When the command prints nothing within five seconds, or Unfold refuses the token, the plugin falls back to the browser approval. Unfold refuses a token when it does not know your account yet, so sign in through the browser once the first time, unless the operator turned on `provision`, which creates your account from the token.
 
 `/unfold:login` starts a sign-in at any time, first with `UNFOLD_IDP_TOKEN_COMMAND` when it is set, `/unfold:login status` says whether and until when this machine is signed in, and `/unfold:logout` signs it out of Unfold and forgets the credential. `UNFOLD_TOKEN`, when you set it yourself, wins over the plugin's own credential and is never renewed by the plugin. `UNFOLD_CREDENTIAL_STORE=file` keeps the credential in the file on macOS too.
 
 ## 3. Turn on telemetry
 
-The settings file that sets `UNFOLD_URL` also switches on Claude Code's telemetry. The session page reads it back by session id ([monitoring](https://code.claude.com/docs/en/monitoring-usage)). Keep `CLAUDE_CODE_ENABLE_TELEMETRY=1` and the `OTEL_*` exporter settings your observability stack already expects.
+If your organisation put Unfold's managed settings on your machine, telemetry is already on and you do nothing. The session page reads Claude Code's own telemetry back by session id from the store your organisation's collector writes to ([monitoring](https://code.claude.com/docs/en/monitoring-usage)).
 
-### Send Claude Code's usage metrics with your identity: the telemetry helper
+For yourself only, add `CLAUDE_CODE_ENABLE_TELEMETRY=1` and the `OTEL_*` exporter settings your observability stack expects to the `env` of `~/.claude/settings.json`, next to `UNFOLD_URL`. A repository's `.claude/settings.json` cannot do this: Claude Code ignores the OpenTelemetry exporter variables there.
 
-A collector that takes metrics from anyone cannot tell whose they are, and one that asks for a bearer token needs a program on every laptop that keeps that token fresh. Claude Code's `otelHeadersHelper` setting names such a program: a command Claude Code runs at start and about every 29 minutes, whose printed JSON object becomes the headers of every metrics and logs export ([monitoring](https://code.claude.com/docs/en/monitoring-usage)). The plugin ships that program, so nothing but the managed settings of step 1 needs installing: [`scripts/otel-headers.mjs`](../../apps/unfold/extensions/claude-code/scripts/otel-headers.mjs) signs each person in at your identity provider once and prints `{"Authorization": "Bearer <access token>"}` from then on ([ADR 0073](../../apps/unfold/docs/adrs/0073-the-plugin-carries-the-opentelemetry-headers-helper-that-signs-usage-metrics-with-the-identity-provider.md)).
-
-**Managed settings.** Add the helper line and the two variables to the file of step 1:
-
-```json
-{
-  "env": {
-    "UNFOLD_URL": "https://unfold.example.org",
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "OTEL_METRICS_EXPORTER": "otlp",
-    "OTEL_LOGS_EXPORTER": "otlp",
-    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otel.example.org",
-    "UNFOLD_TELEMETRY_ISSUER": "https://idp.example.org/realms/people",
-    "UNFOLD_TELEMETRY_CLIENT_ID": "claude-code-telemetry"
-  },
-  "otelHeadersHelper": "sh -c 'P=\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/marketplaces/unfold/apps/unfold/extensions/claude-code/scripts/otel-headers.mjs\"; [ -f \"$P\" ] && exec node \"$P\" || echo {}'",
-  "extraKnownMarketplaces": {
-    "unfold": {
-      "source": { "source": "git", "url": "https://github.com/unfold-hq/unfold.git" }
-    }
-  },
-  "enabledPlugins": { "unfold@unfold": true }
-}
-```
-
-The helper line is a shell line, because `otelHeadersHelper` runs through a shell and does not expand `${CLAUDE_PLUGIN_ROOT}`, which only a plugin's own hooks get. It looks for the helper where Claude Code clones a marketplace registered in managed settings, `plugins/marketplaces/<marketplace name>/`, under `CLAUDE_CONFIG_DIR` or `~/.claude`, and prints `{}` on the very first start, before the marketplace is cloned. Name the marketplace `unfold` as above, or change the path to match. Set `UNFOLD_TELEMETRY_SCOPES` when `openid offline_access` is not enough, `UNFOLD_TELEMETRY_AUDIENCE` when your provider wants an `audience` to issue a token for the collector, and `UNFOLD_TELEMETRY_HEADER` when the collector reads another header than `Authorization`. The [plugin README](../../apps/unfold/extensions/claude-code/README.md#telemetry-headers) lists every variable, the subcommands and the exit codes.
-
-**What your identity provider needs.** A public client (no secret; the helper runs on laptops) with the device authorization grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) and refresh tokens, so the person approves once; access tokens the collector can verify, usually JWTs the collector's proxy checks against the issuer's JWKS; and, to make the same approval the plugin's Unfold sign-in, token exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) at the token endpoint from that client to the audience `unfold` (`UNFOLD_TELEMETRY_EXCHANGE_AUDIENCE`) with the scopes `openid profile email` (`UNFOLD_TELEMETRY_EXCHANGE_SCOPES`) so the token carries the groups claim Unfold maps to a role, with the exchanged token a JWT whose `aud` the operator lists in Unfold's `auth.oidc.exchange.audiences` ([live operation](../../apps/unfold/docs/operations/live.md#one-sign-in-for-editors)). Without token exchange the metrics still carry the identity, and the plugin falls back to the browser approval of step 2.
-
-**What a person sees.** Nothing in the session: the helper is not a hook. On the first start a browser tab opens on the provider's device page with the code filled in, and a desktop notification says `Approve the sign-in in your browser. The page must show BCDF-GHJK.` (macOS and Linux; on Windows only the browser). The person signs in with their company account, checks the code and approves. From the next helper run on, about half an hour later at most, their metrics carry the header. Someone who closes the tab is asked again after four hours, not at every start, and `node ~/.claude/plugins/marketplaces/unfold/apps/unfold/extensions/claude-code/scripts/otel-headers.mjs login` asks at once; `status` and `logout` work the same way. Until the first approval the metrics go out without the header, and a collector that requires it drops them. On macOS the session is one entry in the login Keychain (service `dev.unfold.telemetry`), elsewhere `plugins/data/unfold/telemetry.json` under `~/.claude`, readable by the person only.
-
-**One approval for Unfold too.** With `UNFOLD_TELEMETRY_ISSUER` set and no `UNFOLD_IDP_TOKEN_COMMAND`, the plugin's own sign-in runs the helper's `token` subcommand as its identity-provider token source ([One sign-in for every tool](#one-sign-in-for-every-tool)), so the browser approval of step 2 is never needed after the first sign-in. `UNFOLD_IDP_TOKEN_COMMAND`, when set, wins.
-
-**What leaves your machine.** The helper talks to the issuer only: the device code, the refresh token at each refresh, and the access token at a token exchange. Claude Code then sends the access token, as the header, to wherever `OTEL_EXPORTER_OTLP_ENDPOINT` points, with every export. Set that endpoint to HTTPS. Unfold never sees the telemetry token, and the helper never sends anything to Unfold.
+The settings for a whole organisation, the telemetry helper that signs every export with the person's identity, what the identity provider needs and what a person sees are in [Send every Claude Code session in your organisation to Unfold](send-every-claude-code-session-to-unfold.md#how-identity-is-attached-the-telemetry-helper).
 
 The metrics store can keep Claude Code's metrics under Prometheus names (`claude_code_cost_usage_USD_total`, label `session_id`) or as OTLP sent them (`claude_code.cost.usage`, label `session.id`); Unfold reads both, so the store needs no recording rule or relabelling ([names](../../apps/unfold/docs/contracts/api.md#claude-code-telemetry-names)). Until the store holds a session's metrics, its cost reads **Not known yet**, never $0.00.
 

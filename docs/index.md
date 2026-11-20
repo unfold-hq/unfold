@@ -49,6 +49,7 @@ New here? [Get started](get-started/index.md) has one path each for evaluating U
 | Hand ClickUp tasks to agents, follow them and accept or send back the result | [Working with Unfold from ClickUp](../apps/unfold/docs/operations/working-from-clickup.md) |
 | Follow, ask about and steer Work Items from PhpStorm, Air, Zed or Neovim | [Use Unfold from PhpStorm and other ACP editors](how-to/use-unfold-from-an-acp-editor.md) |
 | See your own Claude Code sessions on the Work Items they serve, with Agent Trace attribution and telemetry | [Link your Claude Code sessions](how-to/link-claude-code-sessions.md) |
+| Roll the plugin and Claude Code's telemetry out to everyone in your organisation, with no setup per person | [Send every Claude Code session in your organisation to Unfold](how-to/send-every-claude-code-session-to-unfold.md) |
 | Start Work Items that wait for you with your own Claude routine, connected once per Team | [Connect your Claude routine](how-to/connect-your-claude-routine.md) |
 | Follow your hand-offs as MCP tasks in a terminal `claude`, including VS Code's integrated terminal | [Follow hand-offs as tasks in a terminal](how-to/follow-hand-offs-as-tasks-in-a-terminal.md) |
 | See your own OpenCode and Codex sessions on the Work Items they serve, with Agent Trace attribution | [Link your OpenCode and Codex sessions](how-to/link-opencode-and-codex-sessions.md) |
