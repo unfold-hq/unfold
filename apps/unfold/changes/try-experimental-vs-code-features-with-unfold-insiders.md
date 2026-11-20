@@ -9,3 +9,4 @@ Run VS Code Insiders with `--enable-proposed-api unfold-hq.unfold-workbench-insi
 What Unfold Insiders adds:
 
 - What waits on you and today's spend, above the chat input, at the top of **Now**, in the status bar hover and in the chat status menu.
+- Proposed work you may take on, in VS Code's Sessions list, approved with the same confirmation as in chat.
