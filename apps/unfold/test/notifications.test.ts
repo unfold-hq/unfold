@@ -11,7 +11,7 @@ import { NtfyChannel, WebPushChannel, ChannelRegistry, parseSubscription, public
 import { NotifyStore } from '../src/notify/store.ts';
 import { notificationSettings } from '../src/notify/settings.ts';
 import { parsePreferences, quietUntil } from '../src/notify/preferences.ts';
-import { workItemMessage } from '../src/notify/triggers.ts';
+import { handedOffMessage, permissionMessage, sameOriginLink, testMessage, workItemMessage } from '../src/notify/triggers.ts';
 import { decryptPayload, fromBase64Url, generateVapidKeys, toBase64Url, verifyVapidToken } from '../src/notify/web-push.ts';
 import { reaches } from '../src/tenant-scope.ts';
 
@@ -261,7 +261,7 @@ test('Web Push sends an RFC 8291 message with a VAPID header, and a 410 deletes 
   assert.equal(key, vapid.publicKey);
   assert.equal(verifyVapidToken(token, vapid.publicKey)?.aud, 'https://push.example.net');
   const notice = JSON.parse(decryptPayload(sent.body, device.ecdh.getPrivateKey(), device.auth).toString());
-  assert.deepEqual(notice, { title: 'A pull request is ready for review', body: '#9 Ship it', url: 'https://unfold.example.org/#work/9', tag: 'review-9' });
+  assert.deepEqual(notice, { title: 'A pull request is ready for review', body: '#9 Ship it', url: '/#work/9', tag: 'review-9' }, 'the service worker opens the route on its own origin');
   status = 410;
   f.events.push(event('2', 'work_item.awaiting_review', '9'));
   await f.notify.tick();
@@ -333,4 +333,37 @@ test('the registry refuses a second channel with the same id, and lists only con
   assert.equal(new NtfyChannel(store, settings.ntfy, undefined, {}).available(), false);
   assert.equal(new WebPushChannel(store, settings.webPush, undefined, { UNFOLD_VAPID_PUBLIC_KEY: vapid.publicKey, UNFOLD_VAPID_PRIVATE_KEY: generateVapidKeys().privateKey }).available(), false);
   assert.ok(fromBase64Url(vapid.publicKey).length === 65);
+});
+
+test('nobody receives anything until they choose a channel, even with moments chosen and the flag on', async () => {
+  const f = fixture();
+  f.user('never-chose');
+  const ann = f.user('ann');
+  const chose = await optIn(f, ann, [], ['needs_you', 'question', 'review', 'budget']) as any;
+  assert.equal(chose.status, 200);
+  assert.equal(f.notify.store.subscribers().length, 0);
+  await f.notify.tick();
+  f.facts['7'] = facts('Fix it');
+  f.events.push(event('1', 'work_item.awaiting_review'), event('2', 'work_item.needs_human'));
+  await f.notify.tick();
+  assert.equal(f.sent.length, 0);
+  const test = await f.notify.route(ann, 'POST', '/api/me/notifications/test', body({})) as any;
+  assert.equal(test.body.queued, 0, 'not even a test notice goes out without a channel');
+  assert.deepEqual(f.notify.store.recent('ann', 5), []);
+});
+
+test('each notice carries the route of its decision: the Work Item page, the session with the tool prompt, or the Notifications page', () => {
+  const item = { id: '42', title: 'Fix the login' };
+  for (const trigger of ['needs_you', 'question', 'review', 'budget', 'sign_off'] as const) {
+    const message = workItemMessage(trigger, item, 'https://unfold.example.org/', 0.8);
+    assert.equal(message.route, 'work/42', trigger);
+    assert.equal(message.url, 'https://unfold.example.org/#work/42', trigger);
+  }
+  assert.equal(handedOffMessage('question', item).route, 'work/42');
+  assert.equal(permissionMessage('session-abcdefgh', undefined, 'r1').route, 'linked-session/session-abcdefgh');
+  assert.equal(testMessage().route, 'settings/notifications');
+  const unconfigured = workItemMessage('review', item);
+  assert.equal(unconfigured.url, null, 'without a base URL no absolute link exists for ntfy, Slack or Teams');
+  assert.equal(sameOriginLink(unconfigured), '/#work/42', 'Web Push still opens the Work Item on the origin it subscribed from');
+  assert.equal(sameOriginLink({ url: 'https://unfold.example.org/#work/7' }), 'https://unfold.example.org/#work/7', 'a notice queued before routes existed keeps its URL');
 });

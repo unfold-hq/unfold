@@ -2,9 +2,9 @@
 export const prefsKey = 'unfold.prefs';
 
 /** Each preference and its default. */
-export const prefDefaults = Object.freeze({ theme: 'system', density: 'comfortable', singleKeyShortcuts: true, live: true, notify: false, format: 'nl', lastVisit: null, team: null, cardMotion: 'auto', cardSound: false, nowView: 'fleet', seenVersion: null });
+export const prefDefaults = Object.freeze({ theme: 'system', density: 'comfortable', singleKeyShortcuts: true, live: true, notify: false, format: 'nl', lastVisit: null, team: null, cardMotion: 'auto', cardSound: false, nowView: 'fleet', seenVersion: null, pushOffer: null });
 
-const choices = { theme: ['system', 'light', 'dark'], density: ['comfortable', 'compact'], format: ['nl', 'browser'], cardMotion: ['auto', 'full', 'calm', 'off'], nowView: ['desk', 'fleet'] };
+const choices = { theme: ['system', 'light', 'dark'], density: ['comfortable', 'compact'], format: ['nl', 'browser'], cardMotion: ['auto', 'full', 'calm', 'off'], nowView: ['desk', 'fleet'], pushOffer: ['accepted', 'declined'] };
 
 /** The browser theme colour for each theme: the colour of the top bar. */
 export const themeColors = Object.freeze({ light: '#FFFFFF', dark: '#141A1D' });

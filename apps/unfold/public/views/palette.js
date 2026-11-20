@@ -304,6 +304,7 @@ const pages = [
   { id: 'activity', label: 'Activity', icon: 'activity', keys: ['g', 'a'], keywords: 'audit events feed log history' },
   { id: 'insights', label: 'Insights', icon: 'insights', keys: ['g', 'i'], keywords: 'spend cost budget money throughput overview' },
   { id: 'tasks', label: 'Tasks', icon: 'tasks', keys: ['g', 't'], keywords: 'tracker import vikunja clickup issues tickets' },
+  { id: 'take-on', label: 'Take on', icon: 'check-circle', keywords: 'approve hand back stop cancel phone proposals running queued taken over' },
   { id: 'sessions', label: 'Sessions', icon: 'sessions', keys: ['g', 's'], keywords: 'workbench teams interactive', count: 'sessions', tone: 'attention', describe: n => `${n} need you`, sessions: true },
 ];
 const lanes = [

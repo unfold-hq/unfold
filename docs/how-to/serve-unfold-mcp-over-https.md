@@ -127,6 +127,7 @@ What changes with Open WebUI:
 * Open WebUI names no client, so its actions are recorded with the channel `mcp:mcp 0.1.0`, the MCP Python SDK's default.
 * Open WebUI refreshes a token five minutes before it expires, but does not refresh after a 401, so a refused token means enabling the tool again.
 * Open WebUI ignores MCP prompts, so `now`, `handoff` and `takeover` are not offered there.
+* Connect Open WebUI to Unfold directly, not through an MCP gateway such as LiteLLM's. Through LiteLLM 1.110 the person's token still arrives, but no confirmation reaches the chat, so every action is refused, and the Work Item card is lost ([probe](../research/evidence/2026-11-20-chat-surfaces/7-litellm-gateway-probe.md)).
 
 ## Protocol revisions
 

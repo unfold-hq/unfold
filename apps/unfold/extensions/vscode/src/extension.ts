@@ -34,6 +34,8 @@ import { mcpInstallUri, mcpJsonEntry, mcpProviderApi, ploegMcpProviderId, ploegM
 import { UnfoldTimeline, timelineApi, timelineItemContext } from './timeline.js';
 import { parseRemote } from './git-remotes.js';
 import { SessionsList } from './sessions-list.js';
+import { InsidersGlance, glanceTreeProvider, nowRules } from './insiders-glance.js';
+import { statusHover } from './what-waits.js';
 import { ProposalGuard, enableProposedApiCommand, insidersExtensionId, insidersProposals, offNoticeKey, proposalsOffNotice } from './proposals.js';
 import { feedbackIssueUrl } from './feedback.js';
 import { execFile } from 'node:child_process';
@@ -78,6 +80,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   private agentsWindow: AgentsWindowState = { status: 'unknown' };
   private readonly proposals: ProposalGuard;
   private sessionsList?: SessionsList;
+  private readonly glance: InsidersGlance;
   private agentHostRegistration?: { origin: string; address: string; token: string; registration: vscode.Disposable };
   private agentsWindowTimer?: ReturnType<typeof setInterval>;
   private agentsWindowCheck?: ReturnType<typeof setTimeout>;
@@ -118,7 +121,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     try { this.current = new UnfoldClient(settings().get('serverUrl', 'http://127.0.0.1:4080'), context.secrets); }
     catch (error) { this.current = new UnfoldClient('http://127.0.0.1:4080', context.secrets); this.configurationError = error as Error; }
     this.now = new NowTree(core);
-    this.nowView = vscode.window.createTreeView('unfold.now', { treeDataProvider: this.now });
+    this.nowView = vscode.window.createTreeView('unfold.now', { treeDataProvider: glanceTreeProvider(this.now, this.proposals) });
     this.tree = new SessionTree(id => this.current.permissions(id));
     this.view = vscode.window.createTreeView('unfold.sessions', { treeDataProvider: this.tree, showCollapseAll: true });
     this.tasks = new TaskTree(core, async (sourceId, page) => { const target = this.current; const generation = this.generation; const result = await target.tasks(sourceId, page); this.assertTarget(target, generation); return result; });
@@ -132,6 +135,8 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     this.status.text = '$(unfold-mark) Unfold';
     this.status.command = 'unfold.now.focus';
     this.status.show();
+    this.glance = new InsidersGlance(core, this.proposals, this.nowView, this.status, () => this.statusHover());
+    context.subscriptions.push(this.glance);
     this.agentsWindowItem.name = 'Unfold Agents Window';
     this.agentsWindowItem.command = 'unfold.agentsWindowStatus';
     context.subscriptions.push(this.agentsWindowItem);
@@ -407,6 +412,7 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     const gateway = gatewayWantsCredential(error);
     this.tree.update([], needsLogin ? 'Sign in to your workbench' : gateway ? 'An access gateway wants a credential — set its headers' : 'Workbench unavailable — reconnect', gateway ? 'unfold.setAccessGatewayHeaders' : 'unfold.connect');
     this.now.offline();
+    this.glance.offline();
     this.lastNow = undefined;
     this.forgetHandOffs();
     this.nowView.badge = undefined;
@@ -468,11 +474,13 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       const demo = bootstrap.mode === 'demo';
       this.taskView.message = demo ? 'Demo fixture · No tracker account required' : undefined;
       this.view.message = demo ? 'Demo · no AI calls' : undefined;
-      this.nowView.message = `${demo || now.value?.demo ? 'Demo · illustrative records, no model calls or spend · ' : ''}${bootstrap.user.name} · ${new URL(client.origin).host}`;
+      const nowMessage = `${demo || now.value?.demo ? 'Demo · illustrative records, no model calls or spend · ' : ''}${bootstrap.user.name} · ${new URL(client.origin).host}`;
+      this.nowView.message = nowMessage;
       const count = waitingCount(now.value, rows);
       this.nowView.badge = count ? { value: count, tooltip: `${count} ${count === 1 ? 'thing waits' : 'things wait'} on you` } : undefined;
       this.view.badge = undefined;
       this.statusLine(client, bootstrap.mode, now.value, rows);
+      this.glance.update({ now: now.value, rows, demo, message: nowMessage });
       await vscode.commands.executeCommand('setContext', 'unfold.sessions', demo || Boolean(bootstrap.sharedExecution) || sessions.length > 0);
       await vscode.commands.executeCommand('setContext', 'unfold.connected', true);
       if (!this.inAgentsWindow) {
@@ -592,6 +600,14 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
     const ticking = Boolean(statusSummary(this.core, now, rows).focus?.progress.current);
     if (ticking && !this.statusTicker) this.statusTicker = setInterval(() => this.paintStatus(), 1000);
     if (!ticking && this.statusTicker) { clearInterval(this.statusTicker); this.statusTicker = undefined; }
+  }
+
+  private async statusHover(): Promise<string | undefined> {
+    const state = this.statusState;
+    if (!state || this.disposed) return undefined;
+    const now = (await this.readNow(state.client, false).catch(() => undefined))?.value ?? state.now;
+    if (state !== this.statusState) return undefined;
+    return statusHover(this.core, nowRules, now, state.rows, { demo: state.mode === 'demo', origin: state.client.origin });
   }
 
   private paintStatus() {

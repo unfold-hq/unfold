@@ -180,5 +180,5 @@ test('quiet hours hold a hand-off notice, and someone who lost the Team gets non
 
 test('the hand-off notice keeps the trigger a channel needs for its button and urgency', () => {
   const message = handedOffMessage('question', { id: '42', title: 'Answer me' }, 'https://unfold.example.org/');
-  assert.deepEqual(message, { trigger: 'question', title: 'Work you handed off asks you a question', body: '#42 Answer me', url: 'https://unfold.example.org/#work/42', tag: 'question-42', about: 'handed_off' });
+  assert.deepEqual(message, { trigger: 'question', title: 'Work you handed off asks you a question', body: '#42 Answer me', url: 'https://unfold.example.org/#work/42', route: 'work/42', tag: 'question-42', about: 'handed_off' });
 });

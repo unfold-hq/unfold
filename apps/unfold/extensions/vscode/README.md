@@ -38,7 +38,12 @@ What the experimental parts do today:
 | --- | --- | --- |
 | The Agents window without editing settings | `remoteAgentHost` | Built. On sign-in the workbench is registered with `vscode.chat.registerRemoteAgentHost` while the extension runs, instead of being written to `chat.remoteAgentHosts` in your `settings.json`; the token stays in SecretStorage. If VS Code refuses the call, the extension writes the setting as the regular one does. |
 | Work in the Sessions list | `chatSessionsProvider` | Built. See [Work in the Sessions list](#work-in-the-sessions-list). |
-| Work Items in chat, what waits above the chat input, Now at a glance, the chat status menu | `chatArtifactIntegrations`, `chatInputNotification`, `treeViewMarkdownMessage`, `treeItemMarkdownLabel`, `statusBarItemTooltip`, `chatStatusItem` | Declared, not built yet. |
+| What waits, above the chat input | `chatInputNotification` | Built. A notice above the chat input says what waits on you, such as "2 need you · 3 ready for review", or that a session's budget is 90 % spent or more. It warns when you are needed or a budget nears its end, is an error once a budget is spent, and only informs for reviews. Its button opens the Work Item or session when one thing waits, and **Now** otherwise. It clears when nothing waits; on a demo workbench it says so. |
+| Now at a glance | `treeViewMarkdownMessage`, `treeItemMarkdownLabel`, `statusBarItemTooltip` | Built. The top of **Now** shows "3 ready for review · 2 need you · US$ 4,10 today"; a count links to its Work Item when there is one, and to the browser's Now page when there are several. Rows that need you or wait for your review have their title in bold. Hovering the Unfold status bar item reads Now again and lists what runs, with its Role, time and cost so far, and today's spend. |
+| The chat status menu | `chatStatusItem` | Built. How many things need you and today's spend, with what is ready for review below. |
+| Work Items in chat | `chatArtifactIntegrations` | Declared, not built yet. |
+
+Today's spend is what the Runs on Ploeg's Now settled, for those that finished today (local time), plus what running Runs observed at the gateway so far, in US dollars as the workbench reports them. It reads "at least" when Ploeg cut a list short or a Run reported no amount, it is not shown when Ploeg could not be read, and a demo shows none. The budget warning reads each session's own authorized budget: the extension does not read a Team's spend cap.
 
 ### Work in the Sessions list
 
