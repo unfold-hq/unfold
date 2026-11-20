@@ -1191,3 +1191,27 @@ test('Connections from an older Ploeg say so, and the demo is illustrative', asy
   assert.equal(demo.demo, true);
   assert(demo.repositories.some(entry => entry.readiness === 'not_ready'), 'the demo shows one problem to fix');
 });
+
+test('an operator request that fails without a readable answer logs its route, error and elapsed time, never the token or query', async t => {
+  const env = `UNFOLD_PLOEG_TEST_${randomBytes(8).toString('hex').toUpperCase()}`;
+  const bearer = randomBytes(24).toString('hex');
+  process.env[env] = bearer;
+  const server = createServer((req) => { req.socket.destroy(); });
+  server.listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  t.after(() => { server.close(); server.closeAllConnections(); delete process.env[env]; });
+  const address = server.address();
+  assert(address && typeof address !== 'string');
+  const lines: string[] = [];
+  t.mock.method(console, 'error', (line: unknown) => { lines.push(String(line)); });
+  const client = new PloegClient({ ...configuration('/tmp/unfold-unreachable', 'live'), ploeg: { url: `http://127.0.0.1:${address.port}`, tokenEnv: env } });
+  await assert.rejects(client.operatorCall(admin, 'connection-flows?secret=query', { method: 'POST', body: { token: 'pk_1_SECRET' } }), (error: unknown) => error instanceof PloegError && error.code === 'ploeg_unavailable');
+  const logged = lines.map(line => JSON.parse(line) as Record<string, unknown>).find(entry => entry.event === 'ploeg.unreachable');
+  assert(logged, 'the cause was logged');
+  assert.equal(logged.method, 'POST');
+  assert.equal(logged.route, 'connection-flows');
+  assert.equal(logged.error, 'TypeError');
+  assert.equal(logged.cause, 'UND_ERR_SOCKET');
+  assert.equal(typeof logged.elapsedMs, 'number');
+  assert(!lines.join('\n').includes(bearer) && !lines.join('\n').includes('pk_1_SECRET') && !lines.join('\n').includes('secret=query'));
+});

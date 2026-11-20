@@ -168,6 +168,10 @@ service_name:unfold event_name:"unfold.error"
 
 Add `| stats by (attributes.unfold.fingerprint) count()` to group them.
 
+### Why Unfold says Ploeg could not be reached
+
+When an operator request to Ploeg ends without an answer Unfold can read, the person reads `ploeg_unavailable` and Unfold logs one `ploeg.unreachable` line: the `method`, the `route` without its query, the `error` name, the network `cause` code when there is one (such as `UND_ERR_SOCKET` or `ECONNREFUSED`) and `elapsedMs`. A `TimeoutError` near 5000 ms means Ploeg did not answer within the read timeout; one near 45000 ms means a slow change, such as checking a pasted token with the tracker, ran out of time. The line never carries the credential, the request body or the error's message.
+
 ### Why an Ask has no answer
 
 Each failed or refused Ask stores a `failureCode`, says why in plain words on the Work Item page, in the VS Code chat and through `unfold_ask`, and offers **Ask again** when another try may help. Every failure is logged as `ask.failed` or `ask.refused`.

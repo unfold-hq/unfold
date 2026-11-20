@@ -295,6 +295,13 @@ const closedStates: PloegState[] = ['done', 'withdrawn'];
 const spanningFilters: Record<'open' | 'closed' | 'all', PloegState[]> = { open: states.filter(state => !closedStates.includes(state)), closed: closedStates, all: states };
 const newestFirstFilters = new Set<PloegItemFilter>(['open', 'closed']);
 const invalid = () => new PloegError(502, 'ploeg_response', 'Ploeg returned an unsupported operator response.');
+const errorCode = (value: unknown): string | undefined => { const code = (value as { code?: unknown } | null | undefined)?.code; return typeof code === 'string' && /^[A-Za-z0-9_]{1,64}$/.test(code) ? code : undefined; };
+/** Logs why an operator request failed without an answer Unfold could read: the route, never its query or the error's message, which may carry response data. */
+function logUnreachable(path: string, method: string, error: unknown, elapsedMs: number): void {
+  const name = error instanceof Error && /^[A-Za-z]{1,64}$/.test(error.name) ? error.name : 'unknown';
+  const cause = errorCode(error instanceof Error ? error.cause : undefined) ?? errorCode(error);
+  console.error(JSON.stringify({ level: 'warn', event: 'ploeg.unreachable', method, route: path.split('?')[0].slice(0, 200), error: name, ...(cause ? { cause } : {}), elapsedMs }));
+}
 const forgeLogin = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const identifier = (value: unknown): string => { if (typeof value !== 'string' || !/^[1-9][0-9]{0,19}$/.test(value)) throw invalid(); return value; };
 function record(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalid(); return value as Record<string, unknown>; }
@@ -1321,6 +1328,7 @@ export class PloegClient {
     const post = options.actor !== undefined;
     const cached = this.cache.get(path);
     if (!post && !fresh && cached && cached.until > Date.now()) return structuredClone(cached.value);
+    const started = Date.now();
     try {
       const headers: Record<string, string> = { accept: 'application/json', authorization: `Bearer ${token}`, ...(post ? { 'X-Ploeg-Actor': options.actor!, 'X-Ploeg-Acting-User': options.actingUser ?? options.actor!, ...ploegAttribution() } : {}), ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(options.raw !== undefined ? { 'content-type': 'application/octet-stream' } : {}) };
       const send = (extra: Record<string, string>) => fetch(`${this.config!.url}/api/v1/operator/${path}`, { method: options.method ?? (post ? 'POST' : 'GET'), headers: { ...headers, ...extra }, ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}), ...(options.raw !== undefined ? { body: new Uint8Array(options.raw) } : {}), signal: AbortSignal.timeout(options.raw !== undefined ? 60_000 : options.comment || options.slow ? 45_000 : 5000), redirect: 'manual' });
@@ -1350,7 +1358,11 @@ export class PloegClient {
       if (this.cache.size >= 200) this.cache.delete(this.cache.keys().next().value!);
       if (!post && token === this.cachedToken) this.cache.set(path, { until: Date.now() + 5000, value: data });
       return structuredClone(data);
-    } catch (error) { if (error instanceof PloegError) throw error; throw new PloegError(503, 'ploeg_unavailable', 'Ploeg could not be reached or returned incomplete data. Refresh to try again.'); }
+    } catch (error) {
+      if (error instanceof PloegError) throw error;
+      logUnreachable(path, options.method ?? (post ? 'POST' : 'GET'), error, Date.now() - started);
+      throw new PloegError(503, 'ploeg_unavailable', 'Ploeg could not be reached or returned incomplete data. Refresh to try again.');
+    }
   }
   private async provenSend(person: string, send: (headers: Record<string, string>) => Promise<Response>): Promise<Response> {
     const response = this.proof ? await this.proof.sendProven(person, send) : null;
