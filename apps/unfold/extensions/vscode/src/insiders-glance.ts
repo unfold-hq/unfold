@@ -45,8 +45,14 @@ export class InsidersGlance implements vscode.Disposable {
   private notice?: vscode.ChatInputNotification;
   private noticeShown = '';
   private chatItem?: vscode.ChatStatusItem;
+  private readonly core: Core;
+  private readonly proposals: ProposalGuard;
+  private readonly view: vscode.TreeView<NowEntry>;
 
-  constructor(private readonly core: Core, private readonly proposals: ProposalGuard, private readonly view: vscode.TreeView<NowEntry>, status: vscode.StatusBarItem, hover: HoverReader) {
+  constructor(core: Core, proposals: ProposalGuard, view: vscode.TreeView<NowEntry>, status: vscode.StatusBarItem, hover: HoverReader) {
+    this.core = core;
+    this.proposals = proposals;
+    this.view = view;
     this.proposals.use('statusBarItemTooltip', () => { status.tooltip2 = async () => { const text = await hover(); return text === undefined ? status.tooltip : new vscode.MarkdownString(text); }; });
   }
 
