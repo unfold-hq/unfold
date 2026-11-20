@@ -9,6 +9,10 @@
   min-width: 0;
 }
 
+.now-push-offer {
+  margin-block-end: var(--space-4);
+}
+
 .now-columns {
   display: grid;
   gap: var(--space-4);
