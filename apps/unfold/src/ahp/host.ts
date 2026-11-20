@@ -143,6 +143,8 @@ function parseSideChat(uri: string): { publicId: string; chatId: string } | unde
   const owner = side ? parseChannel(side.session) : undefined;
   return side && owner?.kind === 'session' && isWorkItemSession(owner.id) ? { publicId: owner.id, chatId: side.chatId } : undefined;
 }
+type FoundSideChat = { chat: SideChat; entry: WorkItemRecord };
+const sideChatUnread = 'Unfold could not read this Work Item from Ploeg. Try again in a minute.';
 const channelKey = (uri: string) => { if (isAutomationsChannel(uri)) return automationsChannel; const parsed = parseChannel(uri); const side = parsed ? undefined : parseSideChat(uri); const annotations = parsed || side ? undefined : parseAnnotationsChannel(uri); return parsed ? `${parsed.kind}:${parsed.id}${parsed.run ? `:${parsed.run}` : ''}` : side ? `side:${side.publicId}:${side.chatId}` : annotations ? `annotations:${annotations.id}` : uri; };
 
 /** Keeps the dollar signs of every Markdown part a client receives literal, so VS Code's chat typesets no maths. */
@@ -1581,7 +1583,7 @@ export class AgentHost {
     const terminal = parseTerminalChannel(channel);
     if (terminal && isWorkItemSession(terminal.sessionId)) { const snapshot = await this.podLogsSnapshot(client, channel, terminal); client.subscriptions.add(channel); return snapshot; }
     const side = parseSideChat(channel);
-    if (side) { const state = this.sideChatState(client, side); client.subscriptions.add(channel); return { resource: channel, state, fromSeq: this.serverSeq }; }
+    if (side) { const state = await this.sideChatState(client, side); client.subscriptions.add(channel); return { resource: channel, state, fromSeq: this.serverSeq }; }
     const parsed = parseChannel(channel);
     if (parsed && isWorkItemSession(parsed.id)) { const snapshot = await this.workItemSnapshot(client, channel, parsed); client.subscriptions.add(channel); return snapshot; }
     if (parsed && this.chats.has(parsed.id)) {
@@ -1974,15 +1976,24 @@ export class AgentHost {
     return side.length ? { ...state, chats: [...state.chats, ...side] } : state;
   }
 
-  private sideChatOf(user: User, side: { publicId: string; chatId: string }): { chat: SideChat; entry: WorkItemRecord } | undefined {
-    const entry = this.workItems.remembered(user, side.publicId);
+  /**
+   * A person's side chat with the Work Item it asks about, under the Work Item's own authorization. A Work Item the host
+   * has not listed to them since it started is read from Ploeg as them, so a side chat kept across a restart opens before
+   * the session list; a Work Item Ploeg or the team map hides from them hides the side chat too.
+   */
+  private async sideChatOf(user: User, side: { publicId: string; chatId: string }): Promise<FoundSideChat | undefined> {
+    if (!this.sideChats.list(user.id, side.publicId).some(chat => chat.chatId === side.chatId)) return undefined;
+    const workItemId = workItemIdOf(side.publicId);
+    const entry = this.workItems.remembered(user, side.publicId) ?? (workItemId ? (await this.workItems.session(user, workItemId))?.entry : undefined);
     if (!entry || !this.workItems.allows(user, entry.item.team)) return undefined;
     const chat = this.sideChats.find(user.id, side.publicId, side.chatId);
     return chat ? { chat, entry } : undefined;
   }
 
-  private sideChatState(client: Client, side: { publicId: string; chatId: string }): Json {
-    const found = this.sideChatOf(client.user, side);
+  private async sideChatState(client: Client, side: { publicId: string; chatId: string }): Promise<Json> {
+    let found: FoundSideChat | undefined;
+    try { found = await this.sideChatOf(client.user, side); }
+    catch (error) { throw new RpcError(codes.internal, error instanceof Error && 'status' in error ? publicError(error, true).message : sideChatUnread); }
     if (!found) throw new RpcError(codes.sessionNotFound, 'Unfold has no such chat, or it is not yours. Reopen the Work Item from the Unfold view.');
     return this.sideChats.state(found.chat, sessionChannel(side.publicId, client.scheme));
   }
@@ -2021,7 +2032,8 @@ export class AgentHost {
    * Every question goes to the Ask path; none reaches the Work Item's own chat, its Team or Ploeg's commands.
    */
   private async dispatchToSideChat(client: Client, channel: string, side: { publicId: string; chatId: string }, action: Json, origin: Origin): Promise<string | undefined> {
-    const found = this.sideChatOf(client.user, side);
+    let found: FoundSideChat | undefined;
+    try { found = await this.sideChatOf(client.user, side); } catch { return sideChatUnread; }
     if (!found) return 'Chat not found';
     const { chat, entry } = found;
     const own = (viewer: Client) => viewer.user.id === client.user.id;

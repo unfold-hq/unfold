@@ -189,7 +189,7 @@ export class WorkItemSideChats {
     const turnId = turn.turnId;
     if (!this.asks.service) return this.finish(chat, turn, outlet, { reply: sideChatText.notSetUp(page) });
     try {
-      const answered = await this.asks.askAbout(user, chat.workItemId, turn.text, { recordOnly: true });
+      const answered = await this.asks.askAbout(user, chat.workItemId, turn.text, { recordOnly: true, ...selectionOf(chat) });
       return this.finish(chat, turn, outlet, { ask: this.entry(answered.ask.id, turn, answered.allowance) });
     } catch (error) {
       if ((error as { code?: unknown })?.code !== 'ask_needs_model') return this.finish(chat, turn, outlet, { reply: sideChatText.notAsked(reasonOf(error)) });
@@ -218,7 +218,7 @@ export class WorkItemSideChats {
     if (!agreed) return this.finish(chat, turn, outlet, { reply: sideChatText.declined(page) });
     this.asking.add(turn.turnId);
     try {
-      const answered = await this.asks.askAbout(user, chat.workItemId, turn.text, { model: true });
+      const answered = await this.asks.askAbout(user, chat.workItemId, turn.text, { model: true, ...selectionOf(chat) });
       this.finish(chat, turn, outlet, { ask: this.entry(answered.ask.id, turn, answered.allowance) });
     } catch (error) {
       this.finish(chat, turn, outlet, { reply: sideChatText.notAsked(reasonOf(error)) });
@@ -232,4 +232,5 @@ export class WorkItemSideChats {
   }
 }
 
+const selectionOf = (chat: SideChat) => chat.origin.selection ? { selection: chat.origin.selection.text } : {};
 const reasonOf = (error: unknown) => error instanceof Error && error.message ? error.message : 'the Ask service did not answer';

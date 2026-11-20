@@ -13,8 +13,8 @@ export interface ChatAskService {
   about(user: User, workItemId: string): Promise<{ asks: Ask[]; allowance: PloegAskAllowance | null }>;
 }
 
-/** How the Ask service may answer: `recordOnly` from the record alone, refused with `ask_needs_model` when only a model could; `model` with a model call. */
-export type ChatAskRequest = { model?: boolean; recordOnly?: boolean };
+/** How the Ask service may answer: `recordOnly` from the record alone, refused with `ask_needs_model` when only a model could; `model` with a model call. `selection` is what the person had selected, passed as context of the question. */
+export type ChatAskRequest = { model?: boolean; recordOnly?: boolean; selection?: string };
 
 /** The two chat commands: `/ask` answers a question without reaching the team, `/steer` sends the message towards the team. */
 export type ChatIntent = 'ask' | 'steer';
@@ -71,7 +71,7 @@ export const resetDay = (iso: string) => { const at = new Date(iso); return Numb
 
 function spendLine(ask: Ask, entry: ChatAskEntry): string {
   const source = ask.source ?? (ask.demo ? 'record' : 'model');
-  if (ask.status === 'answered' && source === 'record') return ask.demo ? 'Demo · answered from the record · no model call, nothing spent' : 'Answered from the record · no model call';
+  if (ask.status === 'answered' && source === 'record') return ask.demo ? 'Demo · answered from the record · no model call, nothing spent' : 'Answered from the Work Item\'s record · no model call, nothing spent';
   if (ask.demo) return 'Demo · no model call, nothing spent';
   if (ask.status === 'refused') return !ask.failureCode || ask.failureCode === 'allowance_used_up' ? 'Nothing was charged. An administrator can raise the allowance.' : 'Nothing was charged.';
   if (ask.status !== 'answered' && ask.costStatus === 'settled' && ask.costUsd === 0) return 'Nothing was charged.';
