@@ -70,6 +70,7 @@ test('only the Insiders manifest contributes the Sessions list and its setting, 
   assert.equal(manifest.contributes.configuration.properties[`unfold.${sessionsListSetting}`], undefined);
   assert.deepEqual(insiders.contributes.chatSessions, [chatSessionsContribution]);
   assert.equal(chatSessionsContribution.type, workSessionType);
+  assert.equal(chatSessionsContribution.canDelegate, true, 'VS Code registers the chat participant of a session type only when its contribution can delegate');
   const setting = insiders.contributes.configuration.properties[`unfold.${sessionsListSetting}`];
   assert.deepEqual(setting.enum, ['take-on', 'all']);
   assert.equal(setting.default, 'take-on');

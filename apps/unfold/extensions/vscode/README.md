@@ -324,6 +324,8 @@ In both builds the suite checks that:
 
 In Stable the regular build declares no API proposal and has no `unfold.insiders.sendFeedback` command. In Insiders every declared proposal stays on and each was called without a refusal: the Sessions list, the chat artifact integration, the notice above the chat input, the tree view message and Markdown labels, the status bar hover, the chat status item and the remote agent host. The suite reads that from the extension's `exports`, whose `proposals()` returns `ProposalGuard`'s states and the proposals it used; it changes nothing.
 
+After each VS Code exits, the runner reads that VS Code's own logs and fails when VS Code refused a chat participant the extension registered (`Unknown agent: "unfold-…"`). VS Code reports that only in its renderer log, never to the extension, so no test inside VS Code sees it.
+
 It does not cover:
 
 - a model answering in chat, which needs a Copilot sign-in;
