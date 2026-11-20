@@ -73,3 +73,12 @@ test('the notice key changes only when the set of parts that are off changes', (
   assert.equal(offNoticeKey(a), offNoticeKey(b));
   assert.notEqual(offNoticeKey(a), offNoticeKey(c));
 });
+
+test('used names only the proposals whose calls VS Code accepted and that are still on', () => {
+  const guard = new ProposalGuard(all, all);
+  assert.deepEqual(guard.used(), []);
+  guard.use('chatStatusItem', () => 'item');
+  guard.use('remoteAgentHost', refused);
+  assert.deepEqual(guard.used(), ['chatStatusItem']);
+  assert.deepEqual(new ProposalGuard({}, {}).used(), []);
+});

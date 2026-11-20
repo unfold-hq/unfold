@@ -1,0 +1,11 @@
+{
+  "name": "unfold-integration-host",
+  "displayName": "Unfold integration suite host",
+  "description": "Carries the integration suite into VS Code; the extension under test is the installed VSIX.",
+  "version": "0.0.0",
+  "publisher": "unfold-hq",
+  "private": true,
+  "engines": {
+    "vscode": "^1.99.0"
+  }
+}

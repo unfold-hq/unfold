@@ -12,3 +12,4 @@ dist/**/*.map
 scripts/**
 dist-insiders/**
 proposed/**
+.vscode-test/**

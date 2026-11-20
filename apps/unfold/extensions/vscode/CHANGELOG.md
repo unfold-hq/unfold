@@ -13,6 +13,7 @@
 - In the Agents window, the Command Palette leaves out the commands that need a view, the status bar or a checkout: **Refresh**, **Refresh Tasks**, **Refresh Work**, **Open Agents Window**, **Send Selection to Remote Session…**, **Send Current File to Remote Session…** and **Follow Hand-offs in a Claude Code Terminal**, read from VS Code's `isSessionsWindow` context key. Every editor window still offers them. The README opens with what the extension does in each window.
 - Against the demo workbench, the chat tools, Work Item links in chat and the Sessions list of Unfold Insiders no longer say "Unfold is not signed in on this editor": the demo identifies its demonstration user without a stored credential, so the extension now counts a demo workbench that answered as signed in.
 - Changing `unfold.serverUrl` while a refresh of the previous workbench was still running left the extension offline until one of its views was opened, because the refresh for the new workbench was dropped. It now runs once the previous one ends.
+- `activate` returns a read-only API, `proposals()`, with `ProposalGuard`'s state of each proposal and the proposals that were called without a refusal. The integration suite reads it; it changes nothing.
 
 ## 0.4.0-rc.151
 

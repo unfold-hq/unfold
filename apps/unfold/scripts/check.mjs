@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const syncedCoreDirectory = resolve(root, 'extensions/vscode/media/core');
 const failures = [];
 const files = [];
-const excluded = new Set(['.git', 'node_modules', '.unfold', 'dist', 'coverage', 'test-results', 'playwright-report']);
+const excluded = new Set(['.git', 'node_modules', '.unfold', 'dist', 'coverage', 'test-results', 'playwright-report', '.vscode-test']);
 
 function walk(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
