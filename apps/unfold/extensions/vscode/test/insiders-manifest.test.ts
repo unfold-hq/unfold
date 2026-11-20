@@ -5,8 +5,9 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { feedbackCommand, insidersManifest, insidersProposals, stageInsiders, stagedFiles } from '../scripts/insiders.mjs';
+import { chatSessionsContribution, feedbackCommand, insidersManifest, insidersProposals, stageInsiders, stagedFiles } from '../scripts/insiders.mjs';
 import { insidersExtensionId, insidersProposals as guardedProposals } from '../src/proposals.ts';
+import { sessionsListSetting, workSessionType } from '../src/work-sessions.ts';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -17,7 +18,7 @@ test('the Insiders manifest is the same extension under its own identifier and n
   assert.equal(`${insiders.publisher}.${insiders.name}`, insidersExtensionId);
   assert.equal(insiders.displayName, 'Unfold Insiders — Remote Agent Workbench');
   for (const key of ['version', 'main', 'engines', 'activationEvents', 'capabilities', 'extensionKind', 'icon', 'repository', 'license']) assert.deepEqual(insiders[key], manifest[key], `${key} is unchanged`);
-  for (const key of Object.keys(manifest.contributes)) if (key !== 'commands') assert.deepEqual(insiders.contributes[key], manifest.contributes[key], `contributes.${key} is unchanged`);
+  for (const key of Object.keys(manifest.contributes)) if (key !== 'commands' && key !== 'configuration') assert.deepEqual(insiders.contributes[key], manifest.contributes[key], `contributes.${key} is unchanged`);
 });
 
 test('it lists exactly the round 1 proposals of the design, which the guard knows by the same names', () => {
@@ -55,4 +56,17 @@ test('staging writes the generated manifest next to the files the VSIX needs', a
   const staged = JSON.parse(await readFile(join(out, 'package.json'), 'utf8'));
   assert.equal(staged.name, 'unfold-workbench-insiders');
   for (const file of stagedFiles) assert.ok(existsSync(join(out, file)), `${file} is staged`);
+});
+
+test('only the Insiders manifest contributes the Sessions list and its setting, under the type the extension registers', () => {
+  assert.equal(manifest.contributes.chatSessions, undefined);
+  assert.equal(manifest.contributes.configuration.properties[`unfold.${sessionsListSetting}`], undefined);
+  assert.deepEqual(insiders.contributes.chatSessions, [chatSessionsContribution]);
+  assert.equal(chatSessionsContribution.type, workSessionType);
+  const setting = insiders.contributes.configuration.properties[`unfold.${sessionsListSetting}`];
+  assert.deepEqual(setting.enum, ['take-on', 'all']);
+  assert.equal(setting.default, 'take-on');
+  const { [`unfold.${sessionsListSetting}`]: _added, ...rest } = insiders.contributes.configuration.properties;
+  assert.deepEqual(rest, manifest.contributes.configuration.properties);
+  assert.match(source, /this\.registerSessionsList\(context\);/);
 });
