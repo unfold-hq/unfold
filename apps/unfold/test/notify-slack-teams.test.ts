@@ -447,5 +447,5 @@ test('the Slack interactions route is public, outside the browser guard, and ref
   const good = await fetch(`${app.url}/api/notifications/channels/slack/interactions`, { method: 'POST', headers: signed(raw, at, 'api-test-signing-secret'), body: raw });
   assert.equal(good.status, 200);
   const admin = await login(app.url);
-  assert.equal((await request(app.url, '/api/me/notifications/channels/slack/link', { method: 'POST', cookie: admin.cookie, body: { email: 'a@b.example' } })).status, 404, 'off while notifications.push is off');
+  assert.equal((await request(app.url, '/api/me/notifications/channels/slack/link', { method: 'POST', cookie: admin.cookie, body: { email: 'a@b.example' } })).status, 404, 'off while notifications.slack is off');
 });

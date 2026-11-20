@@ -2,15 +2,15 @@
 type: how-to
 audience: [owner, operator]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Written with the implementation: src/notify/ (settings.ts, channels.ts, web-push.ts, slack.ts, teams.ts, service.ts, store.ts, triggers.ts, preferences.ts, handed-off.ts), public/sw.js and public/views/notifications.js. test/notify-web-push.test.ts reproduced the RFC 8291 section 5 message and verified the RFC 8292 section 2.4 token; test/notify-handed-off.test.ts covers notices about handed-off work and their dedupe; test/notifications.test.ts published to a local HTTP server standing in for ntfy; test/notify-slack-teams.test.ts drove local HTTP servers standing in for the Slack Web API and a Teams workflow. Slack and Teams request shapes were checked against docs.slack.dev and learn.microsoft.com on 2026-10-30. Not checked: a real ntfy server, delivery through a real browser push service, a real Slack workspace and a real Teams workflow."
+last_verified: 2026-11-20
+verified_by: "On 2026-11-20 the default, the phone offer and the links rewritten with the implementation on branch feat/phone-notifications-open-the-decision: src/flag-registry.json, src/notify/triggers.ts, src/notify/channels.ts, public/sw.js, public/core/push-offer.js and public/views/now.js; test/api-notifications.test.ts, test/notifications.test.ts, test/push-offer.test.mjs and test/service-worker.test.mjs passed. The offer was not opened on a real phone and no notice went through a real push service. Before that, written with the implementation: src/notify/ (settings.ts, channels.ts, web-push.ts, slack.ts, teams.ts, service.ts, store.ts, triggers.ts, preferences.ts, handed-off.ts), public/sw.js and public/views/notifications.js. test/notify-web-push.test.ts reproduced the RFC 8291 section 5 message and verified the RFC 8292 section 2.4 token; test/notify-handed-off.test.ts covers notices about handed-off work and their dedupe; test/notifications.test.ts published to a local HTTP server standing in for ntfy; test/notify-slack-teams.test.ts drove local HTTP servers standing in for the Slack Web API and a Teams workflow. Slack and Teams request shapes were checked against docs.slack.dev and learn.microsoft.com on 2026-10-30. Not checked: a real ntfy server, delivery through a real browser push service, a real Slack workspace and a real Teams workflow."
 ---
 
 # Get notified (ntfy, Web Push, Slack and Microsoft Teams)
 
 Unfold can tell people when something waits for them, while Unfold is closed. It sends from the server over two open channels you can host yourself, [ntfy](https://docs.ntfy.sh/) and Web Push ([RFC 8030](https://www.rfc-editor.org/rfc/rfc8030), encrypted with [RFC 8291](https://www.rfc-editor.org/rfc/rfc8291) and signed with [VAPID, RFC 8292](https://www.rfc-editor.org/rfc/rfc8292)), and over the two chat tools agencies and their clients already use: [Slack](#slack) and [Microsoft Teams](#microsoft-teams). This builds the notifier of [system ADR-0026](../../../../docs/adr/adr-0026-unfold-is-an-installable-web-app-that-notifies-from-the-server.md), which is still proposed.
 
-It is off twice over: the `notifications.push` [feature flag](feature-flags.md) is off for everyone, and a person whose flag is on still gets nothing until they choose a channel under **Settings › Notifications**. With a channel chosen, notices about work they handed off are on until they turn them off; every other moment is off until they choose it. Slack and Teams each have one more flag, `notifications.slack` and `notifications.teams`, also off for everyone.
+The `notifications.push` [feature flag](feature-flags.md) is on for everyone by default, so every person can choose how to be told, but nobody gets anything until they choose a channel under **Settings › Notifications** or accept the offer on their phone ([below](#the-offer-on-a-phone)). An administrator can still turn the flag off for some or all people. With a channel chosen, notices about work they handed off are on until they turn them off; every other moment is off until they choose it. Slack and Teams each have one more flag, `notifications.slack` and `notifications.teams`, also off for everyone.
 
 ## What tells a person
 
@@ -25,7 +25,7 @@ It is off twice over: the `notifications.push` [feature flag](feature-flags.md) 
 
 "Readers" means people whose Teams include the Work Item's Team and, while `tenancy.enforce` is on, whose Tenant or Client membership reaches it (system ADR-0017).
 
-A notice carries a fixed headline, the Work Item's number and its title with secrets masked, and a link into Unfold when `baseUrl` is set. For work a tracker holds it also names the task as its tracker shows it, such as `ClickUp #86c0abc12`, and carries the task's link: a second Slack button and Teams action (**Open in ClickUp**, named after the tracker), and an ntfy view action. A Web Push notice names the task in its body and opens Unfold. It never carries a price, a spend figure, a Ploeg reason, a note, a question's text or a tool's arguments. A budget notice names the share, not the amount.
+A notice carries a fixed headline, the Work Item's number and its title with secrets masked, and a link into Unfold when `baseUrl` is set ([where a notice opens](#where-a-notice-opens)). For work a tracker holds it also names the task as its tracker shows it, such as `ClickUp #86c0abc12`, and carries the task's link: a second Slack button and Teams action (**Open in ClickUp**, named after the tracker), and an ntfy view action. A Web Push notice names the task in its body and opens the decision in Unfold. It never carries a price, a spend figure, a Ploeg reason, a note, a question's text or a tool's arguments. A budget notice names the share, not the amount.
 
 ## Work a person handed off
 
@@ -91,7 +91,7 @@ extraEnv:
 
 Unfold masks the ntfy token and the VAPID private key wherever it masks its other configured secrets.
 
-Then turn the flag on for the people who may use it, for example `{"flags": {"notifications.push": {"targeting": {"if": [{"in": [{"var": "role"}, ["admin", "operator"]]}, "on", "off"]}}}}`.
+The flag is on for everyone by default. To keep notifications to some people, target it, for example `{"flags": {"notifications.push": {"targeting": {"if": [{"in": [{"var": "role"}, ["admin", "operator"]]}, "on", "off"]}}}}`, or set its `defaultVariant` to `off` to turn it off for everyone.
 
 ## Self-host ntfy
 
@@ -115,6 +115,28 @@ upstream-base-url: "https://ntfy.sh"
 ## Web Push in the browser
 
 **Subscribe this browser** registers `/sw.js`, asks the browser's permission and sends the subscription to Unfold. The browser's push service (Google, Mozilla or Apple) carries the message; it sees only ciphertext. On iPhone and iPad, Safari delivers Web Push only to Unfold added to the Home Screen. `sw.js` shows the notice and opens its link in Unfold on a click; it caches nothing.
+
+### The offer on a phone
+
+On a screen narrower than 720 px, the phone layout, Now offers notifications once, as a card at the top of the page and never as a browser prompt or dialog: "Get told on this phone when something waits for you", for work that needs you or asks you a question and for a pull request ready for your review ([`push-offer.js`](../../public/core/push-offer.js)). It shows only while the flag is on for the person, outside the demo, while they have chosen no channel, while the server has a channel configured and while the browser has not refused notifications.
+
+* **Turn on** asks the browser's permission, which the browser shows only after that tap, subscribes this browser and adds Web Push and the moments **A Work Item needs you**, **A question or tool permission waits for you** and **A pull request is ready for review** to the person's choices, keeping what they chose before.
+* Where this browser cannot subscribe (Safari outside the Home Screen, or Web Push not configured but ntfy is), the button reads **Choose how** and opens **Settings › Notifications**.
+* **Not now** removes the card and sends nothing.
+
+Either answer is remembered in this browser (the `pushOffer` preference), so the card does not come back there.
+
+### Where a notice opens
+
+A notice opens the page that holds its decision, the deepest route the workbench has for it:
+
+| Notice | Opens |
+| --- | --- |
+| A Work Item needs you, a question waits, a pull request is ready for review, a budget threshold, a Client Sign-off, and the hand-off notices | `#work/<id>`, the Work Item page, whose decision box holds the question with **Answer**, why it needs you with its budget meter, or the **Before you merge** checklist |
+| A tool permission waits for you | `#linked-session/<id>`, the session page that lists the prompt with **Approve** and **Deny** |
+| The test notice | `#settings/notifications` |
+
+ntfy, Slack and Teams carry the absolute link, so they need `baseUrl`. A Web Push notice carries the route itself, `/#work/<id>`, which the service worker opens on the origin the browser subscribed from, so it lands on the decision without `baseUrl` and behind another host name too. A click moves an open Unfold window there; when the browser does not let the worker move that window, it opens a new one. Unfold sends no notice when a Work Item is proposed, so no notice opens the **Approve** of a proposal yet.
 
 ## Personal data
 

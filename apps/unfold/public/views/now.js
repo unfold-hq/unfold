@@ -19,12 +19,59 @@ import { linkedWaitingCard } from '../core/linked-waiting.js';
 import { handedOffCard } from '../core/handed-off.js';
 import { permissionsChangedEvent } from '../core/linked-permissions.js';
 import { taskStandings } from '../handoff.js';
+import { acceptedPreferences, phoneSized, pushOffer, pushOfferMarkup } from '../core/push-offer.js';
+import { pushSupported, subscribeBrowser } from './notifications.js';
 import { handedMarkup, handedNotice, labelledTeam, pendingHandoffs, retryMarkup, retryNotice, roomOf, sheetMarkup, startCard, startQueue, suggestedTeam, taskKey } from '../start.js';
 
 const baselineKey = 'unfold.nowSince';
 const view = Object.assign(state.now, { summary: { data: null, error: null }, summaryRequest: 0, shown: null, since: undefined, caughtUp: false, hiddenAt: null, refreshing: false, keepFocus: false, linked: null, handed: null, snoozeOpen: null, showSnoozed: false, showOlder: false });
 
 onForget(() => Object.assign(view, { handed: null, snoozeOpen: null, showSnoozed: false, showOlder: false }));
+
+const offer = { data: null, busy: false };
+onForget(() => Object.assign(offer, { data: null, busy: false }));
+const notificationsPath = '/api/me/notifications';
+
+function offerKind() {
+  return pushOffer({ phone: phoneSized(), answered: prefs.get('pushOffer') !== null, data: offer.data, pushReady: pushSupported(), permission: globalThis.Notification?.permission });
+}
+
+async function loadOffer() {
+  if (!phoneSized() || prefs.get('pushOffer') !== null || offer.data) return;
+  try { offer.data = await api(notificationsPath); } catch { offer.data = null; return; }
+  if (state.view === 'now' && offerKind()) renderNow();
+}
+
+function answerOffer(answer, message) {
+  prefs.set('pushOffer', answer);
+  if (state.view === 'now') renderNow();
+  if (message) announce(message);
+}
+
+async function acceptOffer() {
+  const push = offer.data?.channels?.find(channel => channel.id === 'web-push');
+  if (offer.busy || !push?.publicKey) return;
+  offer.busy = true;
+  renderNow();
+  try {
+    const subscribed = await subscribeBrowser(push.publicKey);
+    if (!subscribed) { answerOffer('declined'); notify('Your phone did not allow notifications. You can turn them on later under Settings › Notifications.', true); return; }
+    offer.data = await api(notificationsPath, { method: 'PUT', body: JSON.stringify(acceptedPreferences(subscribed.preferences)) });
+    answerOffer('accepted');
+    notify('This phone now tells you when work needs you and when a pull request is ready for review.');
+  } catch (error) { notify(error.message, true); }
+  finally { offer.busy = false; if (state.view === 'now') renderNow(); }
+}
+
+function declineOffer() {
+  answerOffer('declined', 'Not now. Nothing is sent; you can turn notifications on under Settings › Notifications.');
+  document.getElementById('page-title')?.focus();
+}
+
+function chooseHow() {
+  prefs.set('pushOffer', 'accepted');
+  location.hash = '#settings/notifications';
+}
 
 function readBaseline() {
   try { const saved = JSON.parse(globalThis.sessionStorage?.getItem(baselineKey) ?? 'null'); return saved && typeof saved === 'object' && 'since' in saved ? saved.since : undefined; } catch { return undefined; }
@@ -161,7 +208,7 @@ function renderNow() {
     : nowMarkup(view, { yours: yoursCard(), grafanaUrl: state.bootstrap?.observability?.grafanaUrl, singleKeys: singleKeysEnabled(), handOver, canCancel: canCancel(), sessions: state.sessions, ...snoozeOptions() });
   const subtitle = fleet ? 'Every Team you can read, from the gate to landed.' : loop ? 'Decide, unstick, then start: in that order.' : 'What waits on you, what runs and what finished, across your Teams.';
   const keep = focusedTarget();
-  renderHtml(shell(content, { title: 'Now', subtitle, actions: `${modeSwitch(fleet)}${refreshButton()}` }));
+  renderHtml(shell(`${pushOfferMarkup(offerKind(), { busy: offer.busy })}${content}`, { title: 'Now', subtitle, actions: `${modeSwitch(fleet)}${refreshButton()}` }));
   restoreFocus(keep);
 }
 
@@ -616,7 +663,7 @@ live.register('now', { interval: 30000, refresh: () => loadNow('live') });
 export default {
   id: 'now',
   match: hash => hash === 'now' ? {} : null,
-  load: () => { arrive(); loadStart(); return loadNow('open'); },
+  load: () => { arrive(); loadStart(); void loadOffer(); return loadNow('open'); },
   render: renderNow,
   actions: {
     'now-retry': manualLoad,
@@ -625,6 +672,9 @@ export default {
     'now-caught-up': caughtUp,
     'now-digest-jump': jumpToDigest,
     'now-mode': switchMode,
+    'now-push-accept': acceptOffer,
+    'now-push-dismiss': declineOffer,
+    'now-push-settings': chooseHow,
     'start-open': openSheet,
     'start-reload': () => loadStart(),
     'start-sheet-retry': () => { if (start.sheet) { start.sheet.status = null; renderSheet(); loadSheet(); } },

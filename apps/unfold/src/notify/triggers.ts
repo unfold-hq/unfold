@@ -25,10 +25,12 @@ export function isTrigger(value: unknown): value is TriggerId { return typeof va
 export type NoticeSubject = { kind: 'permission'; sessionId: string; requestId: string };
 /**
  * What a channel sends: a headline, one line of body, where a click goes, a tag that collapses repeats of the same
- * notice, and optionally what it is about, for a channel that offers an action on it. `about` is `handed_off` when
- * the notice goes to the person who handed the Work Item off, under their "work I handed off" choice instead of the trigger.
+ * notice, and optionally what it is about, for a channel that offers an action on it. `route` is the workbench hash
+ * route without its `#` that shows the decision the notice is about; `url` is that route under the configured base URL,
+ * or null without one. A notice queued before `route` existed has none. `about` is `handed_off` when the notice goes
+ * to the person who handed the Work Item off, under their "work I handed off" choice instead of the trigger.
  */
-export type NotificationMessage = { trigger: TriggerId | 'test'; title: string; body: string; url: string | null; tag: string; subject?: NoticeSubject; about?: 'handed_off'; task?: NoticeTask };
+export type NotificationMessage = { trigger: TriggerId | 'test'; title: string; body: string; url: string | null; route?: string; tag: string; subject?: NoticeSubject; about?: 'handed_off'; task?: NoticeTask };
 
 /** The tracker task a Work Item came from, as a notice carries it: how to name it (`ClickUp #86c0abc12`), the label of its link (`Open in ClickUp`) and its web address. */
 export type NoticeTask = { mention: string; label: string; url: string | null };
@@ -50,6 +52,21 @@ export function noticeTitle(title: string): string {
 }
 
 const link = (baseUrl: string | undefined, hash: string) => baseUrl ? `${baseUrl.replace(/\/+$/, '')}/#${hash}` : null;
+const routed = (baseUrl: string | undefined, route: string) => ({ url: link(baseUrl, route), route });
+
+/** The workbench route of a Work Item's page, whose decision box holds its question, its review checklist or why it needs a person. */
+export const workItemRoute = (id: string) => `work/${encodeURIComponent(id)}`;
+/** The workbench route of a Linked Session's page, which lists its tool prompts with Approve and Deny. */
+export const linkedSessionRoute = (sessionId: string) => `linked-session/${encodeURIComponent(sessionId)}`;
+
+/**
+ * The address a same-origin client such as the service worker opens for a notice: the route under the origin it runs
+ * on, so a click lands on the decision even without a configured base URL or behind another host name. A notice
+ * without a route keeps its absolute URL.
+ */
+export function sameOriginLink(message: Pick<NotificationMessage, 'url' | 'route'>): string | null {
+  return message.route ? `/#${message.route}` : message.url;
+}
 
 /**
  * The notice for a trigger about one Work Item: a fixed headline, the Work Item's number and title, a link to its page
@@ -61,7 +78,7 @@ export function workItemMessage(trigger: TriggerId, workItem: NoticeWorkItem, ba
   const name = noticeTitle(workItem.title);
   const task = noticeTask(workItem);
   const body = `${name ? `#${workItem.id} ${name}` : `Work Item #${workItem.id}`}${task ? ` · ${task.mention}` : ''}`;
-  return { trigger, title, body, url: link(baseUrl, `work/${encodeURIComponent(workItem.id)}`), tag: `${trigger}-${workItem.id}`, ...(task ? { task } : {}) };
+  return { trigger, title, body, ...routed(baseUrl, workItemRoute(workItem.id)), tag: `${trigger}-${workItem.id}`, ...(task ? { task } : {}) };
 }
 
 /** The tracker task of a Work Item a tracker holds, or undefined for work no tracker the registry knows holds. Only an http(s) address without credentials is kept. */
@@ -93,12 +110,12 @@ export function handedOffMessage(trigger: 'needs_you' | 'question' | 'review', w
 /** The notice for a tool-permission request in the person's own agent session. It never carries the tool or its arguments. */
 export function permissionMessage(sessionId: string, baseUrl?: string, requestId?: string): NotificationMessage {
   return {
-    trigger: 'question', title: 'A tool permission waits for you', body: 'Your agent session asks before it runs a tool.', url: link(baseUrl, `linked-session/${encodeURIComponent(sessionId)}`), tag: `permission-${sessionId}`,
+    trigger: 'question', title: 'A tool permission waits for you', body: 'Your agent session asks before it runs a tool.', ...routed(baseUrl, linkedSessionRoute(sessionId)), tag: `permission-${sessionId}`,
     ...(requestId ? { subject: { kind: 'permission' as const, sessionId, requestId } } : {}),
   };
 }
 
 /** The test notice a person sends themselves from the Notifications page. */
 export function testMessage(baseUrl?: string): NotificationMessage {
-  return { trigger: 'test', title: 'Unfold notifications work', body: 'This is the test notice you asked for.', url: link(baseUrl, 'settings/notifications'), tag: 'test' };
+  return { trigger: 'test', title: 'Unfold notifications work', body: 'This is the test notice you asked for.', ...routed(baseUrl, 'settings/notifications'), tag: 'test' };
 }

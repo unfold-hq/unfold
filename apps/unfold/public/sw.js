@@ -8,6 +8,14 @@ function noticeFrom(data) {
   return { title: text(value.title, 120, fallback.title), body: text(value.body, 200, fallback.body), url, tag: text(value.tag, 80, fallback.tag) };
 }
 
+async function openIn(client, url) {
+  if (!('navigate' in client)) return false;
+  try {
+    await client.focus();
+    return Boolean(await client.navigate(url));
+  } catch { return false; }
+}
+
 self.addEventListener('install', () => { self.skipWaiting(); });
 self.addEventListener('activate', event => { event.waitUntil(self.clients.claim()); });
 
@@ -24,7 +32,7 @@ self.addEventListener('notificationclick', event => {
   event.waitUntil((async () => {
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const same = open.find(client => new URL(client.url).origin === self.location.origin);
-    if (same) { await same.focus(); if ('navigate' in same) await same.navigate(url).catch(() => undefined); return; }
+    if (same && await openIn(same, url)) return;
     await self.clients.openWindow(url);
   })());
 });

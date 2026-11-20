@@ -5,7 +5,7 @@ import { request as httpsRequest } from 'node:https';
 import { BlockList, isIP } from 'node:net';
 import type { NotifyStore, Target } from './store.ts';
 import type { NtfySettings, WebPushSettings } from './settings.ts';
-import type { NotificationMessage } from './triggers.ts';
+import { sameOriginLink, type NotificationMessage } from './triggers.ts';
 import { encryptPayload, validPublicKey, vapidAuthorization, vapidSigningKey, fromBase64Url, type VapidKeys } from './web-push.ts';
 import { refuse } from './preferences.ts';
 
@@ -208,7 +208,7 @@ export class WebPushChannel implements NotificationChannel {
     const keys = this.keys();
     if (!keys || !this.settings) return { kind: 'failed', reason: 'not_configured' };
     const endpoint = String(target.address.endpoint);
-    const payload = encryptPayload(Buffer.from(JSON.stringify({ title: message.title, body: message.body, url: message.url, tag: message.tag })), { p256dh: String(target.address.p256dh), auth: String(target.address.auth) });
+    const payload = encryptPayload(Buffer.from(JSON.stringify({ title: message.title, body: message.body, url: sameOriginLink(message), tag: message.tag })), { p256dh: String(target.address.p256dh), auth: String(target.address.auth) });
     const headers = {
       authorization: vapidAuthorization(endpoint, this.settings.subject, keys, Math.floor(this.clock() / 1000)),
       'content-encoding': 'aes128gcm', 'content-type': 'application/octet-stream', ttl: '86400', urgency: message.trigger === 'sign_off' || message.trigger === 'test' ? 'normal' : 'high',

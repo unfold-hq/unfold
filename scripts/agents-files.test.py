@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import os
 import tempfile
 import unittest
@@ -46,6 +47,21 @@ class Fixture(unittest.TestCase):
     def failures(self, check=None, files=None):
         found = agents.check(self.root, self.files() if files is None else files)
         return [line for line in found if check is None or f'[{check}]' in line]
+
+
+class Hooks(Fixture):
+    def test_hooks_written_by_apm_pass(self):
+        group = {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': 'guard'}]}
+        self.write('.claude/settings.json', json.dumps({'permissions': {}, 'hooks': {'PreToolUse': [group]}}))
+        self.write('.claude/apm-hooks.json', json.dumps({'PreToolUse': [{**group, '_apm_source': '_local/unfold'}]}))
+        self.assertEqual(self.failures('hooks'), [])
+
+    def test_a_hand_written_hook_fails(self):
+        group = {'matcher': 'Bash', 'hooks': [{'type': 'command', 'command': 'guard'}]}
+        extra = {'matcher': 'Edit', 'hooks': [{'type': 'command', 'command': 'other'}]}
+        self.write('.codex/hooks.json', json.dumps({'hooks': {'PreToolUse': [group, extra]}}))
+        self.write('.codex/apm-hooks.json', json.dumps({'PreToolUse': [{**group, '_apm_source': '_local/unfold'}]}))
+        self.assertEqual(len(self.failures('hooks')), 1)
 
 
 class CleanTree(Fixture):

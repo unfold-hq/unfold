@@ -15,6 +15,7 @@ KNOWLEDGE = 'knowledge'
 CONCEPT_TYPES = {'Convention', 'Decision', 'Fact', 'Pitfall'}
 CONCEPT_FIELDS = ('type', 'title', 'description', 'resource', 'tags')
 FORGE_SOURCE = 'https://github.com/unfold-hq/unfold/blob/development/'
+APM_HOOK_FILES = {'.claude/settings.json': '.claude/apm-hooks.json', '.codex/hooks.json': '.codex/apm-hooks.json'}
 FENCE = re.compile(r'^[ \t]*(`{3,}|~{3,})[^\n]*\n.*?^[ \t]*\1[^\n]*$', re.M | re.S)
 CODE_SPAN = re.compile(r'(`+)(.+?)\1', re.S)
 INLINE_LINK = re.compile(r'!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)')
@@ -250,6 +251,31 @@ def check_duplication(root, agents):
     return failures
 
 
+def without_apm_source(events):
+    return {event: [{key: value for key, value in group.items() if key != '_apm_source'} for group in groups] for event, groups in events.items()}
+
+
+def json_file(path):
+    try:
+        return json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+
+
+def check_hooks(root, files):
+    failures = []
+    for deployed, sidecar in APM_HOOK_FILES.items():
+        if deployed not in files:
+            continue
+        settings = json_file(root / deployed)
+        written_by_apm = json_file(root / sidecar) if sidecar in files else {}
+        if not isinstance(settings, dict) or not isinstance(written_by_apm, dict):
+            failures.append(failure(deployed, 'hooks', f'{deployed} or {sidecar} is not a JSON object; run mise run agents-install.'))
+        elif settings.get('hooks', {}) != without_apm_source(written_by_apm):
+            failures.append(failure(deployed, 'hooks', f'holds a hook that APM did not write; put it in .apm/hooks/ and run mise run agents-install instead of editing {deployed}.'))
+    return failures
+
+
 def check(root, files):
     root = Path(root)
     files = set(files)
@@ -261,6 +287,7 @@ def check(root, files):
         *check_unicode(root, files),
         *check_duplication(root, agents),
         *check_knowledge(root, files),
+        *check_hooks(root, files),
     ]
 
 
@@ -279,7 +306,7 @@ def main():
         for line in failures:
             print(f'  {line}', file=sys.stderr)
         sys.exit(1)
-    print(f'Agent instruction files: {len(agents)} AGENTS.md file(s) and the knowledge bundle pass the Codex size limit, links, commands, unicode, duplication and knowledge checks')
+    print(f'Agent instruction files: {len(agents)} AGENTS.md file(s) and the knowledge bundle pass the Codex size limit, links, commands, unicode, duplication, hooks and knowledge checks')
 
 
 if __name__ == '__main__':
