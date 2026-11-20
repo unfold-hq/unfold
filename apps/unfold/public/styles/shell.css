@@ -1583,7 +1583,7 @@
     left: 0;
     z-index: var(--z-sticky);
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
     padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--shell-border);
@@ -1607,6 +1607,7 @@
     font-size: 12px;
     font-weight: 500;
     line-height: 16px;
+    text-align: center;
     text-decoration: none;
     cursor: pointer;
   }

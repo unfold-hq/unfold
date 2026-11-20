@@ -566,6 +566,49 @@ export async function carryOutAction(name: LmActionToolName, input: unknown, con
   catch (error) { return actionFailureOutcome(error, plan.id, context.actor!.origin); }
 }
 
+/** The channel a take-on from the Sessions list names in `X-Unfold-Client`, so its Action Record reads `<editor sign-in> (VS Code Sessions list)`. */
+export const takeOnChannel = 'VS Code Sessions list';
+
+/** The Work Item a new session's prompt names: `184`, `#184` or an Unfold link ending `#work/184`. */
+export function takeOnTarget(prompt: string | undefined): string | undefined {
+  return workItemRef((prompt ?? '').trim().replace(/^#(?=\d)/, ''));
+}
+
+/** The amount sentence of the take-on confirmation, in the browser's words: Ploeg does not report a Team's budget to Unfold yet. */
+export const budgetNotReported = 'Ploeg does not report that budget to Unfold yet, so Unfold cannot show the amount its Runs may spend.';
+
+/** What the person confirms before a take-on: the approval tool's own confirmation, which names the Work Item and its Team, and what it may spend. */
+export function takeOnMessage(approval: string): string {
+  return approval.startsWith(demoAction) ? approval : `${approval} ${budgetNotReported}`;
+}
+
+/** The person's yes or no to a confirmation; true only when they chose `accept`. */
+export type Confirm = (title: string, message: string, accept: string) => Promise<boolean>;
+
+export type TakeOnResult = { done: boolean; text: string; id?: string };
+
+export const takeOnAccept = 'Approve and queue';
+
+/**
+ * Takes on a proposed Work Item from VS Code's Sessions list through the approval of `unfold_approve_work`: it plans the approval, asks the person to
+ * confirm the Work Item, the Team and what it may spend, plans again and approves only when the plan is the one they
+ * confirmed, sending that text's hash and this channel so the Action Record names both. Never throws.
+ */
+export async function takeOn(id: string, context: ActionContext, confirm: Confirm): Promise<TakeOnResult> {
+  const input = { id };
+  const first = await planAction('unfold_approve_work', input, context);
+  if (first.kind === 'refusal') return { done: false, text: first.text };
+  const message = takeOnMessage(first.message);
+  if (!await confirm(first.title, message, takeOnAccept)) return { done: false, id: first.id, text: `Not taken on: Work Item ${first.id} stays proposed. Nothing was changed.` };
+  const again = await planAction('unfold_approve_work', input, context);
+  if (again.kind === 'refusal') return { done: false, id: first.id, text: again.text };
+  if (takeOnMessage(again.message) !== message) return { done: false, id: first.id, text: 'Not done: what approving would do changed since you confirmed, so nothing was changed. Take it on again to see what it would do now.' };
+  const nonce = (context.nonce ?? defaultNonce)();
+  const confirmation = `vscode-${nonce}:${createHash('sha256').update(message).digest('hex')}`;
+  try { return { done: true, id: again.id, text: again.done(await context.actor!.workItemAction(again.id, again.action, again.body, { client: takeOnChannel, confirmation })) }; }
+  catch (error) { return { done: false, id: again.id, text: actionFailure(error, again.id, context.actor!.origin) }; }
+}
+
 /** One sentence for an action Unfold did not carry out, in Unfold's own words when it refused. */
 export function actionFailure(error: unknown, id: string, origin: string): string {
   return actionFailureOutcome(error, id, origin).text;

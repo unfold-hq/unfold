@@ -16,6 +16,17 @@ export const insidersProposals = [
 ];
 export const insidersActivationEvents = ['onChatArtifactIntegration'];
 export const feedbackCommand = { command: 'unfold.insiders.sendFeedback', title: 'Send Feedback', category: 'Unfold Insiders', icon: '$(feedback)' };
+export const chatSessionsContribution = { type: 'unfold-work', name: 'unfold', displayName: 'Unfold', description: 'Proposed Work Items you may take on and, if you choose, the Work Items and sessions that need you, from your Unfold workbench. Unfold runs no model here.' };
+export const sessionsListSetting = {
+  'unfold.insiders.sessionsList': {
+    type: 'string',
+    enum: ['take-on', 'all'],
+    enumDescriptions: ['Only proposed Work Items you may take on.', 'Also the Work Items and sessions that need you or are ready for your review. The workbench\'s agent host may list these too, so they can appear twice.'],
+    default: 'take-on',
+    scope: 'application',
+    description: 'What Unfold Insiders lists in VS Code\'s Sessions list.',
+  },
+};
 export const stagedFiles = ['dist', 'media', 'README.md', 'CHANGELOG.md', 'LICENSE', '.vscodeignore'];
 
 const buildOnly = ['scripts', 'devDependencies', 'overrides', 'allowScripts'];
@@ -28,7 +39,13 @@ export function insidersManifest(manifest) {
   next.description = `${manifest.description} Insiders build with VS Code's proposed APIs; installed from a GitHub release VSIX only.`;
   next.enabledApiProposals = [...insidersProposals];
   next.activationEvents = [...(next.activationEvents ?? []), ...insidersActivationEvents.filter(event => !next.activationEvents?.includes(event))];
-  next.contributes = { ...next.contributes, commands: [...(next.contributes?.commands ?? []), feedbackCommand] };
+  const configuration = next.contributes?.configuration ?? {};
+  next.contributes = {
+    ...next.contributes,
+    commands: [...(next.contributes?.commands ?? []), feedbackCommand],
+    configuration: { ...configuration, properties: { ...configuration.properties, ...sessionsListSetting } },
+    chatSessions: [chatSessionsContribution],
+  };
   return next;
 }
 

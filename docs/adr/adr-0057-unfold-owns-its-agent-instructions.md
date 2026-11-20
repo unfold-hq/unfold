@@ -64,3 +64,4 @@ Chosen option: "Unfold owns its sources in `.apm/`, and the APM CLI pinned throu
 ## More Information
 
 * 2026-11-16 — Decided by the owner. [Agent instructions](../contributing/agent-instructions.md#how-the-files-are-generated) describes the pipeline.
+* 2026-11-20 — Hooks come from `.apm/hooks/` as well: APM merges them into `.claude/settings.json` and `.codex/hooks.json`, and `scripts/agents-files.py` fails on a hook APM did not write. opencode and OpenHands have no APM hook target and keep their hand-written twins ([Agent instructions](../contributing/agent-instructions.md#how-the-files-are-generated)).

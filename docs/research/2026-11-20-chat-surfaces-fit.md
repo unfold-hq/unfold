@@ -110,16 +110,34 @@ The [market landscape](../../apps/unfold/docs/research/market-landscape.md#413-t
 * Unfold gains a client role or turns `tenancy.enforce` on by default: open the client chat ticket.
 * Open WebUI moves MCP connections, elicitation or MCP Apps under its enterprise licence, as it did with Tether and Terminals: re-run this comparison.
 * Open WebUI fixes refresh after a 401 (#34699) or ships CIMD (#26059): drop the matching caveat from the how-to.
+* LiteLLM's MCP gateway relays elicitation over Streamable HTTP and negotiates MCP Apps: re-run [the gateway probe](evidence/2026-11-20-chat-surfaces/7-litellm-gateway-probe.md) and reconsider [section 9](#9-litellms-mcp-gateway-added-20-november-2026).
 
 ## 8. Tickets
 
-Proposed, not filed:
+Proposed, not yet on the board (drafted 2026-11-20):
 
 1. **Open WebUI names itself on MCP calls.** An upstream pull request to open-webui/open-webui that passes `client_info` in `utils/mcp/client.py`. Done when an Action Record made through Open WebUI shows `mcp:Open WebUI <version>`.
 2. **A client role and Client-safe MCP answers.** Prerequisite for any client chat: a client account signs in without a staff role, reads only its Client's Work Items through the Client-safe brief, and cannot approve, stop or steer. Builds on [ADR-0017](../adr/adr-0017-a-tenant-sits-above-teams-and-bounds-what-users-sources-and-budgets-reach.md) and the proposed Client-facing connector in [identity.md](../../apps/unfold/docs/research/agent-standards/identity.md).
 3. **Test whether a client-membership operator can approve or stop work.** Turn the untested inference in section 5 into a test, and fix it if it holds.
 4. **Spike: a client chat in the portal on Ploeg's chat allowance.** After ticket 2. The Agents-window chat's engine in the browser, without a production dependency.
 5. **Try Open WebUI end to end** against a staging Unfold: sign-in, confirmation dialog, MCP Apps card, refresh. Record the result in the how-to's `verified_by`.
+
+## 9. LiteLLM's MCP gateway, added 20 November 2026
+
+The question: should a chat front end reach `unfold-mcp` and `ploeg-mcp` through LiteLLM's MCP gateway, as some installations route every tool, so that each call is admitted on a virtual key, filtered and recorded beside the model spend?
+
+**Verdict: no, not for the person-facing servers. Connect front ends to `unfold-mcp` directly. Runs keep reaching tools only through the gateway, as [the MCP access record](2026-09-29-mcp-access.md) decided.**
+
+The probe settles it ([7-litellm-gateway-probe.md](evidence/2026-11-20-chat-surfaces/7-litellm-gateway-probe.md)). Open WebUI's MCP client, connected through LiteLLM 1.110.0 and 1.110.2 in `oauth_delegate` mode:
+
+* **keeps the person's identity.** `oauth_delegate` forwards the person's own token, and Unfold maps it to their account;
+* **loses every action.** The gateway initializes Unfold with the legacy handshake. Without the opt-in it declares no elicitation, so Unfold refuses each action. With `allow_elicitation` and `mcp_advertised_versions` it declares it, but the question never reaches the client, and Unfold ends the call unconfirmed. Nothing changed in either run. LiteLLM's own README says interactive relay is verified only on its legacy SSE endpoint, which Open WebUI does not speak ([6-litellm-mcp-gateway.md §3](evidence/2026-11-20-chat-surfaces/6-litellm-mcp-gateway.md#3-feature-passthrough));
+* **loses the Work Item card.** LiteLLM negotiates no extensions ("Apps/Tasks remain disabled"), so the tools carry no `_meta.ui` and the app-only tool disappears;
+* **renames every tool** (`unfold-unfold_now`), with no opt-out, which breaks an MCP App that calls a sibling tool by name (ext-apps #745, #753).
+
+What the gateway would add, Unfold already has for these servers: each action is confirmed by the person, recorded in the Action Record with its channel and the hash of what they agreed to, and paid through Ploeg's admission. A virtual key on top proves only that the front end called. `oauth_delegate` also does not check the token's audience, so the identity check stays Unfold's either way. The gateway's 2026 advisories include an MCP authentication bypass (CVE-2026-59822) and several proxy-wide authentication bypasses.
+
+Where the gateway does belong: model calls of every chat, and tools for Runs, where one key carries both the budget and the tool grant.
 
 ## Not verified
 
