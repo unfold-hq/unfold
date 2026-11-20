@@ -1,5 +1,6 @@
 import type { Core, WaitingQuestionShape } from './core.js';
 import type { PloegDetail, PloegNowItem } from './ploeg-types.js';
+import { plainTitle } from './status.ts';
 
 const pullRequestNumber = (url: string | undefined) => /\/(?:pulls?|merge_requests)\/(\d+)\/?$/.exec(url ?? '')?.[1];
 
@@ -30,7 +31,7 @@ export function channelName(channel: string): string {
 
 /** The title of a hand-off: its Work Item's title, else the task it handed over. Tracker and agent text, shown as plain text only. */
 export function handOffTitle(handoff: HandOff): string {
-  if (handoff.workItem) return handoff.workItem.title || `Work Item ${handoff.workItem.id}`;
+  if (handoff.workItem) return plainTitle(handoff.workItem.title) || `Work Item ${handoff.workItem.id}`;
   return handoff.origin.kind === 'task' ? `Task ${handoff.origin.taskId} on ${handoff.origin.sourceName}` : 'A session handed to Ploeg';
 }
 

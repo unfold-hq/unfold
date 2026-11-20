@@ -1,6 +1,7 @@
 import type { Core, Progress } from './core.js';
 import type { PloegNow, PloegNowItem, PloegRunRow } from './ploeg-types.js';
 import type { Session } from './types.js';
+import { plainTitle } from './status.ts';
 
 /** A session on Now: its progress and the group that progress puts it in. */
 export type SessionRow = { session: Session; progress: Progress; group: 'needs' | 'review' | 'running' };
@@ -25,14 +26,15 @@ export function linkedWorkItems(rows: SessionRow[]): Set<string> {
 /** The words of one session row on Now: the title, the line beside it, the tooltip lines and what a screen reader says. */
 export function describeSession(core: Core, row: SessionRow, now = Date.now()): { label: string; description: string; lines: string[]; accessible: string } {
   const { progress, session } = row;
+  const title = plainTitle(session.title);
   const current = progress.current;
   const elapsed = current?.startedAt ? core.duration(Math.max(0, Math.round((now - Date.parse(current.startedAt)) / 1000))) : '';
   const spend = progress.demo ? 'demo' : progress.spend.status === 'unknown' ? '' : `${progress.spend.text}${progress.spend.status === 'observed' ? ' so far' : ''}`;
   const description = row.group === 'running' && current
     ? [current.role, current.round ? `Round ${current.round}` : '', elapsed, spend].filter(Boolean).join(' · ')
     : [progress.short, spend, core.relative(session.updatedAt, now)].filter(Boolean).join(' · ');
-  const lines = [session.title, `${progress.meta.label}: ${progress.headline}`, progress.next, `Spend ${progress.spend.text}${progress.spend.note ? ` (${progress.spend.note})` : ''}`].filter(Boolean);
-  return { label: session.title, description, lines, accessible: `${session.title}, ${progress.meta.label}, ${progress.headline}` };
+  const lines = [title, `${progress.meta.label}: ${progress.headline}`, progress.next, `Spend ${progress.spend.text}${progress.spend.note ? ` (${progress.spend.note})` : ''}`].filter(Boolean);
+  return { label: title, description, lines, accessible: `${title}, ${progress.meta.label}, ${progress.headline}` };
 }
 
 /** What the status bar says: counts of review, needs-you and running work, and while exactly one session runs, its Role and elapsed time. */
@@ -48,7 +50,7 @@ export function statusSummary(core: Core, now: PloegNow | undefined, rows: Sessi
   const live = focus ? `$(sync~spin) ${role ? `${role.role} ${core.elapsedClock(Math.max(0, (at - Date.parse(role.startedAt)) / 1000))}` : focus.progress.short}` : running ? `$(sync~spin) ${running}` : '';
   const parts = [review ? `$(git-pull-request) ${review}` : '', needs ? `$(bell-dot) ${needs}` : '', live].filter(Boolean);
   const counts = [review ? `${review} ready for your review` : '', needs ? `${needs} need${needs === 1 ? 's' : ''} you` : '', running ? `${running} running` : ''].filter(Boolean);
-  const detail = rows.slice(0, 5).map(row => `${row.session.title}: ${row.progress.headline}`);
+  const detail = rows.slice(0, 5).map(row => `${plainTitle(row.session.title)}: ${row.progress.headline}`);
   return { text: parts.length ? `$(layers) ${parts.join('  ')}` : '$(layers) Unfold', tooltip: [counts.length ? counts.join(' · ') : 'Nothing waits on you', ...detail].join('\n'), warning: needs > 0, focus, asking: rows.some(row => row.progress.phase === 'asking') };
 }
 
@@ -88,7 +90,7 @@ export function describeItem(core: Core, item: PloegNowItem, demo: boolean): { l
   const meta = core.workItemState(item.state);
   const reason = core.listReason(item, { demo });
   const pr = pullRequestNumber(item.pullRequestUrl);
-  const label = item.title || `Work Item ${item.id}`;
+  const label = plainTitle(item.title) || `Work Item ${item.id}`;
   const description = [reason?.chip, pr ? `PR #${pr}` : '', item.state === 'proposed' && item.sourceTitle ? `from ${item.sourceTitle}` : '', item.team, demo ? 'illustration' : '', core.relative(item.updatedAt)].filter(Boolean).join(' · ');
   const settled = demo ? 'demo fixture, no model calls or spend' : `settled ${core.money(item.spentUsd ?? undefined)}`;
   const lines = [label, reason ? reason.sentence : meta.description ?? '', reason ? reason.action : '', `Team ${item.team} · ${item.attempts === 1 ? '1 attempt' : `${item.attempts} attempts`} · ${settled} · updated ${core.relative(item.updatedAt)}`].filter(Boolean);
@@ -101,6 +103,7 @@ export function describeRun(core: Core, run: PloegRunRow, demo: boolean, now = D
   const elapsed = run.startedAt ? core.duration(Math.max(0, Math.round((now - Date.parse(run.startedAt)) / 1000))) : '';
   const observed = !demo && typeof run.observedUsd === 'number' ? run.observedUsd : undefined;
   const description = [run.role, run.round ? `Round ${run.round}` : '', run.team, elapsed, observed === undefined ? '' : `${core.money(observed)} so far`, demo ? 'illustration' : ''].filter(Boolean).join(' · ');
-  const lines = [run.workItemTitle, `${run.role} is running${run.round ? ` in Round ${run.round}` : ''} for team ${run.team}${elapsed ? `, for ${elapsed}` : ''}.`, demo ? 'Demo fixture: no model calls or spend.' : observed === undefined ? `Cost so far: ${core.notReported}.` : `Observed at the gateway so far: ${core.money(observed)}. Not settled yet.`];
-  return { label: run.workItemTitle || `Work Item ${run.workItemId}`, description, lines };
+  const label = plainTitle(run.workItemTitle) || `Work Item ${run.workItemId}`;
+  const lines = [label, `${run.role} is running${run.round ? ` in Round ${run.round}` : ''} for team ${run.team}${elapsed ? `, for ${elapsed}` : ''}.`, demo ? 'Demo fixture: no model calls or spend.' : observed === undefined ? `Cost so far: ${core.notReported}.` : `Observed at the gateway so far: ${core.money(observed)}. Not settled yet.`];
+  return { label, description, lines };
 }

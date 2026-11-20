@@ -127,3 +127,9 @@ test('a reviewed, cancelled or closed-failed session leaves Now', () => {
   const base = { ...fixture.session, execution: undefined, blocker: undefined } as Session;
   assert.equal(sessionRows(core, [{ ...base, status: 'cancelled' }, { ...base, status: 'completed', review: { decision: 'accepted', by: 'r', byName: 'Ryan', at: fixture.now } }, { ...base, status: 'failed', workItemClosedAt: fixture.now }]).length, 0);
 });
+
+test('a Work Item row shows its title as plain text, without Markdown escapes', () => {
+  const text = describeItem(core, item('needs_human', { title: 'Write \\`docs/domains\\.md\\`: one page per domain' }), false);
+  assert.equal(text.label, 'Write `docs/domains.md`: one page per domain');
+  assert.match(text.accessible, /^Write `docs\/domains\.md`: one page per domain,/);
+});

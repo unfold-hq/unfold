@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runLabel, reviewers, situation, failureStage, spendLabel, observedSpend, isolatedPlacement, approvalLabel, presentationFor } from '../src/status.ts';
+import { runLabel, reviewers, situation, failureStage, spendLabel, observedSpend, isolatedPlacement, approvalLabel, presentationFor, plainTitle } from '../src/status.ts';
 import type { Session } from '../src/types.ts';
 
 function session(overrides: Partial<Session> = {}): Session {
@@ -60,4 +60,9 @@ test('approval wording and isolation', () => {
   assert.equal(isolatedPlacement(undefined), false);
   assert.equal(approvalLabel(session({ approval: 'auto' })), 'tool use approved automatically');
   assert.equal(approvalLabel(session({ approval: 'manual' })), 'tool use asks you');
+});
+
+test('a title drops the Markdown backslash escapes a tracker or agent wrote, and keeps a lone backslash', () => {
+  assert.equal(plainTitle('Write \\`docs/domains\\.md\\`: one page per domain'), 'Write `docs/domains.md`: one page per domain');
+  assert.equal(plainTitle('C:\\Users\\ryan'), 'C:\\Users\\ryan');
 });
