@@ -157,7 +157,7 @@ standards:
     date: '2026-11-10'
     url: https://github.com/modelcontextprotocol/registry/releases
   watch:
-  - {kind: github-releases, ref: modelcontextprotocol/registry, current: "v1.8.9"}
+  - {kind: github-releases, ref: modelcontextprotocol/registry, current: "v1.8.11"}
   adoption:
   - 'Public registry announced in preview 2025-09-08: https://blog.modelcontextprotocol.io/posts/2025-09-08-mcp-registry-preview/'
   relations:
