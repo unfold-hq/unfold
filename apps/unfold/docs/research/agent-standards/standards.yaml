@@ -9744,7 +9744,7 @@ standards:
     date: '2025-11-24'
     url: https://ffnews.com/newsarticle/paytech/mollie-ready-for-ai-payments-before-openai-launches-in-europe/
   watch:
-  - {kind: github-releases, ref: mollie/mollie-api-php, current: "v4.1.0"}
+  - {kind: github-releases, ref: mollie/mollie-api-php, current: "v4.1.1"}
   - {kind: changelog-page, ref: "https://www.mollie.com/news"}
   adoption:
   - ACP delegated payments API plus a hackathon demo paid with Apple Pay (https://ffnews.com/newsarticle/paytech/mollie-ready-for-ai-payments-before-openai-launches-in-europe/).
