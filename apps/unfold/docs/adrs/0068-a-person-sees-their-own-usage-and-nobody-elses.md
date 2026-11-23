@@ -64,3 +64,4 @@ Chosen option: "**Your usage under Settings, Yours, keyed on the caller's id**",
 * Contract: [HTTP contract, Your usage](../contracts/api.md#your-usage); behaviour: [Browser UI, Settings and sign-in](../browser-ui.md#settings-and-sign-in).
 * Re-evaluate when Ploeg reports spend per person (`acts_for`, `handed_by` on Work Items), or when sessions record spend by day.
 * 2026-11-17: proposed with its implementation.
+* 2026-11-23: chat messages are attributed after all. Unfold keeps which admitted chat message (Ploeg `chatId`) belongs to which person, and Ploeg's chat record reports each message's cost, so `chats` counts them at that cost; only messages of deleted chats stay not attributed.

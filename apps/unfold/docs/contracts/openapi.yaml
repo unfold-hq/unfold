@@ -6548,7 +6548,7 @@ paths:
                 properties:
                   usage:
                     type: object
-                    required: [period, since, until, spent, asks, sessions, linkedSessions, notAttributed]
+                    required: [period, since, until, spent, asks, sessions, chats, linkedSessions, notAttributed]
                     properties:
                       period: { type: string, enum: [month, 30d] }
                       since: { type: string, format: date-time }
@@ -6562,6 +6562,11 @@ paths:
                         allOf:
                           - { $ref: '#/components/schemas/UsageMoney' }
                           - { type: object, required: [budgetUsd, demo, truncated], properties: { budgetUsd: { type: number }, demo: { type: integer }, truncated: { type: boolean } } }
+                      chats:
+                        description: 'The person''s admitted Agents-window chat messages, each at the cost Ploeg''s chat record reports, never the per-message hold.'
+                        allOf:
+                          - { $ref: '#/components/schemas/UsageMoney' }
+                          - { type: object, required: [truncated], properties: { truncated: { type: boolean } } }
                       linkedSessions:
                         type: object
                         required: [count, claudeCode, uncosted, estimateUsd, costStatus, tokens, telemetry, reason, truncated]

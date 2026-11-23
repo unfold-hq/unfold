@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentHostView, Store } from '../store.ts';
 import type { User } from '../types.ts';
 import { ChatStore } from '../chat/store.ts';
-import type { ChatRecord, ChatTurn } from '../chat/types.ts';
+import type { ChatAllowanceView, ChatRecord, ChatTurn } from '../chat/types.ts';
 import type { ChatHistoryEntry, ChatService, ToolAnswer, ToolView, TurnOutcome, TurnView } from '../chat/service.ts';
 import { sessionChatCatalog } from './versions.ts';
 import { repositoriesDirectory } from './session-config.ts';
@@ -51,6 +51,15 @@ type Runner = { chat: ChatRecord; turn: ChatTurn; abort: AbortController; waitin
 
 const clip = (value: string, max: number) => value.length <= max ? value : `${value.slice(0, max)}…`;
 const resetDay = (iso: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(iso));
+const positive = (value: number | undefined): number => typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+/** What of an allowance is only held: the holds of messages Ploeg has not settled yet, and the most one message holds; empty when Ploeg reported neither. */
+export function heldNote(allowance: ChatAllowanceView): string {
+  const held = positive(allowance.heldUsd);
+  const cap = positive(allowance.chatBudgetUsd);
+  if (held) return `${money(held)} held until settled${cap ? `, at most ${money(cap)} per message` : ''}`;
+  return cap ? `each message holds at most ${money(cap)} until its actual cost settles` : '';
+}
+const withHeld = (allowance: ChatAllowanceView) => { const note = heldNote(allowance); return note ? ` (${note})` : ''; };
 const durationOf = (turn: ChatTurn, at: string) => Math.max(0, Date.parse(at) - Date.parse(turn.startedAt)) || 0;
 function summaryOf(text: string): string | undefined {
   try { const value = JSON.parse(text); return typeof value?.summary === 'string' && value.summary.trim() ? value.summary.trim() : undefined; } catch { return undefined; }
@@ -85,7 +94,7 @@ export class ChatSessions {
 
   /** The chat agent's entry in the root state, listed first because it is where a person starts; the Agents window asks for a folder before any session, and the chat ignores which one. */
   agent(): Json {
-    const cost = this.service?.demo ? 'This is the demo: every answer is a fixed reply and nothing is spent.' : 'Each message is paid from your Team\'s chat allowance.';
+    const cost = this.service?.demo ? 'This is the demo: every answer is a fixed reply and nothing is spent.' : 'Each message is paid from your Team\'s chat allowance: Ploeg holds a fixed amount per message and later settles it to what the answer actually cost.';
     return {
       provider: chatProvider, displayName: 'Unfold', description: `Start here: pick any folder under Workspace ▾ › Folders (Unfold), which the chat does not use, then ask what is running, what waits for you or why work stopped, and start, answer, retry or stop work after you confirm. ${cost}`,
       models: [{ id: chatModelId, name: this.service?.demo ? 'Demo · no model calls' : 'Your Team\'s Ask model', provider: chatProvider }],
@@ -101,7 +110,7 @@ export class ChatSessions {
     const demo = this.service?.demo === true;
     const allowances = demo ? [] : await Promise.all(teams.slice(0, 20).map(team => this.service!.allowance(user, team.id)));
     const team = teams.length
-      ? { type: 'string', title: 'Team', description: 'The Team whose chat allowance pays for each message', enum: teams.map(entry => entry.id), enumLabels: teams.map(entry => entry.name || entry.id), enumDescriptions: teams.map((_, index) => demo ? 'Demo: no model calls, nothing spent' : allowances[index] ? `${money(allowances[index]!.remainingUsd)} of ${money(allowances[index]!.limitUsd)} left until ${resetDay(allowances[index]!.resetAt)}` : 'Chat allowance not reported'), default: teams[0].id, sessionMutable: true }
+      ? { type: 'string', title: 'Team', description: 'The Team whose chat allowance pays for each message', enum: teams.map(entry => entry.id), enumLabels: teams.map(entry => entry.name || entry.id), enumDescriptions: teams.map((_, index) => demo ? 'Demo: no model calls, nothing spent' : allowances[index] ? `${money(allowances[index]!.remainingUsd)} of ${money(allowances[index]!.limitUsd)} left until ${resetDay(allowances[index]!.resetAt)}${withHeld(allowances[index]!)}` : 'Chat allowance not reported'), default: teams[0].id, sessionMutable: true }
       : { type: 'string', title: 'Team', description: 'No Ploeg Team is available to you, so the chat cannot pay for a message. Ask an administrator.', readOnly: true };
     return { type: 'object', properties: { team, title: { type: 'string', title: 'Chat title' } }, required: teams.length ? ['team'] : [] };
   }
@@ -325,7 +334,7 @@ export class ChatSessions {
     const duration = durationOf(turn, at);
     if (outcome.allowance !== undefined && outcome.allowance !== null) chat.allowance = outcome.allowance;
     if (outcome.state === 'complete' && outcome.allowance) {
-      const part = { kind: 'markdown', id: `${turn.id}${allowanceSuffix}`, content: `\n\n*Team ${chat.team} · ${money(outcome.allowance.remainingUsd)} of ${money(outcome.allowance.limitUsd)} chat allowance left, until ${resetDay(outcome.allowance.resetAt)}*` };
+      const part = { kind: 'markdown', id: `${turn.id}${allowanceSuffix}`, content: `\n\n*Team ${chat.team} · ${money(outcome.allowance.remainingUsd)} of ${money(outcome.allowance.limitUsd)} chat allowance left${withHeld(outcome.allowance)}, until ${resetDay(outcome.allowance.resetAt)}*` };
       turn.responseParts.push(part);
       if (!runner.cancelled) this.port.broadcast(chatUri, { type: 'chat/responsePart', turnId: turn.id, part }, chat.owner.id);
     }

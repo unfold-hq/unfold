@@ -2,8 +2,12 @@ import type { User } from '../types.ts';
 
 type Json = Record<string, any>;
 
-/** The allowance a chat last saw for its Team, as the chat shows it: what is left, the limit and when the period resets. */
-export type ChatAllowanceView = { remainingUsd: number; limitUsd: number; resetAt: string };
+/**
+ * The allowance a chat last saw for its Team, as the chat shows it: what is left, the limit and when the period resets,
+ * what Ploeg settled at actual cost, what it still holds for messages not settled yet, and the most one message holds.
+ * A chat saved before Unfold kept the last three lacks them.
+ */
+export type ChatAllowanceView = { remainingUsd: number; limitUsd: number; resetAt: string; settledUsd?: number; heldUsd?: number; chatBudgetUsd?: number };
 
 /** One conversation with Unfold in the Agents window, owned by one person and paid from one Team's chat allowance (Unfold ADR 0049, proposed). */
 export type ChatRecord = {
@@ -34,4 +38,6 @@ export type ChatTurn = {
   responseParts: Json[];
   state: ChatTurnState;
   admission: { team: string; chatId: string } | null;
+  /** What Ploeg settled this message at, kept once it is final so usage does not ask Ploeg again. */
+  settled?: { usd: number };
 };
