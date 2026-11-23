@@ -87,6 +87,7 @@ test('the demo binder, packs, odds and season work without Ploeg, say they are a
 });
 
 test('live: Unfold lists the person\'s own cards from Ploeg\'s facts for their logins and pages until nextBefore is null; nobody reads another person\'s binder or packs', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-20T12:00:00Z') });
   const { api, ploeg, admin, operator, viewer } = await liveWithPloeg(t);
   assert.equal((await request(api.url, '/api/me/card-identity', { method: 'PUT', body: { logins: ['stewart'] }, cookie: operator.cookie })).status, 200);
   assert.equal((await request(api.url, '/api/me/card-identity', { method: 'PUT', body: { logins: ['iris'] }, cookie: viewer.cookie })).status, 200, 'a viewer sets their own logins');
