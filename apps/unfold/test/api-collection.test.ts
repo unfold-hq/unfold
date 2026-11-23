@@ -7,7 +7,10 @@ import { hashPassword } from '../src/auth.ts';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import { application, login, request } from './api-support.ts';
 
-const world: { workItem: { id: string; team: string }; pullRequests: { mergedBy: string | null }[] }[] = JSON.parse(readFileSync(new URL('./fixtures/cards/service/attribution-flow.json', import.meta.url), 'utf8')).world;
+const recorded = JSON.parse(readFileSync(new URL('./fixtures/cards/service/attribution-flow.json', import.meta.url), 'utf8'));
+const yesterday = Date.now() - 24 * 60 * 60 * 1000;
+const shift = yesterday - Date.parse(recorded.options.now);
+const world: { workItem: { id: string; team: string }; pullRequests: { mergedBy: string | null }[] }[] = JSON.parse(JSON.stringify(recorded.world).replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g, at => new Date(Date.parse(at) + shift).toISOString()));
 
 async function upstream(t: TestContext, { facts = true } = {}) {
   const env = `UNFOLD_PLOEG_TEST_${randomBytes(8).toString('hex').toUpperCase()}`;
@@ -87,7 +90,6 @@ test('the demo binder, packs, odds and season work without Ploeg, say they are a
 });
 
 test('live: Unfold lists the person\'s own cards from Ploeg\'s facts for their logins and pages until nextBefore is null; nobody reads another person\'s binder or packs', async t => {
-  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-20T12:00:00Z') });
   const { api, ploeg, admin, operator, viewer } = await liveWithPloeg(t);
   assert.equal((await request(api.url, '/api/me/card-identity', { method: 'PUT', body: { logins: ['stewart'] }, cookie: operator.cookie })).status, 200);
   assert.equal((await request(api.url, '/api/me/card-identity', { method: 'PUT', body: { logins: ['iris'] }, cookie: viewer.cookie })).status, 200, 'a viewer sets their own logins');
