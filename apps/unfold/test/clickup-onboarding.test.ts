@@ -27,13 +27,13 @@ const repository = (key: string, repo: string, readiness: 'ready' | 'not_ready')
 const wiring = (): PloegConnections => ({ demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: [repository('shop', 'shop', 'ready'), repository('docs', 'docs', 'not_ready')], boards: [], unrouted: [], fetchedAt: clock().toISOString() });
 
 type Seen = { method: string; path: string; body: Record<string, unknown> | null };
-type Fake = { seen: Seen[]; states: string[]; answers: Map<string, { status: number; body?: unknown }>; bindings: Record<string, unknown>[]; config: { url: string; tokenEnv: string } };
+type Fake = { seen: Seen[]; states: string[]; answers: Map<string, { status: number; body?: unknown }>; bindings: Record<string, unknown>[]; targets: Record<string, unknown>[] | null; config: { url: string; tokenEnv: string } };
 
 /** A fake Ploeg serving the connection and binding routes of Ploeg ADR-0195 and ADR-0186; `answers` overrides one `METHOD path` with a status and body. */
 async function fakePloeg(t: TestContext): Promise<Fake> {
   const env = `UNFOLD_CLICKUP_TEST_${randomBytes(6).toString('hex').toUpperCase()}`;
   process.env[env] = randomBytes(24).toString('hex');
-  const fake: Fake = { seen: [], states: [], answers: new Map(), bindings: [], config: { url: '', tokenEnv: env } };
+  const fake: Fake = { seen: [], states: [], answers: new Map(), bindings: [], targets: null, config: { url: '', tokenEnv: env } };
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
@@ -65,6 +65,7 @@ async function fakePloeg(t: TestContext): Promise<Fake> {
     if (req.method === 'GET' && path.startsWith('tracker-connections?')) return reply(200, { connections: [{ id: 'clickup-unfold', kind: 'clickup', state: 'active', source: 'runtime', account: { id: '42', login: 'unfold' } }] });
     if (req.method === 'DELETE' && path.startsWith('tracker-connections/')) return reply(204);
     if (req.method === 'GET' && path === 'tracker-bindings') return reply(200, { bindings: fake.bindings });
+    if (req.method === 'GET' && path === 'targets' && fake.targets) return reply(200, { schemaVersion: '1.0', targets: fake.targets });
     if (req.method === 'POST' && path === 'teams/delivery/tracker-bindings?dryRun=true') return reply(200, { binding: { team: 'delivery', connection: 'clickup-unfold', scope: { id: '777', name: 'Sprint 12' }, default: 'shop', allow: [] }, checks: [{ id: 'scope_readable', status: 'ok' }, { id: 'target_ready', status: 'ok' }] });
     if (req.method === 'POST' && path === 'teams/delivery/tracker-bindings') {
       const existing = fake.bindings.find(entry => entry.id === 'b-1');
@@ -195,6 +196,29 @@ test('binding a List runs the dry run first, offers only ready repositories, and
   fake.bindings[0].state = 'active';
   await clickup.check(admin, made.source!.id);
   assert.equal(clickup.lines(true)['bind-lists']?.status, 'ok', 'done only once Ploeg reports it active');
+});
+
+test('a repository a person registered with Ploeg at runtime is offered for a List once Ploeg reports it ready, though the connections read leaves it out', async t => {
+  const { clickup, fake, config } = await setup(t);
+  config.repositories.push({ id: 'r-paint', name: 'Paint', description: '', url: 'https://gitlab.com/acme/customers/paint/paint', baseBranch: 'development', verify: [] }, { id: 'r-wiki', name: 'Wiki', description: '', url: 'https://gitlab.com/acme/wiki', baseBranch: 'main', verify: [] });
+  const target = (key: string, repository: string, branch: string, readiness: string, state = 'active') => ({ key, source: 'runtime', state, forge: 'gitlab', repository, branch, label: key, readiness: { state: readiness, reasons: [], prepareAvailable: false } });
+  fake.targets = [target('paint', 'acme/customers/paint/paint', 'development', 'ready'), target('wiki', 'acme/wiki', 'main', 'not_ready'), target('gone', 'acme/gone', 'main', 'ready', 'removed'), target('shop', 'acme/shop', 'main', 'not_ready')];
+  const kept = await clickup.connectWithToken(admin, { token: memberToken });
+  const options = await clickup.mapOptions(admin);
+  assert.deepEqual(options.repositories.map(entry => entry.key), ['shop', 'paint'], 'the connections read keeps its own entry for shop, and only an active runtime target joins');
+  assert.deepEqual(options.repositories[1]?.target, { forge: 'gitlab', owner: 'acme', repo: 'customers/paint/paint', baseBranch: 'development' });
+  assert.deepEqual(options.waiting, ['acme/docs', 'acme/wiki']);
+  await clickup.bind(admin, { connection: kept.id, list: { id: '777' }, team: 'delivery', default: 'paint', dryRun: true });
+  assert.equal(writes(fake).at(-1)?.body?.default, 'paint');
+  await assert.rejects(clickup.bind(admin, { connection: kept.id, list: { id: '777' }, team: 'delivery', default: 'wiki', dryRun: true }), rejects('repository_not_ready', 409));
+});
+
+test('a Ploeg that does not list runtime targets still offers what its connections read reports', async t => {
+  const { clickup, fake } = await setup(t);
+  await clickup.connectWithToken(admin, { token: memberToken });
+  const options = await clickup.mapOptions(admin);
+  assert.deepEqual(options.repositories.map(entry => entry.key), ['shop']);
+  assert.ok(fake.seen.some(entry => entry.method === 'GET' && entry.path === 'targets'), 'Unfold asked for the runtime targets');
 });
 
 test('a List the configuration routes is shown as configured and nothing is stored', async t => {
