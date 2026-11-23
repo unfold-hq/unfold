@@ -108,7 +108,7 @@ export function scope(value: unknown): PloegTrackerScope {
 export function bindingCheck(value: unknown): PloegBindingCheck {
   const data = object(value);
   const status = data.status ?? (data.ok === true ? 'ok' : data.ok === false ? 'problem' : undefined);
-  return { id: text(data.id ?? data.code ?? data.name, 64), status: oneOf(status, ['ok', 'problem'] as const, 'unknown'), text: optional(data.text ?? data.message ?? data.detail, 2000) ?? '' };
+  return { id: text(data.check ?? data.id ?? data.code ?? data.name, 64), status: oneOf(status, ['ok', 'problem'] as const, 'unknown'), text: optional(data.text ?? data.message ?? data.detail, 2000) ?? '' };
 }
 
 /** Ploeg's connection and binding routes over the operator API (Ploeg ADR-0195, ADR-0186). */
