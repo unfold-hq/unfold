@@ -41,7 +41,15 @@ export function podWait(pod: KubernetesObject | undefined): { phase: WorkspaceWa
   const clone = pod!.status.initContainerStatuses?.find((item: any) => item.name === 'clone');
   if (clone?.state?.running) return { phase: 'cloning' };
   if (!clone?.state?.terminated) return { phase: 'creating' };
+  const failed = cloneExitCode(pod);
+  if (failed !== undefined) return { phase: 'container_error', reason: `The clone container exited with code ${failed}` };
   return { phase: 'starting' };
+}
+
+/** The exit code of a workspace Pod's clone container that ended without cloning, or undefined while it has not failed. */
+export function cloneExitCode(pod: KubernetesObject | undefined): number | undefined {
+  const terminated = pod?.status?.initContainerStatuses?.find((item: any) => item.name === 'clone')?.state?.terminated;
+  return terminated && terminated.exitCode !== 0 ? Number(terminated.exitCode ?? -1) : undefined;
 }
 
 /** Each phase a starting workspace passed through, entered at `at` milliseconds since the epoch. */
@@ -393,6 +401,8 @@ export class KubernetesWorkspaces {
       while (Date.now() < deadline) {
         signal.throwIfAborted();
         const pod = await this.client.request(this.path('Pod', name));
+        const cloneExit = cloneExitCode(pod);
+        if (cloneExit !== undefined) throw await this.cloneFailure(name, cloneExit);
         if (pod.status?.phase === 'Failed' || pod.status?.phase === 'Succeeded') throw new Error('Workspace agent exited before readiness');
         if (pod.status?.conditions?.some((item: any) => item.type === 'Ready' && item.status === 'True')) {
           if (repository.access) await removeCloneCredentials(this.client, this.path('Secret', name));
@@ -416,6 +426,11 @@ export class KubernetesWorkspaces {
     } finally {
       this.waits.delete(session.id);
     }
+  }
+
+  private async cloneFailure(name: string, exitCode: number): Promise<RuntimeFailure> {
+    const log = await this.client.request(this.path('Pod', name) + '/log?container=clone&tailLines=40', 'GET', undefined, false, true).catch(() => '');
+    return new RuntimeFailure('workspace_setup', 'workspace', 'not_submitted', undefined, `git clone inside the workspace Pod exited with code ${exitCode}\n${typeof log === 'string' ? log : ''}`);
   }
 
   async captureCandidate(session: Session, repository: Repository): Promise<Candidate> {
