@@ -400,6 +400,11 @@ test('a failed session is tried again or closed from the Work Item page itself',
   assert.match(step.actions[0], /class="button primary" data-action="work-session-retry" data-id="s1"[^]*Try again/);
   assert.match(step.actions[1], /class="button secondary" data-action="work-session-close" data-id="s1"[^]*Close this Work Item/);
   assert.match(step.actions[2], /href="#session\/s1"[^]*Why it failed/, 'the session page stays one link away for the detail');
+  const onePage = decisionPlan(failed, model({ sessions: [session], flags: { 'work.unified': true }, session: { decision: '<div id="session-decision" tabindex="-1">failed</div>' } }), detailReason(failed));
+  assert.match(onePage.entries[0].actions[2], /data-action="work-section" data-id="session-decision"[^]*Why it failed/, 'on the one page, where the session page opens this page again, it jumps to the session failure shown on it');
+  assert.doesNotMatch(onePage.entries[0].actions.join(''), /href="#session\//);
+  const notLoaded = decisionPlan(failed, model({ sessions: [session], flags: { 'work.unified': true } }), detailReason(failed));
+  assert.doesNotMatch(notLoaded.entries[0].actions.join(''), /Why it failed/, 'without the session failure on the page there is nothing to jump to, so no dead link');
   assert.match(plan.primary, /Try again/);
   const unsettled = decisionPlan(failed, model({ sessions: [{ ...session, costStatus: 'unknown' }] }), detailReason(failed));
   assert.match(unsettled.primary, /class="button primary" data-action="work-session-close"/, 'until spend is reconciled, closing is the action');
