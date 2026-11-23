@@ -7032,9 +7032,9 @@ paths:
                       finishes: { type: object }
                       cracks: { type: integer }
                       mends: { type: integer }
-                      rightFirstTime: { type: object }
-                      bounceReasons: { type: object }
-                      sets: { type: object }
+                      rightFirstTime: { type: [object, 'null'], description: 'Null when no shipped card of the quarter passed a delivery gate.' }
+                      bounceReasons: { type: [object, 'null'], description: 'Null when no card of the quarter is on a board with delivery gates.' }
+                      sets: { type: [object, 'null'], description: 'Null when no card of the quarter belongs to an epic.' }
                       medians: { type: object }
                   source: { type: object, properties: { kind: { type: string }, scanned: { type: integer }, truncated: { type: boolean } } }
         '401': { $ref: '#/components/responses/Unauthenticated' }

@@ -46,7 +46,7 @@ test('administrators list every flag and force a variant for everyone with a rea
   const listed = await request(app.url, '/api/admin/flags', { cookie: admin.cookie });
   assert.equal(listed.status, 200);
   const flag = listed.body.flags.find((item: any) => item.key === 'work.live-view');
-  assert.deepEqual({ source: flag.source, override: flag.override, expired: flag.expired, owner: flag.metadata.owner }, { source: 'code', override: null, expired: false, owner: 'Ryan Grippeling' });
+  assert.deepEqual({ source: flag.source, override: flag.override, expired: flag.expired, owner: flag.metadata.owner }, { source: 'code', override: null, expired: new Date().toISOString().slice(0, 10) > flag.metadata.expires, owner: 'Ryan Grippeling' });
   assert.equal(listed.body.file.file, null);
 
   assert.equal((await request(app.url, '/api/admin/flags/work.live-view/override', { method: 'PUT', cookie: admin.cookie, body: { variant: 'on' } })).status, 400, 'forcing a variant needs a reason');
