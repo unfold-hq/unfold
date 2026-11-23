@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { askPrice, combinedMoney, sessionPrice, usageMoney, usageWindow } from '../src/my-usage.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { MyUsageService, askPrice, chatPrice, combinedMoney, sessionPrice, usageMoney, usageWindow } from '../src/my-usage.ts';
+import { ChatStore } from '../src/chat/store.ts';
+import type { ChatTurn } from '../src/chat/types.ts';
+import type { PloegChatRecord } from '../src/ploeg.ts';
+import type { AppConfig, User } from '../src/types.ts';
 import { digestTokensQuery, readSessionsUsage } from '../src/linked-telemetry.ts';
 import { hashPassword } from '../src/auth.ts';
 import type { Ask } from '../src/ask/types.ts';
@@ -31,6 +36,48 @@ test('an unknown cost is never summed as zero, a demo item is left out, and a pa
   assert.deepEqual(combinedMoney([{ count: 1, usd: null, final: false, unknown: 1 }, { count: 0, usd: 0, final: true, unknown: 0 }]), { count: 1, usd: 0, final: false, unknown: 1 });
   assert.deepEqual(combinedMoney([{ count: 1, usd: null, final: false, unknown: 1 }, { count: 2, usd: null, final: false, unknown: 2 }]).usd, null);
   assert.deepEqual(combinedMoney([{ count: 1, usd: 1.1, final: true, unknown: 0 }, { count: 1, usd: 2.2, final: true, unknown: 0 }]), { count: 2, usd: 3.3, final: true, unknown: 0 });
+});
+
+test('a chat message costs what Ploeg reports, is final only once settled, and is unknown when Ploeg cannot say', () => {
+  assert.deepEqual(chatPrice({}, { costStatus: 'settled', usd: 0.0021 }), { demo: false, usd: 0.0021, settled: true });
+  assert.deepEqual(chatPrice({}, { costStatus: 'observed', usd: 0.01 }), { demo: false, usd: 0.01, settled: false });
+  assert.deepEqual(chatPrice({}, { costStatus: 'unknown', usd: 0.05 }), { demo: false, usd: null, settled: false }, 'Ploeg’s unknown is unknown even with a number, so the hold is never read as the cost');
+  assert.deepEqual(chatPrice({}, null), { demo: false, usd: null, settled: false });
+  assert.deepEqual(chatPrice({ settled: { usd: 0.003 } }, null), { demo: false, usd: 0.003, settled: true });
+});
+
+test('Your usage counts the person’s own admitted chat messages at Ploeg’s cost and asks Ploeg again only until one settles', async () => {
+  const db = new DatabaseSync(':memory:');
+  const chats = new ChatStore(db);
+  const now = new Date('2026-11-23T12:00:00Z');
+  const chat = (id: string, owner: string) => chats.save({ id, owner: { id: owner, name: owner, role: 'operator' }, title: id, team: 'delivery', createdAt: now.toISOString(), updatedAt: now.toISOString(), allowance: null });
+  const turn = (chatId: string, id: string, seq: number, startedAt: string, admitted: boolean): void => chats.saveTurn({ chatId, id, seq, startedAt, finishedAt: startedAt, text: 'hi', responseParts: [], state: 'complete', admission: admitted ? { team: 'delivery', chatId: `ploeg-${id}` } : null });
+  chat('c-op', 'op'); chat('c-other', 'other');
+  turn('c-op', 'settled', 1, '2026-11-20T10:00:00.000Z', true);
+  turn('c-op', 'open', 2, '2026-11-21T10:00:00.000Z', true);
+  turn('c-op', 'unreadable', 3, '2026-11-22T10:00:00.000Z', true);
+  turn('c-op', 'refused', 4, '2026-11-22T11:00:00.000Z', false);
+  turn('c-op', 'last-month', 5, '2026-10-30T10:00:00.000Z', true);
+  turn('c-other', 'theirs', 1, '2026-11-22T10:00:00.000Z', true);
+  const records: Record<string, Pick<PloegChatRecord, 'costStatus' | 'usd'>> = { 'ploeg-settled': { costStatus: 'settled', usd: 0.0021 }, 'ploeg-open': { costStatus: 'observed', usd: 0.004 }, 'ploeg-theirs': { costStatus: 'settled', usd: 9 } };
+  const asked: string[] = [];
+  const usage = new MyUsageService({
+    asksBetween: () => [], sessionSpendSince: () => [], linkedOwned: () => [],
+    chatTurns: (...args) => chats.admitted(...args),
+    chatRecord: async (_user, _team, chatId) => { asked.push(chatId); const record = records[chatId]; if (!record) throw new Error('Ploeg did not answer'); return { chatId, state: 'finished', ...record }; },
+    keepChatSettled: kept => chats.saveTurn(kept),
+  }, {} as AppConfig, { now: () => now });
+  const op: User = { id: 'op', name: 'op', role: 'operator' } as User;
+  const first = await usage.read(op, 'month');
+  assert.deepEqual(first.chats, { count: 3, usd: 0.0061, final: false, unknown: 1, truncated: false }, 'a refused message and last month’s are left out, an unreadable one is unknown, never the hold');
+  assert.deepEqual(first.spent, { count: 3, usd: 0.0061, final: false, unknown: 1 });
+  assert.deepEqual(asked.sort(), ['ploeg-open', 'ploeg-settled', 'ploeg-unreadable'], 'only the caller’s own messages are read from Ploeg');
+  assert.deepEqual((chats.turns('c-op').find((entry: ChatTurn) => entry.id === 'settled'))?.settled, { usd: 0.0021 }, 'a settled cost is kept');
+  asked.length = 0;
+  await usage.read(op, 'month');
+  assert.deepEqual(asked.sort(), ['ploeg-open', 'ploeg-unreadable'], 'a settled message is not read from Ploeg again');
+  assert.deepEqual(first.notAttributed.map(entry => entry.source), ['ploeg_runs', 'chats']);
+  assert.match(first.notAttributed[1].reason, /chats you deleted/);
 });
 
 test('the Linked Session usage asks the metrics store for cost and tokens of the named sessions only', async () => {
@@ -97,6 +144,7 @@ test('Your usage answers only the signed-in person’s own Asks, sessions and Li
   assert.deepEqual(usage.asks, { count: 2, usd: 0.25, final: false, unknown: 1, demo: 0, truncated: false }, 'the unknown Ask is counted, not summed as zero, and last decade’s Ask is outside the month');
   assert.deepEqual(usage.sessions, { count: 1, usd: 1.5, final: true, unknown: 0, budgetUsd: 4, demo: 0, truncated: false });
   assert.deepEqual(usage.spent, { count: 3, usd: 1.75, final: false, unknown: 1 });
+  assert.deepEqual(usage.chats, { count: 0, usd: 0, final: true, unknown: 0, truncated: false }, 'no chat message of theirs was admitted');
   assert.deepEqual([usage.linkedSessions.count, usage.linkedSessions.estimateUsd, usage.linkedSessions.telemetry, usage.linkedSessions.costStatus], [1, 4.5, 'connected', 'estimate']);
   assert.deepEqual(usage.linkedSessions.tokens, { input: 5000, output: 700, cacheRead: 0, cacheCreation: 0 });
   assert.deepEqual(usage.notAttributed.map((entry: { source: string }) => entry.source), ['ploeg_runs', 'chats']);

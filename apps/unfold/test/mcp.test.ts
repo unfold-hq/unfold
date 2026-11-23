@@ -94,6 +94,8 @@ test('unfold-mcp tells a client what waits, why, and what to do, from the demo w
   const usage = await call(server, 'unfold_my_usage');
   assert.equal(usage.isError, undefined, JSON.stringify(usage));
   assert.match(usage.structuredContent.summary, /^Your usage this month: \$0\.00 spent through Unfold .*Work handed to Ploeg is not attributed to you yet\.$/);
+  assert.match(usage.structuredContent.summary, /; 0 chat messages: \$0\.00, paid from their Team's chat allowance\)\./, 'chat messages are counted beside Asks and sessions');
+  assert.deepEqual(usage.structuredContent.usage.chats, { count: 0, usd: 0, final: true, unknown: 0, truncated: false });
   assert.equal(usage.structuredContent.usage.period, 'month');
   assert.equal((await call(server, 'unfold_my_usage', { period: '1y' })).isError, true);
 

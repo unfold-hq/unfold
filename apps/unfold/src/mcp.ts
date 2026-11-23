@@ -318,7 +318,7 @@ export function createMcpServer(options: McpOptions & McpPromptOptions & McpReso
     },
     {
       name: 'unfold_my_usage', title: 'My usage',
-      description: 'What your own Asks, workbench sessions and Linked Claude Code sessions cost this UTC month or in the last 30 days, split by source. Linked Claude Code sessions carry Claude Code\'s own estimate at API prices and tokens, not a bill. Only your own usage, whatever your role. Use unfold_spend for a Team\'s spend.',
+      description: 'What your own Asks, workbench sessions, Agents window chat messages and Linked Claude Code sessions cost this UTC month or in the last 30 days, split by source. A chat message is paid from its Team\'s chat allowance and counts once Ploeg reports its cost. Linked Claude Code sessions carry Claude Code\'s own estimate at API prices and tokens, not a bill. Only your own usage, whatever your role. Use unfold_spend for a Team\'s spend.',
       inputSchema: object({ period: string('month (this UTC calendar month) or 30d; default month', { enum: ['month', '30d'] }) }),
       outputSchema: object({ summary: { type: 'string' }, usage: { type: 'object', description: 'As GET /api/me/usage answers it; a null amount is unknown, never zero' } }, ['summary', 'usage']),
       async run(args) {
@@ -327,8 +327,9 @@ export function createMcpServer(options: McpOptions & McpPromptOptions & McpReso
         const { usage } = await get(`/api/me/usage?period=${period}`);
         const money = (part: Json) => part.usd === null ? 'not known yet' : `${part.unknown ? 'at least ' : ''}${usd(cents(part.usd))}${part.final ? '' : ', not final yet'}`;
         const linked = usage.linkedSessions as Json;
+        const chats = (usage.chats ?? { count: 0, usd: 0, final: true, unknown: 0 }) as Json;
         const estimate = linked.telemetry === 'not_configured' ? 'no telemetry is connected, so no estimate' : linked.estimateUsd === null ? `estimate unknown: ${clip(linked.reason, 300)}` : `about ${usd(cents(linked.estimateUsd))} at API prices`;
-        const summary = `Your usage ${period === 'month' ? 'this month' : 'in the last 30 days'}: ${money(usage.spent)} spent through Unfold (${usage.asks.count} Asks: ${money(usage.asks)}; ${usage.sessions.count} workbench sessions: ${money(usage.sessions)} of ${usd(cents(usage.sessions.budgetUsd))} budget). Linked agent sessions: ${linked.count}, ${estimate}. Work handed to Ploeg is not attributed to you yet.`;
+        const summary = `Your usage ${period === 'month' ? 'this month' : 'in the last 30 days'}: ${money(usage.spent)} spent through Unfold (${usage.asks.count} Asks: ${money(usage.asks)}; ${usage.sessions.count} workbench sessions: ${money(usage.sessions)} of ${usd(cents(usage.sessions.budgetUsd))} budget; ${chats.count} chat messages: ${money(chats)}, paid from their Team's chat allowance). Linked agent sessions: ${linked.count}, ${estimate}. Work handed to Ploeg is not attributed to you yet.`;
         return { summary, usage };
       },
     },

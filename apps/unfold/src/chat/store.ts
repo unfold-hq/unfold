@@ -38,6 +38,11 @@ export class ChatStore {
     return (this.db.prepare('SELECT body FROM chat_turns WHERE chat_id=? ORDER BY seq DESC LIMIT ?').all(chatId, limit) as { body: string }[]).map(row => JSON.parse(row.body) as ChatTurn).reverse();
   }
 
+  /** One person's chat turns that Ploeg admitted and that started in `[since, until)`, newest first, at most `limit`. */
+  admitted(ownerId: string, since: string, until: string, limit: number): ChatTurn[] {
+    return (this.db.prepare(`SELECT t.body FROM chat_turns t JOIN chats c ON c.id=t.chat_id WHERE c.owner_id=? AND json_extract(t.body,'$.admission') IS NOT NULL AND json_extract(t.body,'$.startedAt')>=? AND json_extract(t.body,'$.startedAt')<? ORDER BY json_extract(t.body,'$.startedAt') DESC LIMIT ?`).all(ownerId, since, until, limit) as { body: string }[]).map(row => JSON.parse(row.body) as ChatTurn);
+  }
+
   nextSeq(chatId: string): number {
     const row = this.db.prepare('SELECT MAX(seq) AS seq FROM chat_turns WHERE chat_id=?').get(chatId) as { seq: number | null } | undefined;
     return Number(row?.seq ?? 0) + 1;

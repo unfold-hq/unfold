@@ -27,6 +27,14 @@ test('Linked Sessions say when no telemetry is connected instead of a zero estim
   assert.match(known, /A Claude plan is not billed this/);
 });
 
+test('the page shows chat messages beside Asks and sessions, paid from the Team’s chat allowance', () => {
+  const page = usageMarkup(usage({ spent: money({ count: 3, usd: 0.0061, final: false, unknown: 1 }), chats: { ...money({ count: 3, usd: 0.0061, final: false, unknown: 1 }), truncated: false } }));
+  assert.match(page, /Chat/);
+  assert.match(page, /3 messages · 1 not known yet · paid from the Team’s chat allowance/);
+  assert.match(usageMarkup(usage({ chats: { ...money(), truncated: true } })), /Asks, sessions and chat messages are counted/);
+  assert.doesNotMatch(usageMarkup(usage()), /chat allowance/, 'an answer from an older Unfold without chats shows no chat tile');
+});
+
 test('the page shows spend by source, demo items left out, and what is not attributed yet', () => {
   const page = usageMarkup(usage({ spent: money({ count: 2, usd: 1.75 }), asks: { ...money({ count: 1, usd: 0.25 }), demo: 2, truncated: false }, sessions: { ...money({ count: 1, usd: 1.5 }), budgetUsd: 4, demo: 0, truncated: false } }), '<div class="segmented"></div>');
   for (const heading of ['Spent through Unfold', 'Asks', 'Started in Unfold', 'Your own agent sessions', 'Not attributed to you yet']) assert.match(page, new RegExp(heading));

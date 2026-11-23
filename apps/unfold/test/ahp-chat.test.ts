@@ -8,7 +8,7 @@ import { testTimeout } from './timeframes.ts';
 import { ChatService, chatMaxRounds, demoChatReply, type ChatAuthority } from '../src/chat/service.ts';
 import { mcpToolbox } from '../src/chat/tools.ts';
 import { ChatAllowanceUsedUp, PloegClient, PloegError, type PloegChatAllowance } from '../src/ploeg.ts';
-import { chatSessionUri } from '../src/ahp/chats.ts';
+import { chatSessionUri, heldNote } from '../src/ahp/chats.ts';
 
 type Server = Awaited<ReturnType<typeof application>>;
 type Reply = { content?: string; calls?: { name: string; arguments?: Json }[] } | { status: number; body: string };
@@ -80,11 +80,19 @@ test('the Agents window lists the Unfold chat first, before Unfold teams, for 0.
     assert.deepEqual(agents[0].protectedResources, [], 'no GitHub sign-in gate');
     const resolved = await client.rpc('resolveSessionConfig', { channel: 'ahp-root://', provider: 'unfold-chat' });
     assert.deepEqual(resolved.schema.properties.team.enum, ['delivery', 'research']);
-    assert.match(resolved.schema.properties.team.enumDescriptions[0], /4,55 of .*5,00 left until 1 November/);
+    assert.match(resolved.schema.properties.team.enumDescriptions[0], /4,55 of .*5,00 left until 1 November \(US\\?\$\s0,05 held until settled, at most US\\?\$\s0,05 per message\)$/, 'the picker says what is only held and the most one message holds');
+    assert.match(agents[0].description, /holds a fixed amount per message and later settles it to what the answer actually cost\.$/, 'the chat says each message is a hold settled to its actual cost');
     assert.equal(resolved.values.team, 'delivery');
     const teams = await client.rpc('resolveSessionConfig', { channel: 'ahp-root://', provider: 'unfold' });
     assert.ok(teams.schema.properties.repository, 'the Unfold teams schema is unchanged');
   }
+});
+
+test('the held note names what Ploeg still holds and the most one message holds, and says nothing it does not know', () => {
+  const base = { remainingUsd: 1.85, limitUsd: 2, resetAt: '2026-12-01T00:00:00Z' };
+  assert.match(heldNote({ ...base, settledUsd: 0.05, heldUsd: 0.1, chatBudgetUsd: 0.05 }), /^US\$\s0,10 held until settled, at most US\$\s0,05 per message$/);
+  assert.match(heldNote({ ...base, settledUsd: 0.15, heldUsd: 0, chatBudgetUsd: 0.05 }), /^each message holds at most US\$\s0,05 until its actual cost settles$/, 'with nothing held, the per-message hold is still explained');
+  assert.equal(heldNote(base), '', 'a chat saved before Unfold kept the held part shows only what is left');
 });
 
 test('a short "test" gets an answer in a 0.9 chat, paid by one admission whose key is finished', { timeout: testTimeout(30_000) }, async t => {
@@ -101,7 +109,8 @@ test('a short "test" gets an answer in a 0.9 chat, paid by one admission whose k
   assert.equal(done.params.action.type, 'chat/turnComplete');
   const parts = client.inbox.filter(message => action(message, chat, 'chat/responsePart')).map(message => message.params.action.part.content);
   assert.equal(parts[0], 'Hello from Unfold.');
-  assert.match(parts[1], /Team delivery · US\\\$\s4,55 of US\\\$\s5,00 chat allowance left, until 1 November/);
+  assert.match(parts[1], /Team delivery · US\\\$\s4,55 of US\\\$\s5,00 chat allowance left \(US\\\$\s0,05 held until settled, at most US\\\$\s0,05 per message\), until 1 November\*$/, 'the line after an answer says what is only held, never as if the hold were the cost');
+  assert.doesNotMatch(parts[1], /…/);
   assert.deepEqual(fake.admitted.map(entry => [entry.team, entry.message]), [['delivery', 'test']]);
   assert.deepEqual(fake.finished, [fake.admitted[0].chatId], 'the key is finished once the turn ends');
   assert.equal(fake.requests.length, 1);

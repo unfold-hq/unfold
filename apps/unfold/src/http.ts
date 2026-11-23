@@ -59,6 +59,7 @@ import { knownSecrets, withoutKnownSecrets } from './redaction.ts';
 import { AskService, type AskAuthority } from './ask/service.ts';
 import { ChatService, type ChatAuthority } from './chat/service.ts';
 import { mcpToolbox } from './chat/tools.ts';
+import { ChatStore } from './chat/store.ts';
 import { RunHealthService } from './run-health/service.ts';
 import { RunJudge, defaultJudgeModels } from './run-health/judge.ts';
 import { ChatDecider } from './decider/decider.ts';
@@ -311,7 +312,8 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const linkedUsage = new LinkedUsage(store.db, config, { jobs });
   const linked = new LinkedSessions(store.db, config, ploeg, { resolveTasks: references.resolve, usage: linkedUsage });
   const linkedHandoff = new LinkedHandoff(linked, ploeg, store, config);
-  const usage = new MyUsageService({ asksBetween: (...args) => store.asksBetween(...args), sessionSpendSince: (...args) => store.sessionSpendSince(...args), linkedOwned: (ownerId, limit) => linked.store.owned(ownerId, limit), recordedUsage: id => linkedUsage.recorded(id) }, config);
+  const chatStore = new ChatStore(store.db);
+  const usage = new MyUsageService({ asksBetween: (...args) => store.asksBetween(...args), sessionSpendSince: (...args) => store.sessionSpendSince(...args), linkedOwned: (ownerId, limit) => linked.store.owned(ownerId, limit), recordedUsage: id => linkedUsage.recorded(id), chatTurns: (...args) => chatStore.admitted(...args), chatRecord: (user, team, chatId) => ploeg.chatRecord(user, team, chatId), keepChatSettled: turn => chatStore.saveTurn(turn) }, config);
   const takeOver = new TakeOver(ploeg);
   const inbox = new LinkedInbox(store.db, linked.store, ploeg);
   const conversation = new LinkedConversation(linked.store);
