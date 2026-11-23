@@ -66,7 +66,7 @@ async function fakePloeg(t: TestContext): Promise<Fake> {
     if (req.method === 'DELETE' && path.startsWith('tracker-connections/')) return reply(204);
     if (req.method === 'GET' && path === 'tracker-bindings') return reply(200, { bindings: fake.bindings });
     if (req.method === 'GET' && path === 'targets' && fake.targets) return reply(200, { schemaVersion: '1.0', targets: fake.targets });
-    if (req.method === 'POST' && path === 'teams/delivery/tracker-bindings?dryRun=true') return reply(200, { binding: { team: 'delivery', connection: 'clickup-unfold', scope: { id: '777', name: 'Sprint 12' }, default: 'shop', allow: [] }, checks: [{ id: 'scope_readable', status: 'ok' }, { id: 'target_ready', status: 'ok' }] });
+    if (req.method === 'POST' && path === 'teams/delivery/tracker-bindings?dryRun=true') return reply(200, { binding: { team: 'delivery', connection: 'clickup-unfold', scope: { id: '777', name: 'Sprint 12' }, default: 'shop', allow: [] }, checks: [{ check: 'scope_readable', ok: true, code: null, message: 'The List is readable.' }, { check: 'targets_ready', ok: true, code: null, message: 'Every target is ready.' }] });
     if (req.method === 'POST' && path === 'teams/delivery/tracker-bindings') {
       const existing = fake.bindings.find(entry => entry.id === 'b-1');
       if (existing) return reply(200, { binding: existing, created: false });
@@ -175,7 +175,7 @@ test('binding a List runs the dry run first, offers only ready repositories, and
   assert.equal(writes(fake).length, before, 'a repository that is not ready sends Ploeg nothing');
   const dry = await clickup.bind(admin, { connection: kept.id, list: { id: '777' }, team: 'delivery', default: 'shop', dryRun: true });
   assert.equal(dry.dryRun, true);
-  assert.deepEqual(dry.checks.map(check => check.status), ['ok', 'ok']);
+  assert.deepEqual(dry.checks.map(check => [check.id, check.status]), [['scope_readable', 'ok'], ['targets_ready', 'ok']], 'Ploeg’s own check shape: check, ok, code, message');
   const made = await clickup.bind(admin, { connection: kept.id, list: { id: '777' }, team: 'delivery', default: 'shop' });
   assert.deepEqual(writes(fake).slice(-2).map(entry => entry.path), ['teams/delivery/tracker-bindings?dryRun=true', 'teams/delivery/tracker-bindings']);
   assert.deepEqual(writes(fake).at(-1)?.body, { connection: 'clickup-unfold', scope: { id: '777' }, default: 'shop', allow: [] });
