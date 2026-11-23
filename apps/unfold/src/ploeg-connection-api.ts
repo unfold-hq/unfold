@@ -39,6 +39,9 @@ export type PloegBindResult = { binding: PloegBinding | null; created: boolean; 
 /** The binding body Unfold sends: the connection, the List by id, and registered Work Target keys only (rule R11). */
 export type PloegBindInput = { connection: string; scope: { id: string }; default: string; allow: string[]; label?: string };
 
+/** A Work Target a person registered at runtime (Ploeg ADR-0193), which Ploeg's connections read leaves out. */
+export type PloegWorkTarget = { key: string; state: string; forge: string; repository: string; branch: string; readiness: 'ready' | 'not_ready' | 'unknown' };
+
 /**
  * Ploeg's connection, Scope read and binding routes, as one interface so the onboarding can be built and tested
  * before Ploeg serves them. The live adapter's routes are those of Ploeg ADR-0195 and ADR-0186; the Scope read is
@@ -55,6 +58,7 @@ export interface PloegConnectionApi {
   bindings(user: User): Promise<PloegBinding[]>;
   bind(user: User, team: string, input: PloegBindInput, dryRun: boolean): Promise<PloegBindResult>;
   unbind(user: User, team: string, id: string): Promise<void>;
+  targets(user: User): Promise<PloegWorkTarget[]>;
 }
 
 /** The one call the live adapter needs: `PloegClient.operatorCall`. */
@@ -168,4 +172,19 @@ export class HttpPloegConnectionApi implements PloegConnectionApi {
   }
 
   async unbind(user: User, team: string, id: string): Promise<void> { await this.call(user, `teams/${segment(team)}/tracker-bindings/${segment(id)}`, { method: 'DELETE' }); }
+
+  async targets(user: User): Promise<PloegWorkTarget[]> {
+    const data = object(await this.call(user, 'targets'));
+    return list(data.targets, workTarget, 1000).filter(target => target.key && target.repository);
+  }
+}
+
+export function workTarget(value: unknown): PloegWorkTarget {
+  const data = object(value);
+  const readiness = data.readiness && typeof data.readiness === 'object' ? data.readiness as Record<string, unknown> : {};
+  return {
+    key: optional(data.key, 128) ?? '', state: optional(data.state, 64) ?? '', forge: optional(data.forge, 128) ?? '',
+    repository: optional(data.repository, 300) ?? '', branch: optional(data.branch, 255) ?? '',
+    readiness: oneOf(readiness.state, ['ready', 'not_ready'] as const, 'unknown'),
+  };
 }

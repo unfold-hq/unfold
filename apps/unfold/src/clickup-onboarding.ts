@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { PloegError, PloegOperatorRefusal, type PloegConnections, type PloegTeam } from './ploeg.ts';
-import type { PloegBinding, PloegBindingCheck, PloegConnectionApi, PloegScopeLevel, PloegTrackerConnection } from './ploeg-connection-api.ts';
+import type { PloegBinding, PloegBindingCheck, PloegConnectionApi, PloegScopeLevel, PloegTrackerConnection, PloegWorkTarget } from './ploeg-connection-api.ts';
 import { optInRefusals, pinnedRelease, ploegSteps, unavailableText, type ChecklistLine, type OptInRefusal, type PloegStep, type StepId } from './onboarding.ts';
 import { findTaskProvider, type ServiceAccountGuide } from './task-providers/index.ts';
 import { apiRoot, type TaskTarget } from './tasks.ts';
@@ -244,16 +244,25 @@ export class ClickUpOnboarding {
   /** What the map step offers: Teams, each with whether a List may be bound to it now, and only the repositories Ploeg reports ready. */
   async mapOptions(user: User): Promise<{ teams: BindableTeam[]; repositories: BindableRepository[]; waiting: string[] }> {
     this.manage(user);
-    const [connections, teams] = await Promise.all([this.options.reads.connections(user, true), this.options.reads.routing(user, true)]);
-    const { ready, waiting } = this.bindable(connections);
+    const [connections, teams, registered] = await Promise.all([this.options.reads.connections(user, true), this.options.reads.routing(user, true), this.registeredTargets(user)]);
+    const { ready, waiting } = this.bindable(connections, registered);
     return { teams: teams.all.map(team => ({ id: team.id, bindable: team.spendCap !== null })), repositories: ready, waiting };
   }
 
-  private bindable(connections: PloegConnections): { ready: BindableRepository[]; waiting: string[] } {
+  private async registeredTargets(user: User): Promise<PloegWorkTarget[]> {
+    try { return await this.options.api.targets(user); } catch { return []; }
+  }
+
+  private bindable(connections: PloegConnections, registered: PloegWorkTarget[]): { ready: BindableRepository[]; waiting: string[] } {
     const repositories = this.connections.repositoriesOf(defaultTenant);
     const ready: BindableRepository[] = [];
     const waiting: string[] = [];
-    for (const target of connections.repositories) {
+    const reported = new Set(connections.repositories.map(target => target.key));
+    const runtime = registered.filter(target => target.state === 'active' && !reported.has(target.key)).map(target => {
+      const [owner, ...rest] = target.repository.split('/');
+      return { key: target.key, forge: target.forge, owner: owner ?? '', repo: rest.join('/'), baseBranch: target.branch, readiness: target.readiness };
+    });
+    for (const target of [...connections.repositories, ...runtime]) {
       const path = `${target.owner}/${target.repo}`.toLowerCase();
       const own = repositories.find(repository => repositoryPath(repository.url) === path && repository.baseBranch === target.baseBranch);
       if (!own) continue;
@@ -279,7 +288,8 @@ export class ClickUpOnboarding {
     const allow = Array.isArray(input.allow) ? [...new Set(input.allow.filter((key): key is string => typeof key === 'string'))] : [];
     if (!listId.test(scope) || !team || team.length > 128 || !targetKey.test(defaultKey) || allow.length > 20 || allow.some(key => !targetKey.test(key))) throw fail(400, 'invalid_input', 'Send the connection, the List id, the Team, the default repository key and at most 20 further repository keys.');
     await this.options.steps.admit(user, 'bind-lists', team);
-    const { ready, waiting } = this.bindable(await this.options.reads.connections(user, true));
+    const [connections, registered] = await Promise.all([this.options.reads.connections(user, true), this.registeredTargets(user)]);
+    const { ready, waiting } = this.bindable(connections, registered);
     const chosen = [defaultKey, ...allow].map(key => ready.find(repository => repository.key === key));
     if (chosen.some(found => !found)) throw fail(409, 'repository_not_ready', `Unfold binds a List only to repositories Ploeg reports ready${waiting.length ? `; ${waiting.join(', ')} ${waiting.length === 1 ? 'waits' : 'wait'} for its readiness pull request to be merged` : ''}. Nothing was sent to Ploeg.`);
     const name = typeof list.name === 'string' && list.name.trim() ? list.name.trim().slice(0, 100) : '';
