@@ -40,7 +40,7 @@ Unfold connects to people, their tools, Ploeg and outside systems in more than t
 |---|---|---|---|---|
 | **Linked accounts › ClickUp** | you | Unfold, sealed for your account | Pick ClickUp Lists by name under **Connect a tracker**; read ClickUp sources that name no `tokenEnv` with your own account. It does not hand work to Ploeg. | removed: no personal tracker links (ADR-0060 rule 6) |
 | **Linked accounts › GitLab** | you | Unfold, sealed for your account | Sessions started in Unfold clone private repositories from that GitLab host; GitLab issue sources read with your own account. Only the clone step gets the token, never the agent. Work handed to Ploeg does not use it. | removed: no personal forge links (ADR-0060 rule 6) |
-| **Connect Claude** | you | Ploeg | **Start with my Claude** on a Work Item: Ploeg starts your own Claude routine for that Team. Needs Ploeg 0.2.0-rc.128 or later. | stands |
+| **Claude** (a card on Linked accounts) | you | Ploeg | **Start with my Claude** on a Work Item: Ploeg starts your own Claude routine for that Team. Needs Ploeg 0.2.0-rc.128 or later. | stands |
 | **Card logins** | you | none: only logins | Run cards from those forge and tracker logins in your binder and packs. Never used for attribution. | stands |
 | **Notifications** (ntfy, Web Push, Slack, Microsoft Teams) | you | Unfold: a topic, a push subscription, a Slack user, a Teams workflow URL | A notice when something waits for you; in Slack also answering tool-permission prompts. Behind the `notifications.push` flag. | stands: a product integration (ADR-0060 rule 2) |
 

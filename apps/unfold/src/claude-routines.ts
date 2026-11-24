@@ -4,7 +4,7 @@ import type { User } from './types.ts';
 
 /** A person's own claude.ai routine for one Team as Ploeg reports it (Ploeg ADR-0197 section 7). It never carries the token. */
 export type ClaudeRoutine = { team: string; fireUrl: string; creatorPinned: boolean; registeredAt: string; updatedAt: string };
-/** One of the person's Teams on Connect Claude, with their routine for it or null. */
+/** One of the person's Teams on Linked accounts, with their routine for it or null. */
 export type ClaudeRoutineTeam = { team: string; routine: ClaudeRoutine | null };
 /** `GET /api/claude-routines`: whether Ploeg serves the step, what it refused, and the person's Teams with their routines. */
 export type ClaudeRoutineOverview = {
@@ -22,9 +22,9 @@ export const routineRefusalTable = [
   { status: 422, code: 'routines_not_accepted', words: 'This installation does not start Runs through a person’s own Claude routine. The person who installed Ploeg turns it on with PLOEG_CLAUDE_ROUTINES and the credential gateway (Ploeg ADR-0197).' },
   { status: 409, code: 'credential_gateway_required', words: 'Ploeg starts a Run through your routine only once its credential gateway is configured, so nothing started and the Run keeps waiting. The person who installed Ploeg configures the gateway.' },
   { status: 409, code: 'no_routine_team', words: 'No Role of this Team starts its Runs through a Claude routine, so there is nothing to connect for it.' },
-  { status: 409, code: 'routine_not_registered', words: 'You have not connected your Claude routine for this Team. Connect it on Settings → Connect Claude, then start the Work Item again.' },
+  { status: 409, code: 'routine_not_registered', words: 'You have not connected your Claude routine for this Team. Connect it on Settings → Linked accounts, then start the Work Item again.' },
   { status: 429, code: 'routine_rate_limited', words: 'Your routine was started as often this hour as Anthropic allows: 30 times an hour per routine and 100 per account, and Ploeg keeps some room below that. Try again in the next hour.' },
-  { status: 409, code: 'routine_token_refused', words: 'Anthropic refused your routine’s token: it was rotated, or the API trigger was deleted. Paste the current fire URL and token on Settings → Connect Claude. This Run ended stuck.' },
+  { status: 409, code: 'routine_token_refused', words: 'Anthropic refused your routine’s token: it was rotated, or the API trigger was deleted. Paste the current fire URL and token on Settings → Linked accounts. This Run ended stuck.' },
   { status: 409, code: 'routine_not_found', words: 'Anthropic has no routine or API trigger at the fire URL you connected. Check the routine in claude.ai and connect its current fire URL. This Run ended stuck.' },
   { status: 503, code: 'routines_unavailable', words: 'Anthropic’s routines service could not start the session. This Run ended stuck; try again later.' },
   { status: 503, code: 'routine_fire_unrecorded', words: 'Your routine started a session, but Ploeg could not record it, so that session is never tied to the Run. Stop the session in claude.ai. This Run ended stuck.' },
@@ -47,13 +47,22 @@ export function routineRefusalWords(code: string): string {
 }
 
 const step: StepId = 'connect-claude';
-const connectClaudeHref = '#settings/claude';
+const connectClaudeHref = '#settings/accounts';
 const teamPattern = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const workItemPattern = /^[1-9][0-9]{0,18}$/;
 const tokenPattern = /^[\x21-\x7e]{16,512}$/;
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const short = (value: unknown, max: number): string => typeof value === 'string' ? value.slice(0, max) : '';
 const list = (items: string[]) => items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
+
+/**
+ * The Teams a routine may be connected for. Only a `claude-environment` Role can have a routine carrier, so a Ploeg that
+ * reports its Roles' Harnesses rules the other Teams out; one that predates the field rules out none.
+ */
+export function routineCandidates(teams: PloegTeam[]): PloegTeam[] {
+  const reported = teams.some(team => team.roles.some(role => role.harness !== undefined));
+  return reported ? teams.filter(team => team.roles.some(role => role.harness === 'claude-environment')) : teams;
+}
 
 type PloegCalls = {
   operatorCall(user: User, path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'DELETE'; body?: unknown; slow?: boolean; person?: boolean; proven?: boolean }): Promise<Record<string, unknown> | null>;
@@ -87,7 +96,7 @@ function fireUrlOf(value: unknown): string | null {
 }
 
 /**
- * Connect Claude and Start with my Claude (Ploeg ADR-0197 section 7). A person connects their own claude.ai routine,
+ * The Claude card of Linked accounts and Start with my Claude (Ploeg ADR-0197 section 7). A person connects their own claude.ai routine,
  * with an API trigger on the installation's self-hosted environment, once per Team; Unfold relays its fire URL and
  * token to Ploeg as the proven person and keeps neither the token nor anything derived from it. Unfold remembers only
  * which Teams the person connected, for the onboarding checklist. Starting a Work Item asks Ploeg to fire the routine
@@ -117,7 +126,7 @@ export class ClaudeRoutines {
     if (this.options.ploeg.isDemo) return { demo: true, served: false, waitsFor: null, refused: null, teams: [] };
     const { step: record, served } = await this.options.steps.available(user, step, true);
     if (served !== true) return { demo: false, served, waitsFor: served === false ? { record: record.record, release: record.release } : null, refused: null, teams: [] };
-    const teams = (await this.options.ploeg.teams(user, true).catch(() => [] as PloegTeam[])).map(team => team.id);
+    const teams = routineCandidates(await this.options.ploeg.teams(user, true).catch(() => [] as PloegTeam[])).map(team => team.id);
     let routines: ClaudeRoutine[];
     try { routines = await this.read(user); }
     catch (error) {
@@ -198,6 +207,6 @@ export class ClaudeRoutines {
     const action = user.role === 'viewer' ? {} : { action: { label: teams.length ? 'Manage' : 'Connect Claude', href: connectClaudeHref, kind: 'link' as const } };
     return teams.length
       ? { id: 'connect-claude', stage: 10, title: 'Connect Claude', status: 'ok', text: `Your Claude routine is connected for ${list(teams)}. Ploeg keeps its token; Unfold keeps none.`, ...action }
-      : { id: 'connect-claude', stage: 10, title: 'Connect Claude', status: 'pending', text: 'Only for Teams that start their Runs through your own Claude routine: create a routine in claude.ai with an API trigger on this installation’s self-hosted environment, then paste its fire URL and token. Ploeg keeps the token; Unfold never stores it.', ...action };
+      : { id: 'connect-claude', stage: 10, title: 'Connect Claude', status: 'pending', text: 'Only for Teams that start their Runs through your own Claude routine: create a routine in claude.ai with an API trigger on this installation’s self-hosted environment, then paste the trigger’s URL and token. Ploeg keeps the token; Unfold never stores it.', ...action };
   }
 }

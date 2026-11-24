@@ -8,6 +8,7 @@ const moved = {
   account: 'settings/accounts',
   system: 'settings/environment',
   settings: 'settings/preferences',
+  'settings/claude': 'settings/accounts',
 };
 
 /**

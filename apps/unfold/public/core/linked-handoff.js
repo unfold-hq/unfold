@@ -110,7 +110,7 @@ function startInClaudeMarkup(detail, model) {
   if (!yours) return callout({ tone: 'neutral', icon: 'info', title: 'Waits for its person’s Claude Code', body: `<p>${escape(wait.message || 'A Run of this Work Item waits for the person it acts for to start it from their own Claude Code.')}</p>` });
   const routines = model.claudeRoutines;
   if (Array.isArray(routines) && routines.includes(detail.item.team)) return startWithRoutineMarkup(detail, wait, model);
-  const hint = Array.isArray(routines) ? `<p class="meta">${escape('If this Team starts its Runs through your own Claude routine, connect it once on Settings → Connect Claude and start it here instead.')} <a href="#settings/claude">Connect Claude</a></p>` : '';
+  const hint = Array.isArray(routines) ? `<p class="meta">${escape('If this Team starts its Runs through your own Claude routine, connect it once on Settings → Linked accounts and start it here instead.')} <a href="#settings/accounts">Linked accounts</a></p>` : '';
   return `${startWithCommandMarkup(wait, command)}${hint}`;
 }
 
