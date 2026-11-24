@@ -242,7 +242,7 @@ const rows: Record<ErrorArea, readonly Row[]> = {
     ['team_not_dispatched', [409], 'The Team has no Plan, so Ploeg cannot run work for it.', 'Ask an administrator to give the Team a Plan in Ploeg.'],
     ['request_conflict', [409], 'Ploeg already admitted a different Work Item under this request.', 'Send the form again.'],
     ['dispatch_unavailable', [503], 'Ploeg\'s dispatch is off, so it takes no new work.', 'Try again later, or ask an administrator to turn dispatch on.'],
-    ['pool_above_limit', [409], 'The budget for the restart is above the Team\'s limit.', 'Raise the Team\'s budget, then try again.'],
+    ['pool_above_limit', [409], 'The restart may cost more than Unfold may ask of Ploeg.', 'Raise maxBudgetUsd of Unfold\'s consumer in Ploeg, or assign the task to the Team again in the tracker.'],
     ['not_requeueable', [409], 'Ploeg restarts only a Work Item that needs you or went stale and has no open Shift.', reload],
     ['state_changed', [409], 'The Work Item changed since you looked.', reload],
     ['operator_owned', [409], 'A workbench session drives this Work Item.', 'Act on that session instead.'],

@@ -17,8 +17,8 @@ import { enabled, exposed, flagValues, track } from '../core/flags.js';
 import { agentsWindowAvailable, openAgentsWindow } from '../agents-window.js';
 import { actionsCsv, actionsJson, engineRows, newestFirst, recordRow } from '../action-log.js';
 import { linkedChangedEvent } from './linked-sessions.js';
-import { answerDialogMarkup, answerField, noteDialogMarkup, noteLimit } from '../blackboard-view.js';
-import { answerLimit, answerNote, resumeOffer, waitingQuestion, waitingQuestions, writeError } from '../core/blackboard.js';
+import { answerDialogMarkup, answerField, noteDialogMarkup, noteLimit, resumeDialogMarkup } from '../blackboard-view.js';
+import { answerLimit, answerNote, answeredNotResumed, resumeOffer, waitingQuestion, waitingQuestions, writeError } from '../core/blackboard.js';
 import { detailReason, retryable } from '../core/reasons.js';
 import { retryMarkup, retryNotice } from '../start.js';
 import { attachSession, sessionParts } from './session.js';
@@ -1237,14 +1237,14 @@ function fieldError(form, name, message) {
   return Boolean(message);
 }
 
-async function sendWrite(id, path, body, settled) {
+async function sendWrite(id, path, body, settled, refused = message => message) {
   work.writeBusy = true;
   renderWork();
   try {
     const result = await api(`/api/ploeg/work-items/${encodeURIComponent(id)}/${path}`, { method: 'POST', body: JSON.stringify(body) });
     notify(settled(result));
   } catch (error) {
-    notify(error.message, true);
+    notify(refused(error.message), true);
   } finally {
     work.writeBusy = false;
     if (visible() && work.detailId === id) {
@@ -1284,7 +1284,42 @@ async function submitAnswer(data, form, event) {
     }
   }
   work.writeBusy = false;
-  await sendWrite(id, 'requeue', { commandId, expectedState: 'needs_human', ...(resume ? { resume: true } : {}) }, continued);
+  await sendWrite(id, 'requeue', { commandId, expectedState: 'needs_human', ...(resume ? { resume: true } : {}) }, continued, message => `Your answer is stored, but the work did not continue. ${message}`);
+}
+
+function resumeDialog(detail, extra = {}) {
+  return resumeDialogMarkup(detail, resumeOffer(detail), { demo: Boolean(detail.demo || state.bootstrap?.mode === 'demo'), ...extra });
+}
+
+function openResume(control) {
+  const detail = currentDetail();
+  if (!detail || !answeredNotResumed(detail).length || !resumeOffer(detail)?.ready || work.writeBusy || !canAddContext()) return;
+  const dialog = openPloegDialog(resumeDialog(detail));
+  dialog.addEventListener('close', () => { (control?.isConnected ? control : $('[data-action="work-resume"]'))?.focus({ preventScroll: true }); }, { once: true });
+}
+
+async function submitResume(_data, form) {
+  const detail = currentDetail();
+  const dialog = form.closest('dialog');
+  if (!detail || form.dataset.id !== detail.item.id || !resumeOffer(detail)?.ready) { dialog?.close(); return; }
+  if (work.writeBusy) return;
+  const id = detail.item.id;
+  work.writeBusy = true;
+  dialog.innerHTML = resumeDialog(detail, { busy: true });
+  try {
+    const result = await api(`/api/ploeg/work-items/${encodeURIComponent(id)}/requeue`, { method: 'POST', body: JSON.stringify({ commandId: crypto.randomUUID(), expectedState: 'needs_human', resume: true }) });
+    work.writeBusy = false;
+    dialog.close();
+    notify(continued(result));
+  } catch (error) {
+    work.writeBusy = false;
+    dialog.innerHTML = resumeDialog(detail, { error: error.message || 'Ploeg did not answer.' });
+    return;
+  }
+  if (!visible() || work.detailId !== id) return;
+  await Promise.all([loadOverview({ fresh: true, quiet: true }).catch(() => {}), loadDetail(id, { fresh: true, quiet: true }).catch(() => {})]);
+  renderWork();
+  if (!document.activeElement || document.activeElement === document.body) focusTitle();
 }
 
 function retryDialog(detail) {
@@ -1295,7 +1330,7 @@ function retryDialog(detail) {
 
 function openRetry(control) {
   const detail = currentDetail();
-  if (!detail || !retryable(detailReason(detail)) || work.writeBusy || !canAddContext()) return;
+  if (!detail || !(retryable(detailReason(detail)) || answeredNotResumed(detail).length) || work.writeBusy || !canAddContext()) return;
   const dialog = openPloegDialog(retryDialog(detail).markup());
   dialog.querySelector('#loop-retry-note')?.focus();
   dialog.addEventListener('close', () => { (control?.isConnected ? control : $('[data-action="work-retry"]'))?.focus({ preventScroll: true }); }, { once: true });
@@ -1584,6 +1619,7 @@ export default {
     'work-context-add': () => openContext(),
     'work-ask-open': () => openAsk(),
     'work-answer-open': () => openAnswer(),
+    'work-resume': control => openResume(control),
     'work-retry': openRetry,
     'work-note-open': () => openNote(),
     'work-take-control': () => openTakeControl(),
@@ -1598,7 +1634,7 @@ export default {
     'trace-dispute': openCrackStep('dispute'),
     'trace-resolve': openCrackStep('resolve'),
   },
-  forms: { 'trace-step': submitTraceStep, 'work-context': submitContext, 'work-ask': submitAsk, 'work-steer': submitSteer, 'work-answer': submitAnswer, 'work-retry': submitRetry, 'work-note': submitNote, 'work-take-control': submitTakeControl, 'work-hand-back': submitHandBack },
+  forms: { 'trace-step': submitTraceStep, 'work-context': submitContext, 'work-ask': submitAsk, 'work-steer': submitSteer, 'work-answer': submitAnswer, 'work-resume': submitResume, 'work-retry': submitRetry, 'work-note': submitNote, 'work-take-control': submitTakeControl, 'work-hand-back': submitHandBack },
   inputs: { '[data-run-log-search]': searchRunLog },
   changes: {
     '#ploeg-team': changeTeam,
