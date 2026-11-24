@@ -23,6 +23,13 @@ nav:
       - Use Unfold day to day: get-started/use-unfold.md
       - Hosted Unfold for agencies (proposed): get-started/agency.md
       - Contribute to Unfold: get-started/contribute.md
+  - Onboarding per integration:
+      - Overview: onboarding/index.md
+      - GitLab: onboarding/gitlab.md
+      - ClickUp: onboarding/clickup.md
+      - VS Code: onboarding/vscode.md
+      - Claude Code: onboarding/claude-code.md
+      - Open WebUI: onboarding/open-webui.md
   - Try it:
       - Both applications (demo): workflows/local-demo.md
       - Unfold without Ploeg (demo): unfold/operations/demo.md

@@ -165,7 +165,7 @@ def orphans(pages, nav, links):
 
 SOURCE_ROOTS = (('docs', ''), ('apps/unfold/docs', 'unfold'), ('apps/ploeg/docs', 'ploeg'))
 PAGE_TYPES = {'landing', 'tutorial', 'how-to', 'explanation', 'reference'}
-AUDIENCES = {'owner', 'operator', 'integrator', 'contributor', 'agent'}
+AUDIENCES = {'owner', 'operator', 'developer', 'product-owner', 'integrator', 'contributor', 'agent'}
 OWNERS = {'unfold', 'ploeg', 'unfold'}
 REQUIRED_FOLDERS = ('concepts/', 'how-to/', 'reference/')
 STALE_DAYS = 180
