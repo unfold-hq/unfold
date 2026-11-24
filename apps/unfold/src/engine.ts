@@ -1249,7 +1249,7 @@ export class Engine {
           : this.clean(classifyFailure(error, stage, stage === 'execution' ? 'unknown' : 'not_submitted'));
         session.blocker = session.failure.message;
         const hint = this.linkHint(session, stage);
-        if (hint) session.failure.detail = [session.failure.detail, hint].filter(Boolean).join('\n\n');
+        if (hint) session.failure.remediation = hint;
         for (const run of session.runs) if (['running', 'waiting_input'].includes(run.status)) { run.status = 'failed'; run.finishedAt = new Date().toISOString(); }
         this.resolvePermissions(id);
         this.save(session, 'session.failed', 'system', { message: session.blocker, code: session.failure.category, failure: session.failure });

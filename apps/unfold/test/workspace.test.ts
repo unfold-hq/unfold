@@ -157,6 +157,34 @@ test('pod waits read storage binding as scheduling and image pull errors as an u
   assert.deepEqual(podWait(placed([{ name: 'clone', state: { terminated: { exitCode: 0 } } }], [{ name: 'agent', state: { running: {} } }])), { phase: 'starting' });
   assert.deepEqual(podWait(placed([{ name: 'clone', state: { waiting: { reason: 'CreateContainerConfigError', message: 'secret "agent-keys" not found' } } }])), { phase: 'container_error', reason: 'CreateContainerConfigError: secret "agent-keys" not found' });
   assert.deepEqual(podWait(undefined), { phase: 'scheduling' });
+  assert.deepEqual(podWait(placed([{ name: 'clone', state: { terminated: { exitCode: 1, reason: 'Error' } } }])), { phase: 'container_error', reason: 'The clone container exited with code 1' });
+});
+
+test('a workspace whose clone failed says so with what git printed, never as a plain setup failure', async () => {
+  const config = configuration();
+  const failedClone = { phase: 'Failed', conditions: [{ type: 'PodScheduled', status: 'True' }], initContainerStatuses: [{ name: 'clone', state: { terminated: { exitCode: 1, reason: 'Error' } } }] };
+  const client = pendingPodClient(failedClone);
+  const logs: string[] = [];
+  const fake = { async request(path: string, method = 'GET', body?: any, missing?: boolean, raw?: boolean) {
+    if (path.includes('/log?container=clone')) { logs.push(path); assert.equal(raw, true); return "Cloning into '/workspace/repository'...\nfatal: could not read Username for 'https://gitlab.com': terminal prompts disabled\n"; }
+    return client.request(path, method, body);
+  } };
+  const manager = new KubernetesWorkspaces(config, fake as any);
+  const error = await manager.prepare(session, repository, credential, new AbortController().signal, managedConfig(config)).catch(caught => caught);
+  assert.ok(error instanceof RuntimeFailure);
+  assert.equal(error.category, 'workspace_setup');
+  assert.equal(error.promptAcceptance, 'not_submitted');
+  assert.match(error.detail!, /^git clone inside the workspace Pod exited with code 1\n/);
+  assert.match(error.detail!, /could not read Username for 'https:\/\/gitlab\.com'/);
+  assert.equal(logs.length, 1);
+  const silent = pendingPodClient(failedClone);
+  const unreadable = { async request(path: string, method = 'GET', body?: any) {
+    if (path.includes('/log?')) throw new Error('log unavailable');
+    return silent.request(path, method, body);
+  } };
+  const quiet = await new KubernetesWorkspaces(config, unreadable as any).prepare(session, repository, credential, new AbortController().signal, managedConfig(config)).catch(caught => caught);
+  assert.equal(quiet.category, 'workspace_setup');
+  assert.match(quiet.detail!, /exited with code 1/, 'a log that cannot be read still names the failed clone');
 });
 
 test('a workspace image that cannot be pulled fails as a missing executable', async () => {

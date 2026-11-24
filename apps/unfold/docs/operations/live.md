@@ -585,7 +585,7 @@ Ploeg's chart refuses to render `proven` with consumers and no `operator.personT
 
 Register one OAuth application per workbench in GitLab, under your user or the group that owns the repositories ([GitLab OAuth applications](https://docs.gitlab.com/integration/oauth_provider/)): redirect URI `<baseUrl>/api/links/gitlab/callback`, confidential off, scopes `read_api`, `read_repository` and `write_repository`. The application ID is not a secret. Put it in the profile as `links.gitlab.clientId`, or export `UNFOLD_GITLAB_CLIENT_ID`, and set `links.gitlab.baseUrl` for a self-hosted GitLab. `baseUrl` on the workbench must match what the browser uses, because it forms the redirect URI.
 
-Each person then opens Linked accounts, links GitLab, and approves the application once. From then on a session on a repository from that GitLab clones with their token, which reaches only the clone step. The person can unlink at any time, which also revokes the tokens at GitLab.
+Each person then opens Linked accounts, links GitLab, and approves the application once. From then on a session on a repository from that GitLab clones with their token, which reaches only the clone step. The person can unlink at any time, which also revokes the tokens at GitLab. Unfold cannot tell a private repository from a public one before cloning, so a session from someone without a link still starts; when its clone is refused for want of credentials, the session fails as `workspace_setup` with what git printed as its detail and what to do naming the missing link ("Open Linked accounts, link gitlab.com, then try again").
 
 ## Docker on the workbench host
 

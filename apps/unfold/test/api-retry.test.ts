@@ -29,7 +29,8 @@ test('a failed session can be tried again from the beginning once its spend has 
   await request(server.url, `/api/sessions/${created.body.id}/start`, { method: 'POST', body: {}, cookie, csrf: true });
   const failed = await sessionUntil(server.url, created.body.id, session => session.status === 'failed', cookie);
   assert.equal(failed.failure?.category, 'workspace_setup');
-  assert.ok(failed.failure?.detail?.includes('gitlab.example link exists but the clone was refused'), failed.failure?.detail);
+  assert.equal(failed.failure?.remediation, 'Your gitlab.example link exists but the clone was refused. Unlink and link gitlab.example again under Linked accounts, then try again.', 'what to do names the refused link, not the generic setup checks');
+  assert.match(failed.failure?.detail ?? '', /could not read Username/, 'what git printed stays the detail');
   await sessionUntil(server.url, created.body.id, session => session.costStatus === 'settled', cookie);
   const retried = await request(server.url, `/api/sessions/${created.body.id}/retry`, { method: 'POST', body: {}, cookie, csrf: true });
   assert.equal(retried.status, 200, JSON.stringify(retried.body));
