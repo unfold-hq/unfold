@@ -114,7 +114,12 @@ The session (refresh token, access token, expiry, issuer, client id and the pers
 | `/unfold:handback <work item> [note]` | Hands it back. Refuses while the worktree (or the checkout you run it in, when it is on the Work Item's branch) has uncommitted changes, or commits that are not on `origin/<branch>` after a fetch, and says what to commit or push. Otherwise calls `POST /api/ploeg/work-items/<id>/hand-back` with your note, and Ploeg resumes the Round that stopped on the same branch from its head on the forge. Sends only the note |
 | `/unfold:handoff [work item] [--team <team> [--target <repository>]]` | Hands the work of the session you are in to Ploeg, with its code and findings, in two steps ([below](#hand-a-session-to-a-team)). `preview` pushes and hands over nothing; it asks Unfold for a confirmation bound to what it shows, and shows the Team, what the Runs may spend, the branch it would push, the counts, the findings and `git diff HEAD` with new files, cut at 100 KB. `send <code>` runs once the person confirms that preview |
 | `/unfold:login [status]` and `/unfold:logout` | Start a browser sign-in, show whether this machine is signed in, or sign it out ([above](#sign-in)) |
-| `/unfold:brief [pull request or work item]` | Writes a Delivery Brief ([ADR 0057](../../docs/adrs/0057-a-delivery-brief-is-one-evidence-backed-record-rendered-per-audience.md)): one record of what changed, why, how it was checked, how to roll it out and back, with every claim marked `verified`, `unverified`, `stale` or `failed` against the evidence ledger. [`brief/render-brief.mjs`](brief/render-brief.mjs) validates it against [`brief/brief.schema.json`](brief/brief.schema.json) and renders one page in the Unfold brand with a fold for the reviewer, the operator and the Client. The skill publishes it as a claude.ai Artifact and adds its link to the Work Item |
+
+## Skills
+
+| Skill | What it does |
+| --- | --- |
+| `brief` (`/unfold:brief [pull request or work item]`) | Writes a Delivery Brief ([ADR 0057](../../docs/adrs/0057-a-delivery-brief-is-one-evidence-backed-record-rendered-per-audience.md)): one record of what changed, why, how it was checked, how to roll it out and back, with every claim marked `verified`, `unverified`, `stale` or `failed` against the evidence ledger. [`brief/render-brief.mjs`](brief/render-brief.mjs) validates it against [`brief/brief.schema.json`](brief/brief.schema.json) and renders one page in the Unfold brand with a fold for the reviewer, the operator and the Client. The skill publishes it as a claude.ai Artifact and adds its link to the Work Item |
 
 ## Hand a session to a Team
 

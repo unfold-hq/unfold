@@ -2,16 +2,16 @@
 type: how-to
 audience: [owner, operator]
 owner: unfold
-last_verified: 2026-11-19
-verified_by: "Read apps/unfold/src/clickup-onboarding.ts, src/ploeg-connection-api.ts, src/ploeg-steps.json, src/task-providers/clickup.ts (the member guide) and public/views/connect-clickup.js; read the pinned Ploeg's pkg/connection/config.go, pkg/connection/service.go (the handOverAgent refusal), pkg/provider/clickup/connect.go and docs/how-to/let-operators-connect-trackers-and-forges.md. Not run against a live ClickUp Workspace or a deployed Ploeg."
+last_verified: 2026-11-24
+verified_by: "Read apps/unfold/src/clickup-onboarding.ts, src/ploeg-connection-api.ts, src/ploeg-steps.json, src/task-providers/clickup.ts (the member guide) and public/views/connect-clickup.js; read the pinned Ploeg's pkg/connection/config.go, pkg/connection/service.go (the handOverAgent refusal), pkg/provider/clickup/connect.go and docs/how-to/let-operators-connect-trackers-and-forges.md. Not run against a live ClickUp Workspace or a deployed Ploeg. On 2026-11-24 the handOverAgent note was reread against the pinned 0.2.0-rc.134 bundle (cmd/ploegd/runtime_connections.go, cmd/ploegd/tracker_bindings.go) and Unfold PR #195; not run live."
 ---
 
 # Connect ClickUp
 
 Use this when your agency plans its work in ClickUp and you want Ploeg to take tasks from it. Result: Ploeg holds the token of a ClickUp member called Unfold, and the ClickUp Lists you bind send their tasks to a Team. Unfold keeps no ClickUp credential: it relays the token to Ploeg once ([ADR-0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md)).
 
-!!! warning "Refused by the pinned Ploeg until it allows `handOverAgent`"
-    Unfold starts the connection with `handOverAgent: true`, so that assigning a task to the Unfold member hands it over. The Ploeg release Unfold is pinned to refuses that flag with `capability_missing` ("No adapter recognises an assignment to a per-connection agent yet"). Accepting it is planned upstream in Ploeg. Until a Ploeg release serves it, the paste in step 3 is refused with that message, and the way to connect ClickUp is Ploeg's own configuration: see [Configure ClickUp in Ploeg instead](#configure-clickup-in-ploeg-instead).
+!!! note "Assigning the Unfold member hands work over only through Ploeg's agents list"
+    Unfold starts the connection without `handOverAgent` ([#195](https://github.com/unfold-hq/unfold/pull/195)), because an older Ploeg refused it. The pinned Ploeg accepts it ([Hand work over by assigning the connection's own account](../../apps/ploeg/docs/how-to/let-operators-connect-trackers-and-forges.md#hand-work-over-by-assigning-the-connections-own-account)), but until Unfold sends it again, which assignee hands a task over follows Ploeg's `trackers.clickup.agents`: with none set, every assignee on a bound List hands work over.
 
 ## Before you start
 

@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner, operator]
 owner: unfold
-last_verified: 2026-11-19
-verified_by: "Read the pinned Ploeg's cmd/ploegd/runtime_connections.go (the gitlab connector), pkg/provider/gitlab/connect.go, pkg/connection/config.go (the methods a flow accepts), docs/reference/configuration.md (executor.gitlab) and docs/reference/support-matrix.yaml (forge-gitlab); read apps/unfold/src/gitlab-connections.ts, public/views/connect-gitlab.js and src/ploeg-steps.json (connect-gitlab, connect-gitlab-service-account and gitlab.mint), and test/connect-gitlab.test.ts against a fake Ploeg. The service-account flow is planned and was not run; nothing was run against a live GitLab."
+last_verified: 2026-11-24
+verified_by: "Read the pinned Ploeg's cmd/ploegd/runtime_connections.go (the gitlab connector), pkg/provider/gitlab/connect.go, pkg/connection/config.go (the methods a flow accepts), docs/reference/configuration.md (executor.gitlab) and docs/reference/support-matrix.yaml (forge-gitlab); read apps/unfold/src/gitlab-connections.ts, public/views/connect-gitlab.js and src/ploeg-steps.json (connect-gitlab, connect-gitlab-service-account and gitlab.mint), and test/connect-gitlab.test.ts against a fake Ploeg. The service-account flow is planned and was not run; nothing was run against a live GitLab. On 2026-11-24 the service-account section was reread against ploeg-hq/ploeg#464 (merged into v0.2.0-rc.131), the pinned 0.2.0-rc.134 bundle and apps/unfold/src/ploeg-steps.json; not run live."
 ---
 
 # Connect GitLab
@@ -32,7 +32,7 @@ Unfold starts the `token` flow from **Settings › Connections › Connect GitLa
 
 ## Planned: Connect GitLab in Unfold
 
-Unfold's page for it is built and refuses it with `ploeg_step_unavailable`: no Ploeg release serves the `gitlab_service_account` method yet; it is in [ploeg-hq/ploeg#464](https://github.com/ploeg-hq/ploeg/pull/464), open. When the release after 0.2.0-rc.130 that includes it is pinned, connecting GitLab will work like this:
+Ploeg serves the `gitlab_service_account` method from 0.2.0-rc.131 ([ploeg-hq/ploeg#464](https://github.com/ploeg-hq/ploeg/pull/464)), and the pinned Ploeg is newer. Unfold's page for it is built but still refuses it with `ploeg_step_unavailable`, because Unfold's step record (`connect-gitlab-service-account` in [`ploeg-steps.json`](../../apps/unfold/src/ploeg-steps.json)) names no release yet. GitLab gates service accounts and project access tokens by plan: on gitlab.com they need Premium or Ultimate, and the Owner must be identity-verified ([Ploeg's how-to](../../apps/ploeg/docs/how-to/let-operators-connect-trackers-and-forges.md)). Once Unfold records the release, connecting GitLab works like this:
 
 1. An Owner of a top-level GitLab group opens **Settings › Connections › Connect GitLab** in Unfold.
 2. They create a temporary personal access token with scope `api` and paste it. Unfold relays it to Ploeg once and keeps no copy.
