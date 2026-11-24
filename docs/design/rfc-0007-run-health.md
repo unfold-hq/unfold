@@ -113,6 +113,7 @@ The signals cannot answer "is it still working on the ticket?". Run 305 was on t
 | Running, plan and limits known | On track / Watch / Off track | The common case |
 | Running, Ploeg sent no `limits` | worst of Budget, Repeat and Tripwire, else Not known | Older Ploeg, and every Ploeg until it serves `limits` |
 | Running, transcript still loading, from a harness without one, from the demo, or failing to read | the signals that need no transcript; the others name which of the four it is | Unfold never reads a missing transcript as quiet |
+| Running, the Harness reports no steps (any named Harness but `acp`) and the transcript holds only stage lines | Budget, and Time when the Run has a time limit of its own; Tripwire, Quiet, Pace and Repeat say "This agent reports no steps while it works", and no idle stop is named, because model calls also keep the Run alive | `run.harness` and the entry kinds |
 | Running, transcript unavailable (Claude Code harness, ADR-0090) | Time and Budget only; Quiet, Pace and Repeat say "no transcript" | `run.transcript.available` is false |
 | Running, transcript poll failing | last health, greyed, "health as of 2 min ago" | Never a fresh verdict on stale data |
 | Running, cost unknown | Budget not judged | Never treat unknown spend as zero |

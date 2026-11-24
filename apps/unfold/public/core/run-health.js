@@ -45,8 +45,11 @@ export function healthMeta(key) { return healthStates[key] ?? healthStates.unkno
 const rank = { on_track: 0, watch: 1, off_track: 2 };
 const startedText = 'Starting: health is shown once the agent has a plan or 5 min have passed';
 const noLimits = 'Ploeg did not report this Run\'s limits';
+const noTimeLimit = 'This Run has no time limit of its own';
 /** Why a transcript-dependent signal could not be judged, per transcript state. `loaded` judges them. */
-export const transcriptStates = Object.freeze({ loaded: '', loading: 'Its transcript is still loading', demo: 'The demo records no transcripts', unsupported: 'This Ploeg does not report transcripts', failed: 'Its transcript could not be read' });
+export const transcriptStates = Object.freeze({ loaded: '', loading: 'Its transcript is still loading', demo: 'The demo records no transcripts', unsupported: 'This Ploeg does not report transcripts', failed: 'Its transcript could not be read', stepless: 'This agent reports no steps while it works' });
+/** The Harnesses that report each step of a Run to its transcript; any other one only leaves Ploeg's own stage lines. */
+export const steppingHarnesses = Object.freeze(['acp']);
 /** The signals that show progress: a Run is On track only when at least one of them was judged. */
 export const progressSignals = Object.freeze(['quiet', 'time', 'pace']);
 const capital = text => text ? text[0].toUpperCase() + text.slice(1) : '';
@@ -62,6 +65,15 @@ export function runLimits(run) {
   const started = time(limits?.promptStartedAt);
   if (!limits || started === null) return null;
   return { promptSeconds: positive(limits.promptSeconds) ? limits.promptSeconds : null, idleSeconds: positive(limits.idleSeconds) ? limits.idleSeconds : null, startedAt: started };
+}
+
+/**
+ * Whether silence in a Run's transcript says anything about the Run: false when its Harness reports no steps and the
+ * transcript holds only Ploeg's stage lines. A Run whose Harness Ploeg did not name is taken to report them.
+ */
+export function reportsSteps(run, entries = []) {
+  if (!run?.harness || steppingHarnesses.includes(run.harness)) return true;
+  return (entries ?? []).some(entry => entry?.kind !== 'stage');
 }
 
 /** The newest plan in transcript entries, as its steps, or null when the agent has none yet. */
@@ -117,7 +129,7 @@ function paceSignal(plan, limits, elapsed, state) {
 }
 
 function timeSignal(plan, limits, elapsed) {
-  if (!limits?.promptSeconds) return signal('time', 'unknown', noLimits);
+  if (!limits?.promptSeconds) return signal('time', 'unknown', limits ? noTimeLimit : noLimits);
   const used = elapsed / limits.promptSeconds;
   const said = `${minutes(elapsed)} of ${minutes(limits.promptSeconds)} min used`;
   const finishing = plan?.length ? planProgress(plan).lastWorking : false;
@@ -225,19 +237,20 @@ function onTrackReason(signals) {
  * tripwires in the transcript's calls (egress is checked only against an `allowedHosts` list), or `tripwires` when the caller kept
  * the hits of entries it no longer holds. `transcriptState` says whether the transcript was read (`loaded`), is
  * `loading`, is missing because of the `demo` or a Ploeg that does not report one (`unsupported`), or could not be
- * read (`failed`); the older `transcriptAvailable` false means `unsupported`. `work` is the Run's Work Kind, its
+ * read (`failed`); a loaded transcript of a Harness that reports no steps counts as `stepless`; the older `transcriptAvailable` false means `unsupported`. `work` is the Run's Work Kind, its
  * expectations and the tally of its calls' Activities (RFC-0009): with a loaded transcript it adds the Out of role,
  * Order, First change, Overstay and Churn signals that apply to that kind, none of which can make a Run On track alone.
  * `checks` are the decider's progress-check hits on this Run (public/core/checks.js): one a person has not marked wrong,
  * scoring `raiseScore` (3) on a check that is shown, adds the Checks signal at Watch; the decider never makes a Run Off track. `stale` is the earlier result when the
  * facts could not be read again: it comes back unchanged, marked stale, and is never re-judged. A Run that is not
  * running has no health (null): its state badge or outcome speaks instead.
- * @param {{ run: object, entries?: object[], now: number, transcriptState?: 'loaded'|'loading'|'demo'|'unsupported'|'failed', transcriptAvailable?: boolean, stale?: object|null, tripwires?: object[]|null, allowedHosts?: string[], work?: { kind: string, label: string, expectations: object, tally: object } | null, checks?: object[] | null }} input
+ * @param {{ run: object, entries?: object[], now: number, transcriptState?: 'loaded'|'loading'|'demo'|'unsupported'|'failed'|'stepless', transcriptAvailable?: boolean, stale?: object|null, tripwires?: object[]|null, allowedHosts?: string[], work?: { kind: string, label: string, expectations: object, tally: object } | null, checks?: object[] | null }} input
  */
 export function runHealth({ run, entries = [], now, transcriptState, transcriptAvailable, stale = null, tripwires = null, allowedHosts = null, work = null, checks = null }) {
   if (stale) return { ...stale, stale: true };
   if (run?.state !== 'running') return { health: null, signals: [], deciding: null, reason: '' };
-  const state = Object.hasOwn(transcriptStates, transcriptState) ? transcriptState : transcriptAvailable === false ? 'unsupported' : 'loaded';
+  const read = Object.hasOwn(transcriptStates, transcriptState) ? transcriptState : transcriptAvailable === false ? 'unsupported' : 'loaded';
+  const state = read === 'loaded' && !reportsSteps(run, entries) ? 'stepless' : read;
   const limits = runLimits(run);
   const started = limits?.startedAt ?? time(run?.startedAt);
   const elapsed = started === null ? 0 : Math.max(0, (now - started) / 1000);

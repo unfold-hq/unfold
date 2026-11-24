@@ -54,7 +54,7 @@ function conditionsOf(brief, proofs) {
 
 function runEntry(run) {
   const ending = run.state === 'running' ? 'live' : run.machine ? 'machine' : run.status === 'failed' || run.status === 'stuck' ? 'failed' : run.status === 'cancelled' ? 'cancelled' : run.status === 'pending' ? 'pending' : 'done';
-  return { kind: 'run', move: null, at: run.startedAt, end: run.finishedAt, id: run.id, n: run.n, attempt: run.attempt, role: run.role, writes: run.writes, ending, seconds: run.seconds, costUsd: run.costUsd, tokensIn: run.tokensIn, failure: run.failure?.label ?? '', verdict: run.verdict, said: run.said ?? '' };
+  return { kind: 'run', move: null, stepless: run.stepless === true, at: run.startedAt, end: run.finishedAt, id: run.id, n: run.n, attempt: run.attempt, role: run.role, writes: run.writes, ending, seconds: run.seconds, costUsd: run.costUsd, tokensIn: run.tokensIn, failure: run.failure?.label ?? '', verdict: run.verdict, said: run.said ?? '' };
 }
 
 function burstsOf(entries) {
@@ -75,7 +75,7 @@ function entriesOf(live, { detail, brief, asks, context, linked, messages, origi
   for (const attempt of live.attempts) list.push({ kind: 'admit', at: attempt.openedAt, attempt: attempt.n, budgetUsd: attempt.budgetUsd });
   for (const attempt of live.unstarted ?? []) list.push({ kind: 'unstarted', at: attempt.openedAt, end: attempt.closedAt, reason: attempt.closeReason ? closeReasonLabel(attempt.closeReason) : '', withdrawn: attempt.closeReason.startsWith('withdrawn') });
   const move = live.moves.findLast(each => each.live) ?? null;
-  for (const run of live.runs) if (run.startedAt !== null) list.push({ ...runEntry(run), move: run.state === 'running' && move ? { title: move.title, calls: move.calls.length } : null });
+  for (const run of live.runs) if (run.startedAt !== null) list.push({ ...runEntry(run), move: run.state === 'running' && move && run.id === live.followed?.id ? { title: move.title, calls: move.calls.length } : null });
   for (const file of context?.items ?? []) list.push({ kind: 'context', at: toMs(file.addedAt), who: file.addedBy || 'Someone', name: file.name, note: file.note || '', steering: file.phase === 'while_steering' });
   for (const ask of asks?.items ?? []) list.push({ kind: 'ask', at: toMs(ask.createdAt), who: ask.askerName || 'Someone', question: ask.question, answer: ask.status === 'answered' ? ask.answer : '', status: ask.status, fromRecord: ask.source === 'record', costUsd: isAmount(ask.costUsd) ? ask.costUsd : null });
   for (const message of messages) {

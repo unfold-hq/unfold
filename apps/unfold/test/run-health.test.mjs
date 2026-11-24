@@ -148,8 +148,20 @@ test('running, transcript unavailable: Time and Budget only; Quiet, Pace, Repeat
   assert.equal(bare.reason, 'This Ploeg does not report transcripts; Ploeg did not report this Run\'s limits; Its cost is not reported yet', 'every distinct reason once, without the prefix when nothing was judged');
 });
 
+test('silence from a Harness that reports no steps is not quiet: the reason says so and no idle stop is claimed', () => {
+  const stage = { seq: 1, at: '2026-10-17T08:34:10Z', kind: 'stage', text: 'Harness openhands started for role tests' };
+  const openhands = run({ harness: 'openhands', limits: { ...limits, promptSeconds: undefined } });
+  const result = runHealth({ run: openhands, entries: [stage], now: at('08:48:00') });
+  assert.equal(result.health, 'unknown');
+  for (const key of ['tripwire', 'quiet', 'pace', 'repeat']) assert.equal(signalOf(result, key).reason, 'This agent reports no steps while it works', key);
+  assert.equal(signalOf(result, 'time').reason, 'This Run has no time limit of its own');
+  assert.doesNotMatch(result.reason, /Nothing new|idle stop|did not report this Run/);
+  assert.equal(runHealth({ run: run({ harness: 'openhands' }), entries: [stage, call(2, '08:34:20', 'ls')], now: at('08:48:00') }).deciding, 'quiet', 'a Run that did report a step is judged on it');
+  for (const harness of ['acp', null, undefined]) assert.equal(runHealth({ run: run({ harness }), entries: [stage], now: at('08:48:00') }).deciding, 'quiet', String(harness));
+});
+
 test('each transcript state names why the transcript signals cannot be judged', () => {
-  assert.deepEqual(Object.keys(transcriptStates), ['loaded', 'loading', 'demo', 'unsupported', 'failed']);
+  assert.deepEqual(Object.keys(transcriptStates), ['loaded', 'loading', 'demo', 'unsupported', 'failed', 'stepless']);
   const words = { loading: 'Its transcript is still loading', demo: 'The demo records no transcripts', unsupported: 'This Ploeg does not report transcripts', failed: 'Its transcript could not be read' };
   for (const [state, reason] of Object.entries(words)) {
     const result = runHealth({ run: run(), entries: run305, transcriptState: state, now: at('09:11:00') });

@@ -30,6 +30,28 @@ test('the timeline folds quiet stretches, groups Runs a machine ended in a row a
   assert.equal(view.entries.filter(entry => entry.kind === 'run').reduce((sum, entry) => sum + entry.count, 0), view.live.runs.length, 'every Run is counted once');
 });
 
+const runningView = (change, read = {}) => {
+  const input = { ...scenarios.running.input(), ...read };
+  const detail = { ...input.detail, runs: change(input.detail.runs) };
+  return workView({ ...workInputOf('running'), detail: { ...workInputOf('running').detail, runs: detail.runs }, live: liveModel({ ...input, detail }) });
+};
+
+test('with two Runs at once only the followed Run’s card names its move', () => {
+  const view = runningView(runs => [...runs, { ...runs.find(run => run.state === 'running'), id: '999', role: 'analyst' }]);
+  const cards = view.entries.filter(entry => entry.kind === 'run' && entry.ending === 'live');
+  assert.equal(cards.length, 2);
+  for (const card of cards) assert.equal(Boolean(card.move), card.id === view.live.followed.id, card.role);
+});
+
+test('the card of a Run whose Harness reports no steps says so instead of counting calls', () => {
+  const markup = timeline(runningView(runs => runs.map(run => run.state === 'running' ? { ...run, harness: 'openhands' } : run), {
+    entries: [{ seq: 1, at: '2026-10-17T08:34:10Z', kind: 'stage', text: 'Harness openhands started for role builder' }],
+    transcript: [{ type: 'stage', key: 's1', at: '2026-10-17T08:34:10Z', text: 'Harness openhands started for role builder' }],
+  }));
+  assert.match(markup, /This agent reports no steps while it works\./);
+  assert.doesNotMatch(markup, /calls? so far/);
+});
+
 test('a steering message names the first Run that started after it, or none', () => {
   const view = workView(workInputOf('running'));
   const steer = view.entries.find(entry => entry.kind === 'steer');
