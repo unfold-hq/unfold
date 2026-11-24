@@ -72,7 +72,7 @@ npm run extension:package
 
 The [validation matrix](docs/validation.md) records actual-server integration, browser webview and package checks. Installation and native behavior in an actual VS Code Extension Host still require desktop qualification. See the [release guide](docs/operations/release.md#extension-distribution) for distribution conditions and the [extension guide](extensions/vscode/README.md#install) for VSIX installation.
 
-![Actual 0.2.0 extension webview rendering a retained task snapshot and downloadable candidate evidence](docs/images/vscode-session.png)
+![The extension's session view, rendered in Chromium by the webview test against the deterministic demo: a Work Item ready for review with its Builder and Reviewer, one changed file and US$ 0.00 spent](docs/images/vscode-session.png)
 
 ## Improve Unfold with Unfold
 
