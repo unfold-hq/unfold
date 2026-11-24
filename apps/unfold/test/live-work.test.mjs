@@ -7,7 +7,7 @@ import { liveModel } from '../public/live/model.js';
 import { liveSentence } from '../public/live/parts.js';
 import { standingAnswers } from '../public/live/answers.js';
 import { flightLegs } from '../public/live/flight-path.js';
-import { intentBar, decisionDock, acceptanceLedger, timeline } from '../public/live/work-parts.js';
+import { intentBar, decisionDock, acceptanceLedger, roleRoster, timeline } from '../public/live/work-parts.js';
 import { workPage } from '../public/live/pages.js';
 
 test('a brief lists the items under its acceptance heading as conditions and keeps the text before it', () => {
@@ -131,4 +131,12 @@ test('an open pull request with queued reviewers sits at the pull request, and a
   assert.deepEqual(entries.filter(entry => entry.kind === 'unstarted').map(entry => entry.reason), ['The task was unassigned from the Team', 'The task was unassigned from the Team']);
   assert.ok(entries.filter(entry => entry.kind === 'fold').every(fold => fold.reason !== 'Waiting for a worker'));
   assert.equal(entries.find(entry => entry.kind === 'run').said, 'The telemetry guide now says when Ploeg passes the telemetry setting to each harness.');
+});
+
+test('a Role whose last Run got stuck reads as asking for a person, never as not answering', () => {
+  const seat = status => ({ role: 'builder', initials: 'B', runs: 1, lost: 0, seconds: 60, costUsd: null, writes: true, status, live: false });
+  const stuck = roleRoster({ id: '190', roles: [seat('stuck')] });
+  assert.match(stuck, /<li class="lv-role-seat is-stuck is-writer">[^]*<span class="lv-role-state">Asked for a person<\/span><\/li>/);
+  assert.doesNotMatch(stuck, /answering/i, 'a stuck Run stopped and asked; it did not stop answering');
+  assert.match(roleRoster({ id: '190', roles: [seat('machine')] }), /<span class="lv-role-state">Lost to a machine<\/span>/, 'an infrastructure fault keeps its own words');
 });
