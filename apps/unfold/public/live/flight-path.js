@@ -266,14 +266,14 @@ export function flightLegs(model) {
     if (first !== null) shownDay = calendarDay(live ? model.now : last);
   }
   const pr = ['done', 'current'].includes(model.stages.find(stage => stage.id === 'pr')?.status);
-  const stopped = { needs_human: ['attention', 'Needs you', 'flag'], stale: ['severe', 'Stopped retrying', 'circle-slash'], withdrawn: ['neutral', 'Withdrawn', 'circle-slash'] }[model.state];
+  const stopped = { needs_human: ['attention', 'Needs you', 'flag'], stale: ['severe', 'Stopped retrying', 'circle-slash'], withdrawn: ['neutral', 'Withdrawn', 'circle-slash'], done: model.landed ? null : ['neutral', 'Finished', 'check'] }[model.state];
   const lastFailure = [...model.runs].reverse().find(run => run.failure || run.status === 'cancelled');
   const lastEnd = model.runs.reduce((max, run) => Math.max(max, run.finishedAt ?? run.startedAt ?? -Infinity), -Infinity);
-  if (stopped) legs.push({ kind: 'stop', tone: stopped[0], label: stopped[1], glyph: stopped[2], note: lastFailure?.failure?.label ?? (model.state === 'withdrawn' ? 'Its Runs are kept' : ''), from: Number.isFinite(lastEnd) ? lastEnd : null, to: model.now });
+  if (stopped) legs.push({ kind: 'stop', tone: stopped[0], label: stopped[1], glyph: stopped[2], note: lastFailure?.failure?.label ?? ({ withdrawn: 'Its Runs are kept', done: 'No pull request' }[model.state] ?? ''), from: Number.isFinite(lastEnd) ? lastEnd : null, to: model.now });
   else if (!model.running && (model.state === 'awaiting_review' || model.state === 'done' || pr)) legs.push({ kind: 'approach', mode: 'landed', note: '' });
   else if (!queued) legs.push({ kind: 'approach', mode: model.running ? 'forecast' : 'taxi', note: model.estimate ? model.estimate.note || model.estimate.text : 'no estimate' });
   for (const stage of model.stages.filter(entry => ['pr', 'review', 'merge', 'production'].includes(entry.id))) {
-    const parked = (model.state === 'awaiting_review' && stage.id === 'review') || (model.state === 'done' && stage.id === 'merge');
+    const parked = (model.state === 'awaiting_review' && stage.id === 'review') || (model.landed && stage.id === 'merge');
     legs.push({ kind: 'station', id: stage.id, label: stage.label, status: stopped && stage.status !== 'done' ? 'blocked' : stage.status, you: stage.you, parked, note: stage.id === 'pr' && model.pullRequest?.number ? `#${model.pullRequest.number}` : '' });
   }
   return legs;

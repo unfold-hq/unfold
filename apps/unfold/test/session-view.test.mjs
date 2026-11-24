@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { parseDiff, changesSource, checkSummary, summaryFacts, remediationSteps, retryHold } from '../public/views/session.js';
 import { sessionGroup, sessionProgress, listStatus } from '../public/views/sessions.js';
+import { askedForChanges, askedForChangesFate, askedForChangesTitle } from '../public/core/session-outcome.js';
 import { deliveryGated, deliveryMarkup, deliveryStatus } from '../public/delivery.js';
 
 const demoDiff = `diff --git a/src/order.js b/src/order.js
@@ -260,4 +261,19 @@ test('a finished session behind the delivery gate reads as awaiting your approva
   assert.equal(deliveryStatus(gated({ delivery: { policySha256: 'e'.repeat(64), candidate, approval: { actor: 'Ryan' } } })).label, 'Awaiting your approval');
   assert.equal(deliveryStatus(gated({ session: { ...session, status: 'running' } })), null);
   assert.match(deliveryMarkup(gated()), /class="card session-decision session-gate" data-tone="review"/);
+});
+
+test('a session its reviewer sent back says so, and no other failure does', () => {
+  const runs = [{ mode: 'write', roleName: 'Implementer' }, { mode: 'read', roleName: 'Reviewer', verdict: 'request_changes', summary: 'Bcc has four sentences.' }];
+  const sentBack = { status: 'failed', failure: { category: 'review_incomplete', stage: 'execution' }, runs };
+  assert.equal(askedForChanges(sentBack).summary, 'Bcc has four sentences.');
+  assert.equal(askedForChangesTitle(askedForChanges(sentBack)), 'Reviewer asked for changes');
+  assert.equal(sessionProgress(sentBack), 'Reviewer asked for changes');
+  assert.equal(askedForChanges({ ...sentBack, runs: [{ mode: 'read', verdict: 'inconclusive' }] }), null, 'a review without a verdict stays a failure');
+  assert.equal(sessionProgress({ ...sentBack, runs: [{ mode: 'read', verdict: 'inconclusive' }] }), 'Agent execution failed');
+  assert.equal(askedForChanges({ ...sentBack, failure: { category: 'runaway', stage: 'execution' } }), null);
+  assert.equal(askedForChanges({ ...sentBack, status: 'completed' }), null);
+  assert.equal(askedForChanges(null), null);
+  assert.equal(askedForChangesFate({ candidate: { status: 'ready' } }), 'The change is kept. Nothing was pushed or merged.');
+  assert.equal(askedForChangesFate({ candidate: { status: 'unavailable' } }), 'Nothing was pushed or merged.', 'an uncaptured change is not called kept');
 });

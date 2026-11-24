@@ -6,6 +6,7 @@ import { icon } from '../core/icons.js';
 import { button, card, chip, emptyState, listRow, segmented, stateBadge, timeAgo, dl } from '../core/ui.js';
 import { deliveryStatus } from '../delivery.js';
 import { sessionStatus, sessionNeedsYou, verdict } from '../core/states.js';
+import { askedForChanges, askedForChangesTitle } from '../core/session-outcome.js';
 import { repoName, teamName, isActive, providerName } from '../core/lookup.js';
 import { parseHash, buildHash } from '../core/route.js';
 import { singleKeysEnabled } from '../core/keys.js';
@@ -65,6 +66,8 @@ export function sessionProgress(session, bootstrap) {
   if (session.status === 'running') return `${role} is working`;
   if (session.status === 'exporting') return 'Preparing the repository handoff';
   if (session.status === 'interrupted') return 'Resume when ready';
+  const sentBack = askedForChanges(session);
+  if (sentBack) return askedForChangesTitle(sentBack);
   if (session.status === 'failed') return session.failure ? `${failureStages[session.failure.stage] || 'Execution'} failed` : 'Stopped with an error';
   if (deliveryStatus({ session, bootstrap })) return 'Verify, then approve the frozen commit';
   if (session.status === 'completed' && session.review) return `${session.review.decision === 'accepted' ? 'Accepted' : 'Rejected'} by ${session.review.byName}`;

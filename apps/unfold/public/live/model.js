@@ -158,10 +158,17 @@ function stageTimes(detail, runs, stageList, firstStart, now) {
   };
 }
 
-function stageStates(item, runs, current) {
+function hasPullRequest(item, runs) { return Boolean(item.pullRequest?.url) || runs.some(run => ['pr_opened', 'pr_updated'].includes(run.outcome)); }
+
+function hasLanded(detail, runs) {
+  if (detail.item.state !== 'done') return false;
+  return hasPullRequest(detail.item, runs) || (detail.events ?? []).some(event => event.action === 'work_item.done' && event.detail?.reason === 'pull request merged');
+}
+
+function stageStates(item, runs, current, landed) {
   const state = item.state;
   const hasRun = runs.length > 0;
-  const pr = Boolean(item.pullRequest?.url) || runs.some(run => ['pr_opened', 'pr_updated'].includes(run.outcome));
+  const pr = hasPullRequest(item, runs);
   const writing = runs.some(run => run.writes === true && ['pending', 'running'].includes(run.state));
   let at = 'wait';
   if (state === 'leased' || (hasRun && ['queued', 'ingested'].includes(state))) at = pr && !writing ? 'pr' : 'build';
@@ -173,7 +180,7 @@ function stageStates(item, runs, current) {
   const stopped = state === 'stale' || state === 'withdrawn';
   return stages.map((stage, position) => {
     let status = position < index ? 'done' : position === index ? 'current' : 'next';
-    if (state === 'done') status = stage.id === 'production' ? 'unknown' : 'done';
+    if (state === 'done') status = stage.id === 'production' || (!landed && ['pr', 'review', 'merge'].includes(stage.id)) ? 'unknown' : 'done';
     if (stage.id === 'pr' && pr && status === 'next') status = 'done';
     const tone = status !== 'current' ? null : stopped ? 'severe' : state === 'needs_human' ? 'attention' : stage.id === 'review' ? 'review' : current ? 'live' : 'neutral';
     return { ...stage, status, tone, you: stage.id === 'review' };
@@ -185,7 +192,8 @@ function stageStates(item, runs, current) {
  * folded transcript. It is pure: the same input and `now` always give the same model, and it never invents a number;
  * what Ploeg did not report stays `null` and an estimate exists only when the caller passes one (`landingEstimate`).
  *
- * Invariants the components rely on: `spend.usd` is the one spend figure, summed from reported Run costs, and
+ * Invariants the components rely on: `landed` is true only for a done Work Item with a recorded pull request or merge,
+ * since Ploeg also calls work done that ended without one; `spend.usd` is the one spend figure, summed from reported Run costs, and
  * `spend.attemptUsd` is the part of it the latest attempt spent against its budget, `spend.budgetUsd`; Runs a
  * machine ended count in `lost` and never as Role work; `time.agent = time.useful + time.lost`; attempts are numbered
  * from 1 in the order Ploeg opened them, an attempt that closed before any of its Runs started is not one of them but
@@ -297,7 +305,8 @@ export function liveModel({ detail, transcript = [], transcriptRunId, now, ticke
     checks: progress.filter(hit => hit.runId === running.id),
   }), latestJudge);
   const work = served?.work?.kind ? served.work : localWork ? (({ tally: _tally, ...rest }) => rest)(localWork) : null;
-  const stageList = stageStates(item, runs, running);
+  const landed = hasLanded(detail, runs);
+  const stageList = stageStates(item, runs, running, landed);
   const roleWork = allRuns.filter(run => !run.machine);
   const roles = [...new Set(roleWork.map(run => run.role))].map(role => ({ role, runs: roleWork.filter(run => run.role === role).length }));
   const windowStart = attempts[0]?.openedAt ?? firstStart ?? now;
@@ -312,6 +321,7 @@ export function liveModel({ detail, transcript = [], transcriptRunId, now, ticke
     repo: item.target ? `${item.target.owner}/${item.target.repo}` : null,
     base: item.target?.baseBranch ?? null,
     branch: latest?.id && shifts.find(shift => shift.id === latest.id)?.branch || null,
+    landed,
     pullRequest: item.pullRequest?.url ? { url: item.pullRequest.url, number: item.pullRequest.number ?? null } : null,
     now,
     stages: stageList,

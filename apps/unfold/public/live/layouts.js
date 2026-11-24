@@ -87,7 +87,7 @@ export function fleet(models, { selected = 0 } = {}) {
   const chosen = models[selected];
   const running = models.filter(model => model.running).length;
   const waiting = models.filter(model => ['awaiting_review', 'needs_human'].includes(model.state)).length;
-  const landed = models.filter(model => model.state === 'done').length;
+  const landed = models.filter(model => model.landed).length;
   const summary = `<dl class="lv-fleet-counts"><div><dt>In flight</dt><dd>${running}</dd></div><div class="${waiting ? 'lv-tone-review' : ''}"><dt>Waiting for you</dt><dd>${waiting}</dd></div><div><dt>Landed</dt><dd>${landed}</dd></div></dl>`;
   const list = `<ol class="lv-rows" aria-label="Work Items">${models.map((model, index) => fleetRow(model, { selected: index === selected })).join('')}</ol>`;
   const detail = chosen ? `<section class="lv-panel lv-fleet-detail" aria-label="Selected Work Item">${header(chosen, { level: 2 })}${nowLine(chosen)}${flightPath(chosen, { id: `lv-fleet-flight-${chosen.id}` })}${instruments(chosen, { layout: 'strip' })}${answers(chosen, { layout: 'chips', ask: false })}</section>` : '';

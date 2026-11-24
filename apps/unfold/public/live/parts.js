@@ -47,6 +47,7 @@ export function liveSentence(model) {
     const failure = [...model.runs].reverse().find(run => run.failure)?.failure;
     return { head: 'Stopped. It needs you.', sub: failure ? `Last failure: ${failure.label}.` : 'Ploeg stopped and asks a person to decide.', tone: 'attention' };
   }
+  if (model.state === 'done' && !model.landed) return { head: 'Finished.', sub: 'No pull request is recorded.', tone: 'neutral' };
   if (model.state === 'done') return { head: 'Landed.', sub: `${usd(model.spend.usd)} over ${model.runs.length} Runs.`, tone: 'success' };
   if (model.state === 'withdrawn') return { head: 'Withdrawn.', sub: 'Someone stopped this Work Item; its Runs are kept.', tone: 'neutral' };
   if (model.state === 'stale') return { head: 'Stopped retrying.', sub: `Ploeg gave up after ${model.lost.runs + model.lost.agentFailures} failed Runs.`, tone: 'severe' };
