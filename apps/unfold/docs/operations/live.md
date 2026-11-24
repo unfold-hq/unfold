@@ -172,7 +172,7 @@ Add `| stats by (attributes.unfold.fingerprint) count()` to group them.
 
 When an operator request to Ploeg ends without an answer Unfold can read, the person reads `ploeg_unavailable` and Unfold logs one `ploeg.unreachable` line: the `method`, the `route` without its query, the `error` name, the network `cause` code when there is one (such as `UND_ERR_SOCKET` or `ECONNREFUSED`) and `elapsedMs`. A `TimeoutError` near 5000 ms means Ploeg did not answer within the read timeout; one near 45000 ms means a slow change, such as checking a pasted token with the tracker, ran out of time. The line never carries the credential, the request body or the error's message.
 
-A request made for a person, such as reading their routines on Connect Claude, first exchanges the person's sign-in for a person token at the identity provider. `elapsedMs` includes that exchange, but the timeout starts only when Unfold sends the request to Ploeg, so a `TimeoutError` well above 5000 ms on a GET means the exchange was slow and Ploeg then did not answer within its own 5000 ms.
+A request made for a person, such as reading their routines on Linked accounts, first exchanges the person's sign-in for a person token at the identity provider. `elapsedMs` includes that exchange, but the timeout starts only when Unfold sends the request to Ploeg, so a `TimeoutError` well above 5000 ms on a GET means the exchange was slow and Ploeg then did not answer within its own 5000 ms.
 
 ### Why an Ask has no answer
 

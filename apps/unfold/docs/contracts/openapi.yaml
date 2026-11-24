@@ -4950,7 +4950,7 @@ paths:
       tags: [Ploeg]
       operationId: getClaudeRoutines
       summary: 'Your Claude routines per Team'
-      description: 'What Settings → Connect Claude shows (Ploeg ADR-0197 section 7): whether this Ploeg serves the step, which Ploeg read as the proven person through the person-token exchange, and each of your Teams with the routine Ploeg holds for it. No answer carries a routine''s token. `served` is false while the pinned Ploeg predates the routes, null when Ploeg could not be asked; `refused` carries Ploeg''s named refusal, such as `routines_not_accepted`, in plain words.'
+      description: 'What Settings → Linked accounts shows (Ploeg ADR-0197 section 7): whether this Ploeg serves the step, which Ploeg read as the proven person through the person-token exchange, and each of your Teams that has a `claude-environment` Role, or a routine already, with the routine Ploeg holds for it (every Team when Ploeg does not report its Roles'' Harnesses). No answer carries a routine''s token. `served` is false while the pinned Ploeg predates the routes, null when Ploeg could not be asked; `refused` carries Ploeg''s named refusal, such as `routines_not_accepted`, in plain words.'
       x-unfold-role: viewer
       responses:
         '200':

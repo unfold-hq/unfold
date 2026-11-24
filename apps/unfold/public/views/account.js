@@ -1,6 +1,6 @@
-import { state } from '../core/state.js';
+import { state, onForget } from '../core/state.js';
 import { api } from '../core/api.js';
-import { escape, safeUrl, renderHtml, notify } from '../core/dom.js';
+import { announce, escape, safeUrl, renderHtml, notify } from '../core/dom.js';
 import { icon } from '../core/icons.js';
 import { date, dateTime, plural, relative } from '../core/format.js';
 import { badge, button, chip, disclosure, dl, emptyState, skeleton, timeAt } from '../core/ui.js';
@@ -8,6 +8,7 @@ import { providerLabels } from '../core/lookup.js';
 import { failureCallout, failureOf } from '../core/failure.js';
 import { shell } from '../shell.js';
 import { confirmAction } from './dialogs.js';
+import { claudeCard, claudeTitleId } from '../core/connect-claude.js';
 
 const tokenHelp = {
   gitlab: {
@@ -25,6 +26,9 @@ const tokenHelp = {
 };
 
 let loadError = null;
+const freshClaude = () => ({ data: null, error: '', problem: '', team: '', fireUrl: '', busy: false });
+const claude = freshClaude();
+onForget(() => Object.assign(claude, freshClaude()));
 
 const act = (attribute, options) => button(options).replace('<button ', `<button ${attribute} `);
 const nameOf = provider => providerLabels[provider] || provider;
@@ -101,13 +105,25 @@ function linkCard(link) {
   return `<section class="card settings-card account-card" aria-labelledby="${id}-title"><header class="card-header account-header"><div class="account-heading"><h2 class="card-title" id="${id}-title">${escape(label)}</h2><p class="card-subtitle">${escape(link.host)}</p></div>${linkState(link)}</header><div class="card-body">${body}</div>${footer}</section>`;
 }
 
+function claudeMarkup() { return claudeCard(claude.data, state.bootstrap?.user?.role, claude); }
+
+function claudeSlot(markup) { return `<div class="account-slot" id="claude-slot">${markup}</div>`; }
+
+function renderClaude() {
+  if (state.view !== 'account' || !state.bootstrap) return;
+  const slot = document.getElementById('claude-slot');
+  if (slot) slot.innerHTML = claudeMarkup();
+  else renderAccount();
+}
+
 function renderAccount() {
   const links = state.links;
+  const own = claudeMarkup();
   let content;
-  if (loadError && !links) content = failureCallout({ title: 'Could not read your linked accounts', failure: loadError, action: 'accounts-retry' });
+  if (loadError && !links) content = `${failureCallout({ title: 'Could not read your linked accounts', failure: loadError, action: 'accounts-retry' })}<div class="account-grid">${claudeSlot(own)}</div>`;
   else if (!links) content = `<div class="account-grid" aria-busy="true"><section class="card settings-card account-card account-loading">${skeleton({ rows: 2 })}</section></div>`;
-  else if (!links.length) content = `<section class="card settings-card account-empty">${emptyState({ icon: 'link', title: 'No accounts to link', body: 'This workbench has no GitLab or ClickUp connection that works with personal accounts. When an administrator adds one, you link your account here, once.' })}</section>`;
-  else content = `<div class="account-grid">${links.map(linkCard).join('')}</div>`;
+  else if (!links.length && !own) content = `<section class="card settings-card account-empty">${emptyState({ icon: 'link', title: 'No accounts to link', body: 'This workbench has no GitLab or ClickUp connection that works with personal accounts. When an administrator adds one, you link your account here, once.' })}</section>`;
+  else content = `<div class="account-grid">${links.map(linkCard).join('')}${claudeSlot(own)}</div>`;
   renderHtml(shell(`<div class="settings-page">${content}</div>`, { title: 'Linked accounts', subtitle: 'Personal accounts the workbench uses on your behalf. Only you can use them.' }));
 }
 
@@ -119,8 +135,43 @@ export function linkFailure(code) {
   return `Linking GitLab failed: ${code}.`;
 }
 
+async function loadClaude() {
+  if (state.ploegStatus === 'unconfigured' || state.bootstrap?.user?.role === 'viewer') return;
+  try { Object.assign(claude, { data: await api('/api/claude-routines'), error: '' }); }
+  catch (error) { if (error.status !== 401) claude.error = error.message || 'Unfold could not read your Claude connection.'; }
+  renderClaude();
+}
+
+async function connectClaude(data, form) {
+  const token = String(data.token ?? '');
+  const field = form.querySelector('[name="token"]');
+  if (field) field.value = '';
+  Object.assign(claude, { busy: true, problem: '', team: String(data.team ?? ''), fireUrl: String(data.fireUrl ?? '').trim() });
+  renderClaude();
+  try {
+    await api(`/api/claude-routines/${encodeURIComponent(claude.team)}`, { method: 'PUT', body: JSON.stringify({ fireUrl: claude.fireUrl, token }) });
+  } catch (error) {
+    Object.assign(claude, { busy: false, problem: error.status === 401 ? '' : error.message || 'Ploeg did not connect your Claude.' });
+    renderClaude();
+    document.getElementById('claude-problem')?.focus();
+    return;
+  }
+  const { team } = claude;
+  Object.assign(claude, { busy: false, team: '', fireUrl: '' });
+  notify(`Your Claude is connected to Team ${team}.`);
+  announce(`Your Claude is connected to Team ${team}.`);
+  await loadClaude();
+  document.getElementById(claudeTitleId)?.focus();
+}
+
+function removeClaude(button) {
+  const { team } = button.dataset;
+  confirmAction(`Disconnect your Claude from Team ${team}?`, 'Ploeg deletes the token. To connect again you need a new token from claude.ai. The routine itself stays in claude.ai.', 'Disconnect', async () => { await api(`/api/claude-routines/${encodeURIComponent(team)}`, { method: 'DELETE' }); await loadClaude(); notify(`Your Claude is disconnected from Team ${team}.`); }, { tone: 'danger', dismiss: 'Keep it connected' });
+}
+
 async function loadAccount() {
   loadError = null;
+  void loadClaude();
   try { state.links = (await api('/api/links')).links; }
   catch (error) { if (error.status !== 401) loadError = failureOf(error); state.links = null; }
   if (state.view === 'account' && state.bootstrap) renderAccount();
@@ -142,12 +193,12 @@ async function pasteToken(data, form) {
   if (state.view === 'account' && state.bootstrap) renderAccount();
 }
 
-/** The Linked accounts page (`#settings/accounts`): per provider its link state, and link, unlink or paste a personal token. */
+/** The Linked accounts page (`#settings/accounts`): per provider its link state, and link, unlink or paste a personal token; and per Team the person's own Claude, through Ploeg (Ploeg ADR-0197 section 7). */
 export default {
   id: 'account',
   match: hash => hash === 'settings/accounts' ? {} : null,
   load: loadAccount,
   render: renderAccount,
-  actions: { link, unlink, 'accounts-retry': () => { state.links = null; renderAccount(); return loadAccount(); } },
-  forms: { 'paste-token': pasteToken },
+  actions: { link, unlink, 'claude-refresh': loadClaude, 'claude-remove': removeClaude, 'accounts-retry': () => { state.links = null; renderAccount(); return loadAccount(); } },
+  forms: { 'paste-token': pasteToken, 'claude-connect': connectClaude },
 };

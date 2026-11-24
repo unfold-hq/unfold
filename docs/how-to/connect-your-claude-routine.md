@@ -2,15 +2,15 @@
 type: how-to
 audience: [owner, operator]
 owner: unfold
-last_verified: 2026-11-18
-verified_by: "Written with the implementation: apps/unfold/src/claude-routines.ts, src/onboarding.ts, src/ploeg-steps.json, public/views/connect-claude.js, public/core/connect-claude.js and public/core/linked-handoff.js, against Ploeg 0.2.0-rc.128's pkg/httpapi/claude_routines.go and docs/contracts/operator-api.v1.schema.json. test/connect-claude.test.ts covers connecting, starting and removing against a fake Ploeg, every refusal of the start, the refusals of a malformed fire URL or token, a viewer, a pin before rc.128, and that the token is in no answer, log line or database row. No real claude.ai routine, self-hosted environment or credential gateway was used."
+last_verified: 2026-11-24
+verified_by: "Written with the implementation: apps/unfold/src/claude-routines.ts, src/onboarding.ts, src/ploeg-steps.json, public/views/account.js, public/core/connect-claude.js and public/core/linked-handoff.js, against Ploeg 0.2.0-rc.128's pkg/httpapi/claude_routines.go and docs/contracts/operator-api.v1.schema.json. test/connect-claude.test.ts and test/connect-claude-view.test.mjs cover connecting, starting and removing against a fake Ploeg, every refusal of the start, the refusals of a malformed fire URL or token, a viewer, a pin before rc.128, and that the token is in no answer, log line or database row. No real claude.ai routine, self-hosted environment or credential gateway was used."
 ---
 
 # Connect your Claude routine and start work with it
 
 Use this when your Team's Runs start through your own Claude routine ([Ploeg ADR-0197](../../apps/ploeg/docs/adrs/0197-no-credential-enters-a-run-pod-and-a-credential-gateway-outside-it-attaches-each-one-a-run-uses.md), section 7). When you finish, a Work Item that waits for you starts with one click, on your own Claude account and limits, and no Claude login is stored anywhere.
 
-You need a Ploeg of 0.2.0-rc.128 or later whose installation turned routines on (`PLOEG_CLAUDE_ROUTINES`) behind its credential gateway, a Team with a `claude-environment` Role that has `carrier: routine`, and single sign-on into Unfold, so Ploeg can prove it is you. Before that, Settings → Connect Claude and the onboarding checklist say what is missing.
+You need a Ploeg of 0.2.0-rc.128 or later whose installation turned routines on (`PLOEG_CLAUDE_ROUTINES`) behind its credential gateway, a Team with a `claude-environment` Role that has `carrier: routine`, and single sign-on into Unfold, so Ploeg can prove it is you. Before that, Linked accounts shows no Claude card and the onboarding checklist says what is missing.
 
 ## 1. Create the routine in claude.ai
 
@@ -20,15 +20,15 @@ You need a Ploeg of 0.2.0-rc.128 or later whose installation turned routines on 
 
 ## 2. Paste the fire URL and token in Unfold
 
-Open **Settings → Connect Claude** (`#settings/claude`), or **Connect Claude** on the onboarding checklist. Each of your Teams has a line that says **Connected** or **Not connected**. Paste the fire URL and the token on your Team's line and choose **Connect**.
+Open **Settings → Linked accounts** (`#settings/accounts`), or **Connect Claude** on the onboarding checklist. The **Claude** card is there when one of your Teams can run work on your own Claude. Open **Link Claude**, choose the Team when there is more than one, paste the fire URL under **Trigger URL** and the token under **Trigger token**, and choose **Connect**. The old address `#settings/claude` opens the same page.
 
-Unfold sends both to Ploeg as you, only with the proof your single sign-on gives it: without that proof it sends nothing and asks you to sign in again. Ploeg keeps the token in its secret store. Unfold never stores, logs or shows the token: the action log and audit trail record it as `[redacted]`, and no page shows it again. To rotate it, paste the new token and choose **Replace**. **Remove** asks Ploeg to delete the routine and its token.
+Unfold sends both to Ploeg as you, only with the proof your single sign-on gives it: without that proof it sends nothing and asks you to sign in again. Ploeg keeps the token in its secret store. Unfold never stores, logs or shows the token: the action log and audit trail record it as `[redacted]`, and no page shows it again. To rotate it, open **Replace the token**, paste the URL and the new token and choose **Connect**. **Disconnect** asks Ploeg to delete the routine and its token, after a confirmation.
 
-Ploeg does not say which Teams start their Runs through a routine. Connecting a Team that does not answers that no Role of the Team starts its Runs through a Claude routine.
+Ploeg reports each Role's Harness but not its carrier, so the card offers the Teams with a `claude-environment` Role. Connecting one whose Role has another carrier answers that no Role of the Team starts its Runs through a Claude routine. Connecting does not show that a runner is up: the first Work Item you start does.
 
 ## 3. Start a Work Item with your Claude
 
-On a Work Item whose Run waits for you, the **Your Claude Code** card shows **Start with my Claude** once your routine for its Team is connected. Ploeg claims the Run, fires your routine with the Work Item's prompt, and records the session it started; the card links to it in claude.ai. Without a connected routine the card shows the `/unfold:start` command and a link to Connect Claude.
+On a Work Item whose Run waits for you, the **Your Claude Code** card shows **Start with my Claude** once your routine for its Team is connected. Ploeg claims the Run, fires your routine with the Work Item's prompt, and records the session it started; the card links to it in claude.ai. Without a connected routine the card shows the `/unfold:start` command and a link to Linked accounts.
 
 ## When Ploeg refuses
 
@@ -39,7 +39,7 @@ Ploeg names each refusal and Unfold shows it in plain words, never Ploeg's own m
 | `routines_not_accepted` | The installation does not start Runs through routines. | Ask whoever installed Ploeg to turn on `PLOEG_CLAUDE_ROUTINES` with the credential gateway. |
 | `credential_gateway_required` | The credential gateway is not configured, so no routine Run starts. | Ask whoever installed Ploeg to configure it. |
 | `no_routine_team` | No Role of the Team starts its Runs through a routine. | Connect a routine only for a Team that does. |
-| `routine_not_registered` | You have no routine connected for the Team. | Connect it on Settings → Connect Claude. |
+| `routine_not_registered` | You have no routine connected for the Team. | Connect it on Settings → Linked accounts. |
 | `routine_rate_limited` | Anthropic allows 30 starts an hour per routine and 100 per account, and Ploeg keeps some room below that. | Try again in the next hour. |
 | `routine_token_refused` | Anthropic refused the token: it was rotated or the trigger was deleted. The Run ended stuck. | Paste the current fire URL and token. |
 | `routine_not_found` | Anthropic has no routine or trigger at the fire URL. The Run ended stuck. | Connect the routine's current fire URL. |
@@ -47,4 +47,4 @@ Ploeg names each refusal and Unfold shows it in plain words, never Ploeg's own m
 | `invalid_fire_url`, `invalid_token` | The fire URL or token is not what claude.ai shows for an API trigger. Nothing was sent or stored. | Copy them again from the trigger. |
 | `secret_store_unavailable` | Ploeg's secret store did not answer. Nothing changed. | Try again later. |
 
-A session that another Claude account starts never takes over your Run: the first session your routine starts ties it to your Anthropic account, and Ploeg refuses a session from any other account. Connect Claude shows whether Ploeg has seen your account yet. That refusal happens between Ploeg and the runner, so Unfold sees it only as a Run that does not finish.
+A session that another Claude account starts never takes over your Run: the first session your routine starts ties it to your Anthropic account, and Ploeg refuses a session from any other account. The Claude card shows whether Ploeg has seen your account yet. That refusal happens between Ploeg and the runner, so Unfold sees it only as a Run that does not finish.

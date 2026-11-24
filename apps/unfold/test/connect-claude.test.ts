@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { hashPassword } from '../src/auth.ts';
-import { ClaudeRoutines, routineRefusalTable } from '../src/claude-routines.ts';
+import { ClaudeRoutines, routineCandidates, routineRefusalTable } from '../src/claude-routines.ts';
 import { errorCatalogue } from '../src/error-catalogue.ts';
 import { Onboarding } from '../src/onboarding.ts';
 import { claimFailures, PloegClient } from '../src/ploeg.ts';
@@ -12,14 +12,13 @@ import { personTokenHeader, type PersonProof } from '../src/person-proof.ts';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import type { User } from '../src/types.ts';
 import { linkedWorkMarkup } from '../public/core/linked-handoff.js';
-import { teamMarkup } from '../public/core/connect-claude.js';
 import { application, login, request } from './api-support.ts';
 
 const fireUrl = 'https://api.anthropic.com/v1/claude_code/routines/trig_01AbCdEf/fire';
 type Call = { method: string; path: string; actor?: string; proof?: string; body: Record<string, unknown> | null; raw: string };
 const rawPloegText = 'RAW-PLOEG-TEXT the person must never read';
 type Refusal = { status: number; code?: string };
-type FakeOptions = { list?: Refusal; put?: Refusal; remove?: Refusal; fire?: Refusal };
+type FakeOptions = { list?: Refusal; put?: Refusal; remove?: Refusal; fire?: Refusal; harness?: string };
 
 async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
   const env = `UNFOLD_CONNECT_CLAUDE_${randomBytes(6).toString('hex').toUpperCase()}`;
@@ -39,7 +38,7 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
     const send = (status: number, value: object) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...value }));
     const refuse = (refusal: Refusal) => send(refusal.status, { error: { ...(refusal.code ? { code: refusal.code } : {}), message: `Ploeg says ${refusal.code}. ${rawPloegText}` } });
     if (req.headers.authorization !== `Bearer ${bearer}`) return res.writeHead(401).end();
-    if (path === 'teams') return send(200, { teams: ploegDemo.teams });
+    if (path === 'teams') return send(200, { teams: options.harness ? ploegDemo.teams.map(team => ({ ...team, roles: team.roles.map(role => ({ ...role, harness: { name: options.harness, profile: null } })) })) : ploegDemo.teams });
     if (path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: [] });
     if (path === 'claude-routines' && req.method === 'GET') return options.list ? refuse(options.list) : send(200, { routines: [...routines.values()] });
     const routine = /^claude-routines\/([^/]+)$/.exec(path);
@@ -142,7 +141,7 @@ test('a person connects their routine, starts a Work Item with it and removes it
   const line = checklist.body.stages.find((entry: { id: string }) => entry.id === 'connect-claude');
   assert.equal(line.status, 'ok', checklist.text);
   assert.match(line.text, /connected for delivery/);
-  assert.equal(line.action.href, '#settings/claude');
+  assert.equal(line.action.href, '#settings/accounts');
 
   const fired = await request(server.url, '/api/ploeg/work-items/109/fire-routine', { method: 'POST', cookie: op.cookie });
   answers.push(fired.text);
@@ -253,20 +252,25 @@ test('the Work Item offers Start with my Claude only to its person, once their r
   assert.doesNotMatch(connected, /\/unfold:start 109/, 'a routine Team does not offer the Claude Code command');
   const notConnected = linkedWorkMarkup(detail, { userId: 'op', claudeRoutines: [] });
   assert.doesNotMatch(notConnected, /work-fire-routine/);
-  assert.match(notConnected, /#settings\/claude/, 'the person is pointed to Connect Claude');
+  assert.match(notConnected, /#settings\/accounts/, 'the person is pointed to Linked accounts');
   assert.doesNotMatch(linkedWorkMarkup(detail, { userId: 'someone-else', claudeRoutines: ['delivery'] }), /work-fire-routine/, 'nobody starts a colleague’s Run');
   const refused = linkedWorkMarkup(detail, { userId: 'op', claudeRoutines: ['delivery'], routineFire: { id: '109', error: 'Your routine was started as often this hour as Anthropic allows.', code: 'routine_rate_limited' } });
   assert.match(refused, /as often this hour[^<]*\(routine_rate_limited\)/);
 });
 
-test('the Connect Claude form never puts a token back on the page', () => {
-  const html = teamMarkup({ team: 'delivery', routine: { fireUrl, creatorPinned: true, registeredAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z' } });
-  assert.match(html, /name="token" type="password"[^>]*autocomplete="off"/);
-  assert.doesNotMatch(html, /name="token"[^>]*value=/, 'the token field has no value');
-  assert.doesNotMatch(html, /data-private/, 'no marker that nothing reads');
-  assert.match(html, /Connected/);
-  assert.match(html, /Remove/);
-  assert.match(teamMarkup({ team: 'delivery', routine: null }), /Not connected/);
+test('only Teams with a Claude environment Role are offered, once Ploeg reports its Harnesses', () => {
+  const team = (id: string, ...harnesses: (string | null | undefined)[]) => ({ id, paused: null, queueDepth: 0, assignees: [], pinnedScopes: [], roles: harnesses.map((harness, index) => ({ id: `role-${index}`, queueDepth: 0, ...(harness === undefined ? {} : { harness }) })) });
+  const ids = (...teams: ReturnType<typeof team>[]) => routineCandidates(teams).map(entry => entry.id);
+  assert.deepEqual(ids(team('app', 'openhands', 'openhands'), team('claude', 'openhands', 'claude-environment'), team('bare', null), team('empty')), ['claude']);
+  assert.deepEqual(ids(team('app', 'openhands')), [], 'no Team can');
+  assert.deepEqual(ids(team('app', undefined), team('claude', undefined)), ['app', 'claude'], 'a Ploeg that predates the field rules out nothing');
+});
+
+test('the person’s overview leaves out a Team Ploeg reports another Harness for, and keeps one already connected', async t => {
+  const { ploeg, server, op } = await people(t, { harness: 'openhands' });
+  assert.deepEqual((await request(server.url, '/api/claude-routines', op)).body.teams, []);
+  ploeg.routines.set('delivery', { team: 'delivery', fireUrl, creatorPinned: false, registeredAt: '2026-11-18T19:00:00Z', updatedAt: '2026-11-18T19:00:00Z' });
+  assert.deepEqual((await request(server.url, '/api/claude-routines', op)).body.teams.map((entry: { team: string }) => entry.team), ['delivery']);
 });
 
 test('a refusal Unfold has no sentence for names its code in a general sentence and never repeats Ploeg’s message', async t => {
