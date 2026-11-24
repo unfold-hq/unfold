@@ -850,7 +850,7 @@ test('when the budget ran out a restart offers a raised pool, and a pool above P
   const max = f.server.config.maxBudgetUsd;
   assert.deepEqual(question.questions[0].options, [{ id: 'restart', label: 'Restart from Round 1' }, { id: 'restart_raised', label: `Restart with a ${money(max)} pool` }, { id: 'keep', label: 'Leave it stopped' }]);
   f.dispatch(chat, { type: 'chat/inputCompleted', requestId: question.id, response: 'accept', answers: picked('restart_raised') });
-  await f.replied(chat, /^Raise the Team's budget to try again with more\.$/);
+  await f.replied(chat, /^This restart may cost more than Unfold may ask of Ploeg\. An administrator raises maxBudgetUsd of Unfold's consumer in Ploeg\.$/);
   assert.equal(JSON.parse(f.state.writes[0].body).poolUsd, max);
   assert.equal(f.state.details.get('204')!.item.state, 'needs_human', 'nothing restarted');
 });

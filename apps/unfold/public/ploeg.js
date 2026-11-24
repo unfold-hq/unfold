@@ -36,9 +36,9 @@ import { consoleMarkup, consoleSections } from './console-view.js';
 import { healthMeta } from './core/run-health.js';
 import { tripwireScoreMeta } from './core/tripwire.js';
 import { checkLabel, isProgressCheck } from './core/checks.js';
-import { resumeOffer, waitingQuestion, waitingQuestions } from './core/blackboard.js';
+import { answeredNotResumed, resumeOffer, waitingQuestion, waitingQuestions } from './core/blackboard.js';
 import { takeOverMarkup } from './core/take-over.js';
-import { questionMarkup, disagreementsMarkup, findingAnswersMarkup, findingsMarkup, noteAction } from './blackboard-view.js';
+import { answeredMarkup, questionMarkup, disagreementsMarkup, findingAnswersMarkup, findingsMarkup, noteAction } from './blackboard-view.js';
 
 /** The Work lanes in the order the lane control shows them: closest to shipping first. */
 export const ploegLanes = Object.freeze([
@@ -716,9 +716,12 @@ export function decisionPlan(detail, model, reason) {
     return html;
   };
   const question = model.canWrite ? waitingQuestion(detail, reason) : null;
+  const answered = reason.code === 'person_question' ? answeredNotResumed(detail) : [];
+  const resume = answered.length ? resumeOffer(detail) : null;
+  if (model.canWrite && resume?.ready) primary = { kind: 'resume', html: ui.button({ label: `Resume Round ${resume.fromRound}`, icon: 'play', variant: 'primary', action: 'work-resume' }) };
   if (question) primary = { kind: 'answer', html: ui.button({ label: 'Answer', icon: 'send', variant: 'primary', action: 'work-answer-open' }) };
   const prKind = reason.variant === 'changes_unresolved' || (reason.code === 'plan_exhausted' && !reason.variant && pr) ? 'pr' : reason.variant === 'clone_failed' ? undefined : reasonLinks[reason.code];
-  const main = { text: escape(reason.fix), actions: [] };
+  const main = { text: escape(answered.length && !model.canWrite ? 'Only a member who may restart work can continue it here.' : answered.length ? resume?.ready ? `Resume it. Ploeg reopens Round ${resume.fromRound} with your answer: up to ${money(resume.roundCapUsd)} for this Round, in total up to ${money(resume.poolUsd)}. Unfold asks you first.` : 'Start it again. Its next Runs read your answer.' : reason.fix), actions: [] };
   const requeue = { text: escape(reason.requeue), actions: [] };
   const entries = [];
   if (warning) entries.push({ text: escape(warning.fix), actions: [control('tracker')].filter(Boolean) });
@@ -726,14 +729,15 @@ export function decisionPlan(detail, model, reason) {
   if (prKind) { const html = control(prKind); if (html) main.actions.push(html); }
   if ((reason.code === 'fix_round_cap_reached' || reason.variant === 'changes_unresolved') && reader) main.actions.push(runJump(reader, 'Read the reviewer’s findings').replace('button ghost xs', 'button ghost'));
   if (reason.code === 'unknown') main.actions.push('<button type="button" class="button ghost" data-action="work-section" data-id="work-activity">Read its history</button>');
-  if (question) main.actions.unshift(primary.html);
+  if (question || primary?.kind === 'resume') main.actions.unshift(primary.html);
   entries.push(main);
-  const retry = model.canWrite && !question && retryable(reason) ? ui.button({ label: 'Try again', icon: 'refresh', variant: primary || reason.caution ? 'secondary' : 'primary', action: 'work-retry', data: { id: item.id } }) : '';
+  const retry = model.canWrite && !question && (retryable(reason) || answered.length > 0) ? ui.button({ label: 'Try again', icon: 'refresh', variant: primary || reason.caution ? 'secondary' : 'primary', action: 'work-retry', data: { id: item.id } }) : '';
   if (retry && !primary) primary = { kind: 'retry', html: retry };
   const trackerHtml = control('tracker');
   if (trackerHtml) requeue.actions.push(trackerHtml);
   if (question) requeue.text = escape(`Or answer in ${trackerOr(item.provider, 'the tracker')} and assign the task to the Team again there.`);
-  if (retry) requeue.text = escape(item.provider === 'manual' ? 'Then press Try again.' : `Then press Try again. Assigning the task to the Team again in ${trackerOr(item.provider)} also starts it again.`);
+  if (retry && answered.length) requeue.text = escape(`${resume?.ready ? 'Or start over from Round 1.' : 'Press Try again.'}${item.provider === 'manual' ? '' : ` Assigning the task to the Team again in ${trackerOr(item.provider)} also starts it again.`}`);
+  else if (retry) requeue.text = escape(item.provider === 'manual' ? 'Then press Try again.' : `Then press Try again. Assigning the task to the Team again in ${trackerOr(item.provider)} also starts it again.`);
   entries.push(requeue);
   if (!linked && !question) {
     const key = trackerReference(item) ? String(item.externalId ?? '').trim() : '';
@@ -784,9 +788,11 @@ function needsYouBox(detail, model, reason, plan) {
   const evidence = evidenceRuns(detail, reason).filter(run => !question || String(run.id) !== question.runId);
   const driving = reason.code === 'operator_failed' ? drivingSession(detail, model.sessions) : null;
   const sentBack = askedForChanges(driving);
-  const why = [`<p class="work-decision-sentence">${escape(sentBack ? `${askedForChangesTitle(sentBack)}. ${askedForChangesFate(driving)}` : reason.sentence)}</p>`];
+  const answered = reason.code === 'person_question' ? answeredNotResumed(detail) : [];
+  const why = [`<p class="work-decision-sentence">${escape(sentBack ? `${askedForChangesTitle(sentBack)}. ${askedForChangesFate(driving)}` : answered.length ? 'The agent’s question has an answer, but the work has not continued.' : reason.sentence)}</p>`];
+  if (answered.length) why.push(answeredMarkup(answered));
   if (question) why.push(questionMarkup(question, { canAnswer: Boolean(model.canWrite), demo: Boolean(detail.demo), others: waitingQuestions(detail).filter(entry => entry.id !== question.id), resume: resumeOffer(detail) }));
-  if (reason.headline && !(question && overlaps(question.text, reason.headline.split(' — ').at(-1))) && !evidence.some(run => overlaps(evidenceText(run, reason), reason.headline.split(' — ').at(-1)))) why.push(quote(reason.headline, event?.at));
+  if (reason.headline && !answered.length && !(question && overlaps(question.text, reason.headline.split(' — ').at(-1))) && !evidence.some(run => overlaps(evidenceText(run, reason), reason.headline.split(' — ').at(-1)))) why.push(quote(reason.headline, event?.at));
   const shift = latestShift(detail);
   if (shift && ['budget_exhausted', 'budget_exhausted_before_fix_round', 'budget_held'].includes(reason.code)) why.push(`<div class="work-decision-meter">${shiftMeter(shift, detail.demo)}</div>`);
   if (evidence.length) why.push(`<ul class="work-evidence-list" aria-label="Evidence">${evidence.map(run => evidenceLine(run, reason)).join('')}</ul>`);

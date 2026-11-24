@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { answerNote, answeredBy, detailQuestions, disagreementSummary, resumeOffer, reviewDisagreements, waitingQuestion, waitingQuestions, workItemFindings, writeError } from '../public/core/blackboard.js';
+import { answerNote, answeredBy, answeredNotResumed, detailQuestions, disagreementSummary, resumeOffer, reviewDisagreements, waitingQuestion, waitingQuestions, workItemFindings, writeError } from '../public/core/blackboard.js';
 import { detailReason, listReason } from '../public/core/reasons.js';
 import { closeReasonLabel } from '../public/core/states.js';
 import { detailMarkup, ploegReview } from '../public/ploeg.js';
-import { answerDialogMarkup, disagreementsMarkup, findingsMarkup, noteAction, noteDialogMarkup } from '../public/blackboard-view.js';
+import { answerDialogMarkup, disagreementsMarkup, findingsMarkup, noteAction, noteDialogMarkup, resumeDialogMarkup } from '../public/blackboard-view.js';
 import { nowMarkup } from '../public/now.js';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import { detail as parseDetail } from '../src/ploeg.ts';
@@ -50,6 +50,39 @@ test('without Ploeg’s questions list the close message, and on an older ploegd
   assert.deepEqual([fallback.id, fallback.typed, fallback.runId, fallback.role], ['', false, '28', 'builder']);
   assert.match(fallback.text, /stops at 2023/);
   assert.equal(waitingQuestion(demoDetail('109'), detailReason(demoDetail('109'))), null, 'a reviewer that ran out of fix Rounds asks nothing');
+});
+
+test('a question that has its answer is not asked again: the box shows the answer and offers to resume', () => {
+  const detail = { ...asking({ waitingForPerson: false, answer: 'Use 422.', answeredBy: 'person' }), demo: false };
+  detail.resume = { shiftId: '15', askedRound: 3, fromRound: 3, roundCapUsd: 0.4, poolUsd: 2.25, ready: true, waitingQuestionIds: [] };
+  detail.events.unshift({ id: '9999', at, actor: 'ploegd', action: 'work_item.needs_human', workItemId: '109', team: detail.item.team, detail: { reason: 'Question q43-1 from implementer: Must the API answer 422? Answer each question by its id, then resume the Work Item' } });
+  assert.equal(waitingQuestion(detail, detailReason(detail)), null, 'the close message does not stand in for an answered question');
+  assert.deepEqual(answeredNotResumed(detail).map(entry => entry.answer), ['Yes', 'Use 422.']);
+  const page = detailMarkup(detail, model({ detailId: '109', canWrite: true }));
+  assert.match(page, /Your answers are stored[^]*Must the API answer 422[^]*Answer: Use 422\./);
+  assert.match(page, /the work did not continue/);
+  assert.match(page, /data-action="work-resume"[^]*Resume Round 3/);
+  assert.match(page, /up to US\$\s0,40 for this Round, in total up to US\$\s2,25/);
+  assert.match(page, /data-action="work-retry"/, 'starting over stays possible');
+  assert.doesNotMatch(page, /data-action="work-answer-open"/);
+  assert.doesNotMatch(page.slice(page.indexOf('id="work-decision"'), page.indexOf('What you can do')), /Answer each question by its id/);
+  const viewer = detailMarkup(detail, model({ detailId: '109', canWrite: false }));
+  assert.doesNotMatch(viewer, /data-action="work-resume"|data-action="work-retry"/);
+  const noOffer = detailMarkup({ ...detail, resume: null }, model({ detailId: '109', canWrite: true }));
+  assert.doesNotMatch(noOffer, /data-action="work-resume"/);
+  assert.match(noOffer, /Start it again\. Its next Runs read your answer\.[^]*data-action="work-retry"/);
+  const partly = asking();
+  assert.deepEqual(answeredNotResumed(partly), [], 'one question still waits');
+  assert.deepEqual(answeredNotResumed({ ...detail, item: { ...detail.item, state: 'queued' } }), []);
+  assert.deepEqual(answeredNotResumed({ ...detail, shifts: [{ ...detail.shifts[0], id: '99' }, ...detail.shifts] }), [], 'an earlier attempt’s answers are not this stop');
+});
+
+test('the Resume dialog names the cost, keeps Ploeg’s refusal in view and does nothing in the demo', () => {
+  const detail = { ...asking(), demo: false };
+  const resume = { fromRound: 3, roundCapUsd: 0.4, poolUsd: 2.25 };
+  assert.match(resumeDialogMarkup(detail, resume), /Resume Round 3\?[^]*This Round: up to US\$\s0,40, in total up to US\$\s2,25\./);
+  assert.match(resumeDialogMarkup(detail, resume, { error: 'Too expensive.' }), /role="alert"[^]*Ploeg did not resume it[^]*Too expensive\./);
+  assert.match(resumeDialogMarkup(detail, resume, { demo: true }), /nothing resumes and nothing is spent[^]*disabled/);
 });
 
 test('questions, findings and disagreements are read defensively: absent lists and unreadable entries show nothing', () => {

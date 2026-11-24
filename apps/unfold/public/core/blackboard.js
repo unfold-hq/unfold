@@ -47,6 +47,18 @@ export function detailQuestions(detail) {
 }
 
 /**
+ * The questions to a person that the latest attempt asked and that all have an answer, while the Work Item still needs
+ * a person: the answers are stored, and what did not happen is continuing the work. Empty when a question still waits.
+ * @param {object | null | undefined} detail
+ */
+export function answeredNotResumed(detail) {
+  if (detail?.item?.state !== 'needs_human') return [];
+  const latest = text(detail.shifts?.[0]?.id, 32);
+  const asked = detailQuestions(detail).filter(entry => entry.to === 'person' && (!entry.shiftId || !latest || entry.shiftId === latest));
+  return asked.length && asked.every(entry => !entry.waitingForPerson && entry.answer) ? asked : [];
+}
+
+/**
  * The question a stopped Work Item waits on a person for, or null. In order: the newest question to a person that
  * Ploeg marks `waitingForPerson` (it has an `id` to answer); the close message of a `question_for_person` Shift when
  * the detail lists no questions; and, for an older ploegd, the stuck reason of the Run that stopped the item, because
@@ -65,6 +77,7 @@ export function waitingQuestion(detail, reason) {
   const waiting = detailQuestions(detail).filter(entry => entry.to === 'person' && entry.waitingForPerson).at(-1);
   if (waiting) return { id: waiting.id, text: waiting.text, typed: true, runId: waiting.runId, role: waiting.role, round: waiting.round, at: when(waiting.runId) };
   if (reason?.code === 'person_question') {
+    if (answeredNotResumed(detail).length) return null;
     const headline = text(reason.headline, 4096);
     return headline ? { id: '', text: headline, typed: true, runId: '', role: '', round: null, at: null } : null;
   }

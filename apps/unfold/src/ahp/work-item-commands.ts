@@ -39,7 +39,7 @@ export const workItemCommandText = {
   requeueQuestion: (team: string, note: boolean) => `Restart from Round 1${note ? ' with this note' : ''}? This spends from ${team}'s pool.`,
   confirmTryAgain: (id: string) => `Confirm below to restart #${id}. Nothing runs until you do.`,
   withdrawn: 'Ploeg restarts a withdrawn Work Item only when its task is assigned to the team again.',
-  poolAboveLimit: 'Raise the Team\'s budget to try again with more.',
+  poolAboveLimit: 'This restart may cost more than Unfold may ask of Ploeg. An administrator raises maxBudgetUsd of Unfold\'s consumer in Ploeg.',
   unchanged: 'Nothing changed.',
   noteSaved: 'Saved for the next Round. The running agent won\'t see it until then.',
   questionOpening: (id: string, count: number) => `${count === 1 ? 'A question' : `${count} questions`} for you on #${id}`,

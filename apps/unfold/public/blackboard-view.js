@@ -37,6 +37,24 @@ export function questionMarkup(question, { canAnswer = false, demo = false, othe
   return `<div class="work-question" data-tone="attention"><p class="overline work-question-lead">${icon('help-circle')}<span>${escape(lead)}</span></p><blockquote class="work-quote work-question-text"><p data-private>${escape(`“${question.text}”`)}</p><footer class="meta">${escape(question.typed ? 'A question the agent raised instead of guessing' : 'The reason the agent gave for stopping')}</footer></blockquote>${more}<div class="work-decision-actions">${answer}${show}</div>${reach}${viewer}</div>`;
 }
 
+/**
+ * The answered questions of a Work Item that did not continue after its answer, at the top of its decision box: each
+ * question with the stored answer and who gave it, and that nothing runs until a person resumes it.
+ */
+export function answeredMarkup(questions) {
+  if (!questions.length) return '';
+  const several = questions.length > 1;
+  const quotes = questions.map(question => `<blockquote class="work-quote work-question-text"><p data-private>${escape(`“${clip(question.text, 600)}”`)}</p><p data-private>${escape(`Answer: ${question.answer}`)}</p><footer class="meta">${escape(`${asker(question)}${question.round ? ` · Round ${question.round}` : ''}${question.answeredBy && question.answeredBy !== 'person' ? ` · answered by ${question.answeredBy}` : ''}`)}</footer></blockquote>`).join('');
+  return `<div class="work-question" data-tone="attention"><p class="overline work-question-lead">${icon('check')}<span>${escape(several ? 'Your answers are stored' : 'Your answer is stored')}</span></p>${quotes}<p class="meta">${escape(`Ploeg has ${several ? 'every answer' : 'the answer'}, but the work did not continue. Nothing runs until a person resumes it.`)}</p></div>`;
+}
+
+/** The Resume dialog of a Work Item whose questions are all answered: what resuming costs, and Ploeg's refusal when it came. */
+export function resumeDialogMarkup(detail, resume, { demo = false, busy = false, error = '' } = {}) {
+  const failure = error ? `<div role="alert">${ui.callout({ tone: 'danger', title: 'Ploeg did not resume it', body: `<p>${escape(error)}</p>` })}</div>` : '';
+  const body = demo ? 'This is the demo: nothing resumes and nothing is spent.' : `Ploeg reopens Round ${resume.fromRound} on the same branch and keeps the Rounds before it. Its Runs read your answer. This Round: up to ${money(resume.roundCapUsd)}, in total up to ${money(resume.poolUsd)}.`;
+  return `<form data-form="work-resume" data-id="${escape(detail.item.id)}" class="work-answer-dialog" novalidate aria-labelledby="confirm-title"><header class="dialog-header"><h2 id="confirm-title">${escape(`Resume Round ${resume.fromRound}?`)}</h2>${ui.iconButton({ icon: 'x', label: 'Close', action: 'close-dialog' })}</header><div class="dialog-body">${failure}<p>${escape(body)}</p></div><footer class="dialog-footer">${ui.button({ label: 'Cancel', action: 'close-dialog' })}${ui.button({ label: demo ? 'Resume (demo)' : `Resume Round ${resume.fromRound}`, variant: 'primary', type: 'submit', disabled: busy || demo })}</footer></form>`;
+}
+
 /** The form field name of the answer to `question`: one per question id, or `answer` for a question without one. */
 export function answerField(question) {
   return question.id ? `answer:${question.id}` : 'answer';

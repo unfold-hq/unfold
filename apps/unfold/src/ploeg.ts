@@ -574,7 +574,7 @@ function cancelledPullRequest(value: unknown): { pullRequest?: PloegCancelledPul
   return url && (data.state === 'open' || data.state === 'closed') ? { pullRequest: { url, state: data.state } } : {};
 }
 const requeueFailures: Record<string, string> = {
-  pool_above_limit: 'Raise the Team\'s budget to try again with more.',
+  pool_above_limit: 'This restart may cost more than Unfold may ask of Ploeg. An administrator raises maxBudgetUsd of Unfold\'s consumer in Ploeg; a person can also assign the task to the Team again in the tracker.',
   not_requeueable: 'Ploeg restarts only a Work Item that needs you or went stale and has no open Shift. Refresh to see where it stands.',
   state_changed: 'The Work Item changed since you looked. Refresh to see where it stands.',
   operator_owned: 'A workbench session drives this Work Item. Restart that session instead.',
