@@ -319,6 +319,7 @@ export class Engine {
   private launch(session: Session, user: User): Session {
     if (!this.authority && this.managed(session)) throw new EngineError(503, 'authority_required', 'Ploeg was asked to manage this session, so it never runs standalone. Restore the Ploeg execution connection to reconcile it, or cancel it to discard it.');
     this.interactiveRepository(session.repositoryId, session.sourceTask);
+    this.requireRepositoryLink(session);
     if (this.shuttingDown) throw new EngineError(503, 'shutting_down', 'The workbench is restarting and takes no new work until it is back. Wait a minute, reload, and do it again.');
     if (this.active.has(session.id)) throw new EngineError(409, 'already_running', 'This session is already executing.');
     if (this.active.size >= this.config.maxConcurrentSessions) throw new EngineError(409, 'capacity', 'The workbench already runs as many sessions as it may. Wait until one finishes, or ask an administrator to raise the limit.');
@@ -1033,6 +1034,13 @@ export class Engine {
     this.save(session, eventType, 'system', { message: session.blocker, ...eventData });
     this.save(session, 'session.failed', 'system', { message: session.blocker, code: category, failure: session.failure });
     this.active.get(session.id)?.controller.abort(new DOMException(session.blocker, 'AbortError'));
+  }
+
+  private requireRepositoryLink(session: Session): void {
+    const repository = this.config.repositories.find(item => item.id === session.repositoryId);
+    if (!repository?.requiresLink || !this.links) return;
+    const link = this.links.describeFor(session.ownerId, repository.url);
+    if (link && !link.linked) throw new EngineError(409, 'link_required', `${repository.name} needs your own ${link.host} link to clone. Open Linked accounts, link ${link.host}, then try again.`);
   }
 
   private linkHint(session: Session, stage: FailureStage): string | undefined {

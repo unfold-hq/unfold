@@ -167,6 +167,10 @@
                 "enum": ["interactive", "ploeg"],
                 "description": "Who runs work on this repository: people from the workbench (interactive) or Ploeg."
               },
+              "requiresLink": {
+                "type": "boolean",
+                "description": "Refuse to start a session on this repository until the person starting it has linked their own account on its forge (Settings, Linked accounts). Set it when the repository cannot be cloned anonymously."
+              },
               "access": {
                 "type": "object",
                 "additionalProperties": false,

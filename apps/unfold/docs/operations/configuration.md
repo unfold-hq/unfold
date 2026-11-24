@@ -122,6 +122,7 @@ The repositories sessions may work on. Demo mode replaces them with the bundled 
 | `repositories[].verify` | list of string |  | Verification command as argv, run in the workspace, such as ["npm", "test"]. |
 | `repositories[].trackerUrl` | string |  | Link to the repository's issue tracker. |
 | `repositories[].executionOwner` | one of `interactive`, `ploeg` |  | Who runs work on this repository: people from the workbench (interactive) or Ploeg. |
+| `repositories[].requiresLink` | boolean |  | Refuse to start a session on this repository until the person starting it has linked their own account on its forge (Settings, Linked accounts). Set it when the repository cannot be cloned anonymously. |
 | `repositories[].access` | object |  | Basic credentials the workspace clones with. Prefer kubernetes.gitSecretName, which keeps the password out of this file. |
 | `repositories[].access.username` | string |  | Git user name. |
 | `repositories[].access.password` | string |  | Git password or token. |

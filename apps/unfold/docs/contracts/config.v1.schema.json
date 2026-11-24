@@ -32,6 +32,7 @@
           "verify": { "type": "array", "items": { "type": "string" }, "description": "Verification command as argv, run in the workspace, such as [\"npm\", \"test\"]." },
           "trackerUrl": { "$ref": "#/$defs/httpUrl", "description": "Link to the repository's issue tracker." },
           "executionOwner": { "type": "string", "enum": ["interactive", "ploeg"], "description": "Who runs work on this repository: people from the workbench (interactive) or Ploeg." },
+          "requiresLink": { "type": "boolean", "description": "Refuse to start a session on this repository until the person starting it has linked their own account on its forge (Settings, Linked accounts). Set it when the repository cannot be cloned anonymously." },
           "access": {
             "type": "object",
             "additionalProperties": false,

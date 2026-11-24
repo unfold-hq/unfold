@@ -434,6 +434,7 @@ export function loadConfig(argv = process.argv.slice(2)): AppConfig {
     if (mode === 'live') configuredUrl(repo.url, `Repository ${repo.id}`);
     if (repo.trackerUrl) configuredUrl(repo.trackerUrl, `Repository ${repo.id} trackerUrl`);
     if (repo.executionOwner !== undefined && !['interactive', 'ploeg'].includes(repo.executionOwner)) throw new Error(`Invalid execution owner for repository ${repo.id}`);
+    if (repo.requiresLink !== undefined && typeof repo.requiresLink !== 'boolean') throw new Error(`Repository ${repo.id} requiresLink must be true or false`);
     if (repo.mcp !== undefined) validateRepositoryMcp(repo.mcp, repo.id);
   }
   validateRepositoryOwners(repositories);
