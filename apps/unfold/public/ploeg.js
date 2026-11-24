@@ -685,9 +685,11 @@ const reasonLinks = {
  * The actions of a Needs-you decision box, as numbered steps. Each link-out appears once, on the first step that
  * needs it, and exactly one control is primary: the pull request or tracker task that step points at. For a person who
  * may restart work (`model.canWrite`), the last step offers Try again (`work-retry`) on a reason that names a restart
- * and waits on no question, primary when no link-out is, and names the tracker as the other way. When Ploeg
+ * and waits on no question, and names the tracker as the other way. Try again is primary when no link-out is and its
+ * confirmation adds no caution (`reason.caution`); with a caution it is secondary everywhere. When Ploeg
  * reported no link, the tracker step names the task to find and offers to copy its key.
- * `primary` is that control for the phone action bar, or '' when it is disabled.
+ * `primary` is the control the status panel and the phone action bar carry: the primary one, or a Try again that a
+ * caution made secondary; '' when there is none.
  */
 export function decisionPlan(detail, model, reason) {
   const item = detail.item;
@@ -725,7 +727,7 @@ export function decisionPlan(detail, model, reason) {
   if (reason.code === 'unknown') main.actions.push('<button type="button" class="button ghost" data-action="work-section" data-id="work-activity">Read its history</button>');
   if (question) main.actions.unshift(primary.html);
   entries.push(main);
-  const retry = model.canWrite && !question && retryable(reason) ? ui.button({ label: 'Try again', icon: 'refresh', variant: primary ? 'secondary' : 'primary', action: 'work-retry', data: { id: item.id } }) : '';
+  const retry = model.canWrite && !question && retryable(reason) ? ui.button({ label: 'Try again', icon: 'refresh', variant: primary || reason.caution ? 'secondary' : 'primary', action: 'work-retry', data: { id: item.id } }) : '';
   if (retry && !primary) primary = { kind: 'retry', html: retry };
   const trackerHtml = control('tracker');
   if (trackerHtml) requeue.actions.push(trackerHtml);
