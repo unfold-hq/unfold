@@ -79,6 +79,13 @@ test('observability names a Grafana, dashboards by uid and datasources by uid', 
     assert.deepEqual(loadConfig(['--config', join(dir, 'ok.json')]).observability, { grafanaUrl: 'https://grafana.example', dashboards: { spend: 'litellm' }, tracesDatasource: 'victoriatraces' });
     await writeFile(join(dir, 'bad.json'), JSON.stringify({ ...base, observability: { grafanaUrl: 'https://grafana.example', dashboards: { spend: 'not a uid' } } }));
     assert.throws(() => loadConfig(['--config', join(dir, 'bad.json')]), /observability.dashboards/);
+    const logsFields = { namespace: 'k8s_namespace', pod: 'k8s_pod' };
+    await writeFile(join(dir, 'fields.json'), JSON.stringify({ ...base, observability: { logsFields } }));
+    assert.deepEqual(loadConfig(['--config', join(dir, 'fields.json')]).observability, { logsFields });
+    for (const bad of [{ pod: 'pod) or (*' }, { node: 'k8s_node' }, { pod: '' }, ['k8s_pod'], 'k8s_pod']) {
+      await writeFile(join(dir, 'bad-fields.json'), JSON.stringify({ ...base, observability: { logsFields: bad } }));
+      assert.throws(() => loadConfig(['--config', join(dir, 'bad-fields.json')]), /observability.logsFields/, JSON.stringify(bad));
+    }
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 

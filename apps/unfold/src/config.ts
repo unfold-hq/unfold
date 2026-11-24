@@ -49,6 +49,11 @@ function number(value: unknown, fallback: number, min: number, max: number, name
   return parsed;
 }
 
+const logFieldNames = ['namespace', 'pod', 'container'] as const;
+function logsFieldNames(value: unknown): Partial<Record<(typeof logFieldNames)[number], string>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.entries(value).some(([key, name]) => !(logFieldNames as readonly string[]).includes(key) || typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(name))) throw new Error('observability.logsFields maps namespace, pod and container to field names of the log store');
+  return value;
+}
 function configuredUrl(value: string, name: string): string {
   const parsed = new URL(value);
   if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error(`${name} must be an HTTP(S) URL without embedded credentials`);
@@ -534,6 +539,7 @@ export function loadConfig(argv = process.argv.slice(2)): AppConfig {
     observability = {};
     if (o.grafanaUrl !== undefined) observability.grafanaUrl = configuredUrl(o.grafanaUrl, 'observability.grafanaUrl');
     if (o.logsUrl !== undefined) observability.logsUrl = configuredUrl(o.logsUrl, 'observability.logsUrl');
+    if (o.logsFields !== undefined) observability.logsFields = logsFieldNames(o.logsFields);
     if (o.metricsUrl !== undefined) observability.metricsUrl = configuredUrl(o.metricsUrl, 'observability.metricsUrl');
     if (o.dashboards !== undefined) {
       if (!o.dashboards || typeof o.dashboards !== 'object' || Array.isArray(o.dashboards) || Object.entries(o.dashboards).some(([key, value]) => !/^[a-z0-9-]{1,40}$/.test(key) || typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(value))) throw new Error('observability.dashboards maps short names to Grafana dashboard uids');

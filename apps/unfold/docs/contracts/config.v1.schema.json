@@ -393,6 +393,16 @@
         "tracesDatasource": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Datasource uid of traces." },
         "logsDatasource": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Datasource uid of logs." },
         "logsUrl": { "$ref": "#/$defs/httpUrl", "description": "Logs query API URL, for pod logs per Run." },
+        "logsFields": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "What the log store calls the fields that name a line's pod.",
+          "properties": {
+            "namespace": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$", "default": "namespace", "description": "Field with the Kubernetes namespace." },
+            "pod": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$", "default": "pod", "description": "Field with the pod name." },
+            "container": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$", "default": "container", "description": "Field with the container name." }
+          }
+        },
         "metricsUrl": { "$ref": "#/$defs/httpUrl", "description": "Metrics query API URL." },
         "traceQuery": { "type": "string", "maxLength": 500, "description": "Trace query template." },
         "logsQuery": { "type": "string", "maxLength": 500, "description": "Logs query template." }

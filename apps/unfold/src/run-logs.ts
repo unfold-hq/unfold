@@ -2,6 +2,7 @@ import type { AppConfig } from './types.ts';
 import { plainRedactedText } from './redaction.ts';
 
 export type RunLogPod = { namespace: string; pod: string; container: string };
+export type RunLogFields = NonNullable<NonNullable<AppConfig['observability']>['logsFields']>;
 export type RunLogLine = { at: string; text: string; stream?: string };
 export type RunLogsReason = 'demo' | 'not_connected' | 'no_alias' | 'not_started';
 export type RunLogs = { workItemId: string; runId: string; available: boolean; reason?: RunLogsReason; message?: string; pods: RunLogPod[]; lines: RunLogLine[]; truncated: boolean; live: boolean; cursor: string | null; grafanaUrl?: string; demo: boolean; fetchedAt: string };
@@ -29,9 +30,12 @@ export function logsqlString(value: string): string { return JSON.stringify(valu
 /** The LogsQL filter that finds the pods whose lines carry the Run's trace key. */
 export function traceFilter(alias: string): string { return logsqlString(`trace=${alias}`); }
 
+/** What the log store calls the fields that name a line's pod, when `observability.logsFields` does not say otherwise. */
+export const defaultLogFields: Required<RunLogFields> = Object.freeze({ namespace: 'namespace', pod: 'pod', container: 'container' });
+
 /** The LogsQL filter that selects every line of `pods`. */
-export function podsFilter(pods: RunLogPod[]): string {
-  return `(${pods.map(entry => `namespace:=${logsqlString(entry.namespace)} pod:=${logsqlString(entry.pod)} container:=${logsqlString(entry.container)}`).join(' or ')})`;
+export function podsFilter(pods: RunLogPod[], fields: Required<RunLogFields> = defaultLogFields): string {
+  return `(${pods.map(entry => `${fields.namespace}:=${logsqlString(entry.namespace)} ${fields.pod}:=${logsqlString(entry.pod)} ${fields.container}:=${logsqlString(entry.container)}`).join(' or ')})`;
 }
 
 function explore(grafanaUrl: string, datasource: string, expr: string, from: number, to: number): string {
@@ -79,7 +83,7 @@ async function query(logsUrl: string, logsql: string, limit: number, fetcher: ty
  * worker pod `<name>` that claimed it, whose lines carry no trace key, then returns their newest lines oldest
  * first, without the duplicates a log shipper may deliver twice, with terminal escapes removed and credentials masked. `after` (a returned `cursor`) reads only newer lines.
  * Without `logsUrl` it answers `available: false` with a Grafana Explore link when Grafana and a logs datasource are
- * configured. The demo has no pods and says so.
+ * configured. `logsFields` names the store's own fields for a line's namespace, pod and container. The demo has no pods and says so.
  */
 export async function readRunLogs(observability: AppConfig['observability'], run: RunLogsRun, options: RunLogsOptions = {}): Promise<RunLogs> {
   const base = { workItemId: run.workItemId, runId: run.id, pods: [] as RunLogPod[], lines: [] as RunLogLine[], truncated: false, live: run.state !== 'finished', cursor: null as string | null, demo: options.demo === true };
@@ -98,22 +102,25 @@ export async function readRunLogs(observability: AppConfig['observability'], run
   if (!observability?.logsUrl) return { ...base, available: false, reason: 'not_connected', message: 'Logs are not connected: set observability.logsUrl.', ...(grafana ? { grafanaUrl: grafana(traced) } : {}), fetchedAt: stamp() };
   if (!run.startedAt) return { ...base, available: true, reason: 'not_started', message: 'The Run has not started, so it has no pod yet.', ...(grafana ? { grafanaUrl: grafana(traced) } : {}), fetchedAt: stamp() };
   const fetcher = options.fetch ?? fetch;
+  const fields = { ...defaultLogFields, ...observability.logsFields };
+  const byPod = `stats by (${fields.namespace}, ${fields.pod}, ${fields.container}) count() n`;
+  const named = (row: Record<string, unknown>) => ({ namespace: String(row[fields.namespace] ?? ''), pod: String(row[fields.pod] ?? ''), container: String(row[fields.container] ?? '') });
   const window = `_time:[${new Date(from).toISOString()}, ${new Date(to).toISOString()}]`;
-  const found = await query(observability.logsUrl, `${window} ${traced} | stats by (namespace, pod, container) count() n`, 100, fetcher);
-  const workers = [...new Map(found.map(row => [String(row.namespace ?? ''), String(row.pod ?? '')] as const).filter(([namespace, pod]) => namePattern.test(namespace) && sandboxPod.test(pod)).map(([namespace, pod]) => [`${namespace}/${pod}`, { namespace, pod: pod.slice('sbx-'.length) }])).values()].slice(0, runLogLimits.pods);
-  const launched = workers.length ? await query(observability.logsUrl, `${window} (${workers.map(entry => `namespace:=${logsqlString(entry.namespace)} pod:=${logsqlString(entry.pod)}`).join(' or ')}) | stats by (namespace, pod, container) count() n`, 100, fetcher) : [];
+  const found = await query(observability.logsUrl, `${window} ${traced} | ${byPod}`, 100, fetcher);
+  const workers = [...new Map(found.map(row => [named(row).namespace, named(row).pod] as const).filter(([namespace, pod]) => namePattern.test(namespace) && sandboxPod.test(pod)).map(([namespace, pod]) => [`${namespace}/${pod}`, { namespace, pod: pod.slice('sbx-'.length) }])).values()].slice(0, runLogLimits.pods);
+  const launched = workers.length ? await query(observability.logsUrl, `${window} (${workers.map(entry => `${fields.namespace}:=${logsqlString(entry.namespace)} ${fields.pod}:=${logsqlString(entry.pod)}`).join(' or ')}) | ${byPod}`, 100, fetcher) : [];
   const seen = new Set<string>();
   const pods = [...found, ...launched]
-    .map(row => ({ namespace: String(row.namespace ?? ''), pod: String(row.pod ?? ''), container: String(row.container ?? '') }))
+    .map(named)
     .filter(entry => namePattern.test(entry.namespace) && namePattern.test(entry.pod) && namePattern.test(entry.container) && !seen.has(`${entry.namespace}/${entry.pod}/${entry.container}`) && seen.add(`${entry.namespace}/${entry.pod}/${entry.container}`))
     .sort((a, b) => a.pod.localeCompare(b.pod) || a.container.localeCompare(b.container))
     .slice(0, runLogLimits.pods);
   if (!pods.length) return { ...base, available: true, ...(grafana ? { grafanaUrl: grafana(traced) } : {}), fetchedAt: stamp() };
-  const selected = podsFilter(pods);
+  const selected = podsFilter(pods, fields);
   const after = options.after && Date.parse(options.after) > from ? `_time:(${options.after}, ${new Date(to).toISOString()}]` : window;
-  const rows = await query(observability.logsUrl, `${after} ${selected} | sort by (_time desc) | limit ${runLogLimits.lines + 1} | fields _time, _msg, pod`, runLogLimits.lines + 1, fetcher);
+  const rows = await query(observability.logsUrl, `${after} ${selected} | sort by (_time desc) | limit ${runLogLimits.lines + 1} | fields _time, _msg, ${fields.pod}`, runLogLimits.lines + 1, fetcher);
   const truncated = rows.length > runLogLimits.lines;
   const several = new Set(pods.map(entry => entry.pod)).size > 1;
-  const lines = rows.slice(0, runLogLimits.lines).filter(row => typeof row._time === 'string' && cursorPattern.test(row._time)).reverse().map(row => ({ at: row._time as string, text: cleanLine(row._msg), ...(several && typeof row.pod === 'string' ? { stream: row.pod } : {}) })).filter((line, index, all) => index === 0 || line.at !== all[index - 1].at || line.text !== all[index - 1].text || line.stream !== all[index - 1].stream);
+  const lines = rows.slice(0, runLogLimits.lines).filter(row => typeof row._time === 'string' && cursorPattern.test(row._time)).reverse().map(row => ({ at: row._time as string, text: cleanLine(row._msg), ...(several && typeof row[fields.pod] === 'string' ? { stream: row[fields.pod] as string } : {}) })).filter((line, index, all) => index === 0 || line.at !== all[index - 1].at || line.text !== all[index - 1].text || line.stream !== all[index - 1].stream);
   return { ...base, available: true, pods, lines, truncated, cursor: lines.at(-1)?.at ?? options.after ?? null, ...(grafana ? { grafanaUrl: grafana(selected) } : {}), fetchedAt: stamp() };
 }

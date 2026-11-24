@@ -60,6 +60,24 @@ test('a finished Run reads its pod in two steps and returns the lines oldest fir
   assert.deepEqual(panes.v.range, { from: String(Date.parse('2026-10-11T09:58:00Z')), to: String(Date.parse('2026-10-11T10:22:00Z')) });
 });
 
+test('logsFields names the fields of the log store in every query and in the rows it answers with', async () => {
+  const logsFields = { namespace: 'k8s_namespace', pod: 'k8s_pod', container: 'k8s_container' };
+  const named = (name: string) => ({ k8s_namespace: 'ploeg', k8s_pod: name, k8s_container: 'worker', n: '1' });
+  const fake = victoriaLogs(query => isStats(query)
+    ? (query.includes('"trace=') ? [named('sbx-first'), named('second')] : [named('first')])
+    : [{ _time: '2026-10-11T10:10:00Z', _msg: 'b', k8s_pod: 'second' }, { _time: '2026-10-11T10:01:00Z', _msg: 'a', k8s_pod: 'sbx-first' }]);
+  const logs = await readRunLogs({ ...observability, logsFields }, run, { fetch: fake.fetch });
+  assert.deepEqual(logs.pods.map(entry => [entry.namespace, entry.pod, entry.container]), [['ploeg', 'first', 'worker'], ['ploeg', 'sbx-first', 'worker'], ['ploeg', 'second', 'worker']]);
+  assert.deepEqual(logs.lines.map(line => [line.stream, line.text]), [['sbx-first', 'a'], ['second', 'b']]);
+  for (const { query } of fake.queries) assert.doesNotMatch(query, /(?<!k8s_)\b(namespace|pod|container)\b/, query);
+  assert.match(fake.queries[0].query, /stats by \(k8s_namespace, k8s_pod, k8s_container\)/);
+  assert.match(fake.queries[1].query, /k8s_namespace:="ploeg" k8s_pod:="first"/);
+  assert.match(fake.queries[2].query, /k8s_container:="worker".*\| fields _time, _msg, k8s_pod$/);
+  const one = victoriaLogs(() => []);
+  await readRunLogs({ ...observability, logsFields: { pod: 'kube_pod' } }, run, { fetch: one.fetch });
+  assert.match(one.queries[0].query, /stats by \(namespace, kube_pod, container\)/, 'a name left out keeps its default');
+});
+
 test('a retried Run shows each pod, labelled, and pod names the log store returns are never trusted into a query', async () => {
   const fake = victoriaLogs(query => isStats(query)
     ? [{ ...pod, n: '2' }, { namespace: 'ploeg', pod: 'sbx-second-attempt', container: 'worker', n: '1' }, { namespace: 'ploeg', pod: 'bad" or namespace:="ai', container: 'worker', n: '1' }]
