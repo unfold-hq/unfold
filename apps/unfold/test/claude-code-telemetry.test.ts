@@ -7,7 +7,7 @@ import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { askAgainAfterMs, configuration, deviceFlow, fileStore, keychainService, keychainStore, mayAsk, readState, redacted, stateFile, telemetryStore } from '../extensions/claude-code/scripts/otel-headers.mjs';
+import { askAgainAfterMs, configuration, deviceFlow, fileStore, keychainService, keychainStore, mayAsk, readState, redacted, refresh, stateFile, telemetryStore } from '../extensions/claude-code/scripts/otel-headers.mjs';
 import { idpTokenCommand } from '../extensions/claude-code/scripts/sign-in.mjs';
 
 const helper = fileURLToPath(new URL('../extensions/claude-code/scripts/otel-headers.mjs', import.meta.url));
@@ -247,6 +247,24 @@ test('Claude Code gets {} at once and a background sign-in; then the header, a s
   assert.deepEqual([afterwards.code, afterwards.stdout], [1, '']);
   assert.match((await run(['status'], env)).stdout, /Not signed in/);
   assert.equal(issuer.requests.filter(request => request.path === '/device').length, 1, 'neither logout nor token starts a sign-in');
+});
+
+test('of two processes that refresh at once, the one the issuer refuses uses the session the other one stored', async t => {
+  const issuer = await fakeIssuer();
+  t.after(() => issuer.close());
+  const { env } = await environment(t, issuer.url);
+  const settings = configuration(env);
+  const stale = { issuer: issuer.url, clientId, accessToken: 'stale', refreshToken: `refresh-0-${'r'.repeat(30)}`, expiresAt: new Date(Date.now() - 1000).toISOString(), user: '', scope: '' };
+  issuer.refresh.push(stale.refreshToken);
+  const store = telemetryStore(env);
+  store.write(issuer.url, stale);
+  const late = { ...store, write: (at: string, entry: unknown) => { setTimeout(() => store.write(at, entry), 400); return { where: '', fallback: false }; } };
+
+  const [first, second] = await Promise.all([refresh(settings, stale, { env, store: late }), refresh(settings, stale, { env, store: late })]);
+  assert.equal(issuer.access.length, 1, 'the issuer renewed once and refused once');
+  assert.equal(first?.accessToken, issuer.access[0]);
+  assert.equal(second?.accessToken, issuer.access[0]);
+  assert.equal(store.read(issuer.url).entry?.accessToken, issuer.access[0], 'the refusal did not forget the renewed session');
 });
 
 test('a refused refresh token forgets the session and asks again; a denied sign-in is not asked again for four hours', async t => {
