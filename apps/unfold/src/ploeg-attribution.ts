@@ -81,18 +81,28 @@ export class PloegAttribution {
   private readonly refused = new Map<string, { at: number; cause: UnprovenCause }>();
   private provenSeen = false;
   private readonly now: () => number;
+  private readonly personTokensConfigured: boolean;
 
-  constructor(now: () => number = Date.now) { this.now = now; }
+  constructor(now: () => number = Date.now, options: { personTokensConfigured?: boolean } = {}) {
+    this.now = now;
+    this.personTokensConfigured = options.personTokensConfigured === true;
+  }
 
   /** Whether a Ploeg refusal has shown that this Ploeg refuses changes without a person token. */
   get requiresProof(): boolean { return this.provenSeen; }
 
   /** Records that Ploeg refused a change made for `person` for want of proof. */
   refusedFor(person: string, cause: UnprovenCause): void {
-    if (!this.provenSeen) console.error(JSON.stringify({ level: 'error', event: 'ploeg.person_unproven', cause, message: 'Ploeg refuses operator changes without a person token (PLOEG_OPERATOR_ATTRIBUTION=proven). Configure ploeg.personTokens.' }));
+    if (!this.provenSeen) console.error(JSON.stringify({ level: 'error', event: 'ploeg.person_unproven', cause, message: this.unprovenLogMessage(cause) }));
     this.provenSeen = true;
     if (this.refused.size >= 10_000 && !this.refused.has(person)) this.refused.delete(this.refused.keys().next().value!);
     this.refused.set(person, { at: this.now(), cause });
+  }
+
+  private unprovenLogMessage(cause: UnprovenCause): string {
+    if (!this.personTokensConfigured) return 'Ploeg refuses operator changes without a person token (PLOEG_OPERATOR_ATTRIBUTION=proven). Configure ploeg.personTokens.';
+    if (cause === 'rejected') return 'Ploeg refuses operator changes without a person token it accepts (PLOEG_OPERATOR_ATTRIBUTION=proven), and it rejected the one Unfold sent. Check that ploeg.personTokens and Ploeg agree on issuer, audience and subject namespace.';
+    return 'Ploeg refuses operator changes without a person token (PLOEG_OPERATOR_ATTRIBUTION=proven). ploeg.personTokens is set, but Unfold had no token to send: most often the person’s sign-in expired and could not be refreshed, or the change was made without a person. The person signs in again; for proof that lasts the whole session, allow the refresh_token grant at the sign-in provider and add offline_access to auth.oidc.scopes.';
   }
 
   /** Records that Ploeg accepted a change made for `person`, which ends what an earlier refusal said. */

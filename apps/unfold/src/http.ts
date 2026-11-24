@@ -291,7 +291,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   if (config.ploeg && !ploeg.isDemo) { trackerConnections.useRoutes(() => ploeg.routes()); void trackerConnections.refreshRoutes(); }
   const cards = config.ploeg && !config.ploeg.demo ? new CardService(ploeg, new CardStore(store.db), { settings: config.cards?.rules ?? {}, publish: config.cards?.publishPullRequestComment === true }) : undefined;
   if (cards) ploeg.useCards(cards);
-  const attribution = new PloegAttribution();
+  const attribution = new PloegAttribution(Date.now, { personTokensConfigured: Boolean(config.ploeg?.personTokens) });
   const proof = personProof(config, store, oidc?.configured() ? refreshToken => oidc.refresh(refreshToken) : undefined, attribution);
   ploeg.usePersonProof(proof, attribution);
   engine.usePersonProof(proof, attribution);

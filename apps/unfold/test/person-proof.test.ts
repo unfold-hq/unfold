@@ -564,3 +564,20 @@ test('a change that must be proven is not sent without a person token, and a ref
   await actionContext.run({ via: 'browser', confirmation: null, scope: 'browser', signIn }, () => proof.send('oidc-person', undefined, plain.call));
   assert.equal(plain.calls.length, 2, 'an ordinary change is retried without the token, which is why a secret goes through sendProven');
 });
+
+test('the log line for the first proof refusal names what the administrator must change', async () => {
+  const first = async (attribution: PloegAttribution, cause: 'missing' | 'rejected') => {
+    const { lines } = await captured(async () => { attribution.refusedFor('person-1', cause); attribution.refusedFor('person-2', cause); });
+    const logged = lines.filter(line => line.includes('"event":"ploeg.person_unproven"'));
+    assert.equal(logged.length, 1, 'logged once per process');
+    return JSON.parse(logged[0]!).message as string;
+  };
+  assert.match(await first(new PloegAttribution(), 'missing'), /Configure ploeg\.personTokens/, 'without person tokens it asks for them');
+  const expired = await first(new PloegAttribution(Date.now, { personTokensConfigured: true }), 'missing');
+  assert.doesNotMatch(expired, /Configure ploeg\.personTokens/, 'with person tokens set it does not ask for them again');
+  assert.match(expired, /refresh_token grant/);
+  assert.match(expired, /offline_access to auth\.oidc\.scopes/);
+  const rejected = await first(new PloegAttribution(Date.now, { personTokensConfigured: true }), 'rejected');
+  assert.match(rejected, /rejected the one Unfold sent/);
+  assert.match(rejected, /issuer, audience and subject namespace/);
+});
