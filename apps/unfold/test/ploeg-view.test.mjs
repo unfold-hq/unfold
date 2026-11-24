@@ -388,27 +388,32 @@ test('a failed driving session sends the person to that session, never to a trac
   assert.match(decisionPlan(failed, model(), detailReason(failed)).primary, /href="#sessions"[^]*Open Sessions/, 'without the session at hand it opens Sessions');
 });
 
-test('a failed session is tried again or closed from the Work Item page itself', () => {
+test('a failed session Ploeg ran is duplicated or closed from the Work Item page, never tried again', () => {
   const failed = demoDetail('108');
   failed.item = { ...failed.item, provider: 'manual', externalId: '', url: '' };
   failed.shifts.at(-1).closeReason = 'operator_failed';
   if (failed.item.latestShift) failed.item.latestShift.closeReason = 'operator_failed';
   const session = { id: 's1', status: 'failed', costStatus: 'settled', failure: { message: 'The agent runtime rejected a request or reported a failure.' }, execution: { workItemId: '108' } };
-  const plan = decisionPlan(failed, model({ sessions: [session] }), detailReason(failed));
-  const [step] = plan.entries;
-  assert.match(step.text, /^The agent runtime rejected a request or reported a failure\. Try it again, or close this Work Item/);
-  assert.match(step.actions[0], /class="button primary" data-action="work-session-retry" data-id="s1"[^]*Try again/);
+  const loaded = { decision: '<div id="session-decision" tabindex="-1">failed</div>' };
+  const onePage = decisionPlan(failed, model({ sessions: [session], flags: { 'work.unified': true }, session: loaded }), detailReason(failed));
+  const [step] = onePage.entries;
+  assert.match(step.text, /^The agent runtime rejected a request or reported a failure\. Start a new session for the same work, or close this Work Item/);
+  assert.match(step.actions[0], /class="button primary" data-action="duplicate"[^]*Duplicate as a new session/);
   assert.match(step.actions[1], /class="button secondary" data-action="work-session-close" data-id="s1"[^]*Close this Work Item/);
-  assert.match(step.actions[2], /href="#session\/s1"[^]*Why it failed/, 'the session page stays one link away for the detail');
-  const onePage = decisionPlan(failed, model({ sessions: [session], flags: { 'work.unified': true }, session: { decision: '<div id="session-decision" tabindex="-1">failed</div>' } }), detailReason(failed));
-  assert.match(onePage.entries[0].actions[2], /data-action="work-section" data-id="session-decision"[^]*Why it failed/, 'on the one page, where the session page opens this page again, it jumps to the session failure shown on it');
-  assert.doesNotMatch(onePage.entries[0].actions.join(''), /href="#session\//);
+  assert.match(step.actions[2], /data-action="work-section" data-id="session-decision"[^]*Why it failed/, 'on the one page it jumps to the session failure shown on it');
+  assert.match(onePage.primary, /data-action="duplicate"/);
+  assert.match(step.note, /^A session Ploeg ran cannot start again\./);
+  for (const plan of [onePage, decisionPlan(failed, model({ sessions: [session] }), detailReason(failed)), decisionPlan(failed, model({ sessions: [{ ...session, costStatus: 'unknown' }] }), detailReason(failed))]) {
+    const html = `${plan.entries.map(entry => `${entry.text} ${entry.actions.join('')} ${entry.note ?? ''}`).join('')}${plan.primary}`;
+    assert.doesNotMatch(html, /Try again|work-session-retry|runs the same brief/, 'the server refuses to restart a session Ploeg ran, so the page never offers it');
+  }
+  const elsewhere = decisionPlan(failed, model({ sessions: [session] }), detailReason(failed));
+  assert.match(elsewhere.primary, /class="button primary" href="#session\/s1"[^]*Open the session/, 'without the one page the session page, which carries Duplicate, is the way to start anew');
+  assert.match(elsewhere.entries[0].actions[1], /class="button secondary" data-action="work-session-close"/);
+  assert.match(elsewhere.entries[0].note, /Open the session and press Duplicate as a new session/);
   const notLoaded = decisionPlan(failed, model({ sessions: [session], flags: { 'work.unified': true } }), detailReason(failed));
-  assert.doesNotMatch(notLoaded.entries[0].actions.join(''), /Why it failed/, 'without the session failure on the page there is nothing to jump to, so no dead link');
-  assert.match(plan.primary, /Try again/);
-  const unsettled = decisionPlan(failed, model({ sessions: [{ ...session, costStatus: 'unknown' }] }), detailReason(failed));
-  assert.match(unsettled.primary, /class="button primary" data-action="work-session-close"/, 'until spend is reconciled, closing is the action');
-  assert.match(unsettled.entries[0].note, /once the session’s spend is reconciled/);
+  assert.doesNotMatch(notLoaded.entries[0].actions.join(''), /Why it failed|data-action="duplicate"|href="#session\//, 'without the session loaded there is nothing to duplicate or jump to, so no dead control');
+  assert.match(notLoaded.primary, /class="button primary" data-action="work-session-close"/);
   const closed = decisionPlan(failed, model({ sessions: [{ ...session, workItemClosedAt: '2026-09-20T12:00:00Z' }] }), detailReason(failed));
   assert.doesNotMatch(closed.entries[0].actions.join(''), /work-session-close/);
   const viewer = decisionPlan(failed, model({ sessions: [session], canCancel: false }), detailReason(failed));

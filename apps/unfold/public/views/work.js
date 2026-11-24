@@ -1566,7 +1566,6 @@ export default {
     'work-agents-window': control => openAgentsWindow(control, state.ploegDetail?.item?.title),
     'work-copy-command': copyCommand,
     'work-cancel': () => work.cancelBusy ? null : openCancel(),
-    'work-session-retry': control => sessionAction(control, 'retry', 'Trying again. The team starts from the beginning.'),
     'work-session-close': control => sessionAction(control, 'close-work-item', 'Closed. The Work Item has left Needs you; its session and history stay.'),
     'work-brief': () => toggleBrief(),
     'work-run': jumpToRun,

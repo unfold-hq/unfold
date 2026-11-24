@@ -114,6 +114,14 @@ test('Try again is offered only when Unfold knows whether the first prompt reach
   assert.equal(retryHold(failed('not_submitted', 'unknown')), 'spend');
 });
 
+test('a failed session Ploeg ran is never offered Try again, because the server refuses to start it again', () => {
+  const failed = extra => ({ status: 'failed', costStatus: 'settled', failure: { category: 'workspace_setup', stage: 'workspace', promptAcceptance: 'not_submitted' }, ...extra });
+  assert.equal(retryHold(failed({ execution: { workItemId: '42' } })), 'ploeg');
+  assert.equal(retryHold(failed(), { sharedExecution: true }), 'ploeg');
+  assert.equal(retryHold(failed({ execution: { workItemId: '42' }, costStatus: 'unknown' })), 'ploeg', 'reconciling spend never makes it restartable');
+  assert.equal(retryHold(failed(), { sharedExecution: false }), null);
+});
+
 test('a remediation becomes numbered steps, one per instruction, with statements kept as context', () => {
   assert.deepEqual(remediationSteps('Do not resubmit the prompt. Confirm the remote turn has stopped, inspect its evidence and reconcile gateway spend before deciding whether to start new work.'), {
     steps: ['Do not resubmit the prompt.', 'Confirm the remote turn has stopped.', 'Inspect its evidence.', 'Reconcile gateway spend before deciding whether to start new work.'],
