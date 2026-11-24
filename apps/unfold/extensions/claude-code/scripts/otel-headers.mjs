@@ -14,6 +14,8 @@ export const refreshWithinMs = 60_000;
 /** The longest `token` may take in all, so the plugin's sign-in never waits on it. */
 export const tokenDeadlineMs = 5000;
 const discoveryTtlMs = 24 * 3600_000;
+/** How long a refused refresh waits for the session another process may be storing. */
+export const renewedElsewhereMs = 1_500;
 const lockStaleMs = 30_000;
 const deviceGrant = 'urn:ietf:params:oauth:grant-type:device_code';
 const exchangeGrant = 'urn:ietf:params:oauth:grant-type:token-exchange';
@@ -243,9 +245,10 @@ function usable(entry, now) {
 
 /**
  * Refreshes `entry` at the issuer with its refresh token. Resolves with the new session, `null` when the issuer refused
- * the refresh token (which forgets the session), or `entry` itself when the issuer could not be reached.
+ * the refresh token and no other process renewed the session meanwhile (which forgets it), or `entry` itself when the
+ * issuer could not be reached.
  */
-export async function refresh(configurationValues, entry, { env = process.env, store, fetcher = fetch, now = Date.now(), signal = AbortSignal.timeout(5000) } = {}) {
+export async function refresh(configurationValues, entry, { env = process.env, store = telemetryStore(env), fetcher = fetch, now = Date.now(), signal = AbortSignal.timeout(5000) } = {}) {
   if (!entry?.refreshToken) return null;
   let discovery;
   try { discovery = await discover(configurationValues.issuer, { env, fetcher, now, timeoutMs: 5000 }); } catch { return entry; }
@@ -257,8 +260,27 @@ export async function refresh(configurationValues, entry, { env = process.env, s
     store.write(configurationValues.issuer, session);
     return session;
   }
-  if (result.status === 401 || result.answer.error === 'invalid_grant') { store.forget(configurationValues.issuer); return null; }
+  if (result.status === 401 || result.answer.error === 'invalid_grant') {
+    const renewed = await renewedElsewhere(configurationValues, entry, store);
+    if (renewed) return renewed;
+    store.forget(configurationValues.issuer);
+    return null;
+  }
   return entry;
+}
+
+/**
+ * The session another process stored while this one's refresh was refused, or null. A provider that rotates refresh
+ * tokens refuses the second of two processes that refresh at once, and the first may not have stored its answer yet.
+ */
+async function renewedElsewhere(configurationValues, entry, store) {
+  const until = Date.now() + renewedElsewhereMs;
+  for (;;) {
+    const { entry: kept } = readSession(configurationValues, store);
+    if (kept && kept.refreshToken !== entry.refreshToken) return kept;
+    if (Date.now() >= until) return null;
+    await new Promise(done => setTimeout(done, 100));
+  }
 }
 
 /** Resolves with a session whose access token is good for at least `refreshWithinMs`, refreshing when needed, or null. Never opens a browser. */
