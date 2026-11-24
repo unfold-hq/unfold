@@ -534,9 +534,14 @@ function briefMarkup(session) {
 const statusCauses = new Set(['capacity', 'timeout', 'connectivity', 'missing_executable', 'gateway_rejected']);
 const certainSubmissions = new Set(['not_submitted', 'rejected', 'accepted']);
 
-/** Why a failed session may not be tried again yet: `submission` when Unfold cannot tell whether the first prompt reached the agent, `spend` while its spend is unreconciled, otherwise null. */
-export function retryHold(session) {
+/**
+ * Why a failed session may not be tried again: `submission` when Unfold cannot tell whether the first prompt reached the
+ * agent, `ploeg` when Ploeg ran it (it has an execution binding, or this installation shares execution with Ploeg), which
+ * the server always refuses with `new_authorization_required`, `spend` while its spend is unreconciled, otherwise null.
+ */
+export function retryHold(session, { sharedExecution = false } = {}) {
   if (!certainSubmissions.has(session.failure?.promptAcceptance)) return 'submission';
+  if (session.execution || sharedExecution) return 'ploeg';
   if (session.costStatus === 'unknown') return 'spend';
   return null;
 }
@@ -547,11 +552,11 @@ function failureMarkup(session) {
   const title = failure ? `${failureStage(failure)} failed` : session.status === 'interrupted' ? 'This session stopped' : 'This session is blocked';
   const message = failure?.message || session.blocker || 'The runtime stopped before the role finished. Resume to continue; nothing restarts on its own.';
   const { steps, notes } = remediationSteps(failure?.remediation);
-  const hold = session.status === 'failed' && canOperate() ? retryHold(session) : null;
+  const hold = session.status === 'failed' && canOperate() ? retryHold(session, { sharedExecution: Boolean(state.bootstrap.sharedExecution) }) : null;
   const statusLink = statusCauses.has(failure?.category) ? button({ label: 'Open Status', icon: 'monitor', href: `#status?from=${encodeURIComponent(session.id)}` }) : '';
   const investigateButton = investigation.id === session.id && investigation.result ? '' : button({ id: 'session-investigate', label: 'Investigate', icon: 'search', action: 'investigate', disabled: investigation.busy, busy: investigation.busy });
-  const actions = (session.status === 'failed' && canOperate() ? `${hold === null ? button({ label: 'Try again', icon: 'refresh', variant: 'primary', action: 'retry' }) : hold === 'submission' ? button({ label: 'Read its Activity', icon: 'activity', variant: 'primary', action: 'tab', data: { id: 'stream' } }) : ''}${button({ label: 'Duplicate as a new session', icon: 'copy', action: 'duplicate' })}${session.execution && !session.workItemClosedAt ? button({ label: 'Close its Work Item', icon: 'x-circle', action: 'close-work-item' }) : ''}${statusLink}` : statusLink) + investigateButton;
-  const facts = [submissions[failure?.promptAcceptance], failure?.automaticRetry === false ? 'No automatic retry will be started.' : '', hold === 'submission' ? 'Try again is not offered: if the first prompt did reach the agent, trying again would do the same work and spend twice. Read its Activity to see what the agent did, and start a new session only if the work still needs doing.' : hold === 'spend' ? 'Try again becomes available once spend is reconciled.' : ''].filter(Boolean);
+  const actions = (session.status === 'failed' && canOperate() ? `${hold === null ? button({ label: 'Try again', icon: 'refresh', variant: 'primary', action: 'retry' }) : hold === 'submission' ? button({ label: 'Read its Activity', icon: 'activity', variant: 'primary', action: 'tab', data: { id: 'stream' } }) : ''}${button({ label: 'Duplicate as a new session', icon: 'copy', variant: hold === 'ploeg' ? 'primary' : 'secondary', action: 'duplicate' })}${session.execution && !session.workItemClosedAt ? button({ label: 'Close its Work Item', icon: 'x-circle', action: 'close-work-item' }) : ''}${statusLink}` : statusLink) + investigateButton;
+  const facts = [submissions[failure?.promptAcceptance], failure?.automaticRetry === false ? 'No automatic retry will be started.' : '', hold === 'submission' ? 'Try again is not offered: if the first prompt did reach the agent, trying again would do the same work and spend twice. Read its Activity to see what the agent did, and start a new session only if the work still needs doing.' : hold === 'ploeg' ? 'A session Ploeg ran cannot start again. Duplicate as a new session fills in a new session with the same brief and budget; nothing runs or spends until you start it.' : hold === 'spend' ? 'Try again becomes available once spend is reconciled.' : ''].filter(Boolean);
   const body = [
     `<p class="session-failure-lead">${escape(message)}</p>`,
     notes.length ? `<p class="session-failure-context">${notes.map(note => `<span>${escape(note)}</span>`).join(' ')}</p>` : '',

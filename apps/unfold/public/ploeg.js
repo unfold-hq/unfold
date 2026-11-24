@@ -748,10 +748,11 @@ function drivingSession(detail, sessions) {
 }
 
 /**
- * The step of a reason about the driving Unfold session. A failed session is acted on here: Try again (once its
- * spend is reconciled) and Close this Work Item, with its failure detail one link away: the session page, or on the one
- * page, where the session page opens the Work Item again, the session's failure shown above on the same page. Every
- * other session reason opens the session, whose page answers, resumes or cancels it.
+ * The step of a reason about the driving Unfold session. A failed session is acted on here. Ploeg ran it, so it cannot
+ * start again (the server refuses with `new_authorization_required`): the person starts a new session for the same work,
+ * or closes this Work Item. On the one page, where the session is loaded, Duplicate as a new session does that and its
+ * failure is shown above on the same page; elsewhere the session page, which carries Duplicate and the failure detail,
+ * is one link away. Every other session reason opens the session, whose page answers, resumes or cancels it.
  */
 function sessionPlan(detail, model, reason) {
   const session = drivingSession(detail, model.sessions);
@@ -760,13 +761,15 @@ function sessionPlan(detail, model, reason) {
     const html = open('primary', session ? 'Open the session' : 'Open Sessions');
     return { entries: [{ text: escape(reason.fix), actions: [html] }], primary: html };
   }
-  const retry = session.costStatus === 'unknown' ? '' : ui.button({ label: 'Try again', icon: 'refresh', variant: 'primary', action: 'work-session-retry', data: { id: session.id } });
-  const close = session.workItemClosedAt ? '' : ui.button({ label: 'Close this Work Item', icon: 'x-circle', variant: retry ? 'secondary' : 'primary', action: 'work-session-close', data: { id: session.id } });
+  const onePage = model.flags?.['work.unified'] === true;
+  const duplicate = onePage && model.session ? ui.button({ label: 'Duplicate as a new session', icon: 'copy', variant: 'primary', action: 'duplicate' }) : '';
+  const anew = duplicate || (onePage ? '' : open('primary', 'Open the session'));
+  const close = session.workItemClosedAt ? '' : ui.button({ label: 'Close this Work Item', icon: 'x-circle', variant: anew ? 'secondary' : 'primary', action: 'work-session-close', data: { id: session.id } });
   const failure = session.failure?.message ? `${session.failure.message} ` : '';
-  const note = session.costStatus === 'unknown' ? 'Try again becomes available once the session’s spend is reconciled.' : 'Try again runs the same brief from the beginning and spends from the session’s budget.';
-  const why = model.flags?.['work.unified'] !== true ? open('ghost', 'Why it failed') : model.session?.decision ? ui.button({ label: 'Why it failed', icon: 'sessions', variant: 'ghost', action: 'work-section', data: { id: 'session-decision' } }) : '';
-  const entry = { text: escape(`${failure}Try it again, or close this Work Item if you no longer want it.`), actions: [retry, close, why].filter(Boolean), note: escape(note) };
-  return { entries: [entry], primary: retry || close };
+  const note = duplicate ? 'A session Ploeg ran cannot start again. Duplicate as a new session fills in a new session with the same brief and budget; nothing runs or spends until you start it.' : 'A session Ploeg ran cannot start again. Open the session and press Duplicate as a new session to start the same work with its own budget.';
+  const why = onePage && model.session?.decision ? ui.button({ label: 'Why it failed', icon: 'sessions', variant: 'ghost', action: 'work-section', data: { id: 'session-decision' } }) : '';
+  const entry = { text: escape(`${failure}Start a new session for the same work, or close this Work Item if you no longer want it.`), actions: [anew, close, why].filter(Boolean), note: escape(note) };
+  return { entries: [entry], primary: anew || close };
 }
 
 function needsYouBox(detail, model, reason, plan) {
