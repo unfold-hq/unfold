@@ -10,9 +10,10 @@ export type McpAudience = 'resource' | 'client-id';
 /**
  * What `unfold-mcp` over HTTP accepts as an access token, and where its clients learn how to get one. An empty
  * `clientIds` accepts every client the issuer gave a token for this resource, such as one that signs in with a
- * Client ID Metadata Document URL.
+ * Client ID Metadata Document URL. Clients are told about `issuer` only; tokens of `additionalIssuers` are accepted on
+ * the same terms, for a provider that gives every client an issuer of its own.
  */
-export type McpHttpSettings = { resource: string; issuer: string; jwksUrl?: string; clientIds: string[]; audience: McpAudience; scope: string; requestScopes: string[]; maxLifetimeMs: number; subjectNamespace?: string };
+export type McpHttpSettings = { resource: string; issuer: string; additionalIssuers?: string[]; jwksUrl?: string; clientIds: string[]; audience: McpAudience; scope: string; requestScopes: string[]; maxLifetimeMs: number; subjectNamespace?: string };
 
 /**
  * The verified facts of an access token that an MCP request carries, with its verified claims for entitlement.
@@ -79,8 +80,14 @@ export function mcpHttpSettings(env: Record<string, string | undefined> = proces
   const issuer = env.UNFOLD_MCP_ISSUER?.trim() ?? '';
   if (!issuer) throw new Error('UNFOLD_MCP_ISSUER is required when UNFOLD_MCP_RESOURCE is set');
   httpUrl(issuer, 'UNFOLD_MCP_ISSUER');
+  const additionalIssuers = [...new Set((env.UNFOLD_MCP_ADDITIONAL_ISSUERS ?? '').split(',').map(item => item.trim()).filter(Boolean))];
+  for (const item of additionalIssuers) {
+    if (httpUrl(item, 'UNFOLD_MCP_ADDITIONAL_ISSUERS').origin !== new URL(issuer).origin) throw new Error('UNFOLD_MCP_ADDITIONAL_ISSUERS must be on the same origin as UNFOLD_MCP_ISSUER: the subjects of another identity provider may not be the same people');
+    if (item === issuer) throw new Error('UNFOLD_MCP_ADDITIONAL_ISSUERS repeats UNFOLD_MCP_ISSUER');
+  }
   const jwksUrl = env.UNFOLD_MCP_JWKS_URL?.trim() || undefined;
   if (jwksUrl) httpUrl(jwksUrl, 'UNFOLD_MCP_JWKS_URL');
+  if (jwksUrl && additionalIssuers.length) throw new Error('UNFOLD_MCP_JWKS_URL names the keys of one issuer; unset it to use UNFOLD_MCP_ADDITIONAL_ISSUERS');
   const audience = env.UNFOLD_MCP_TOKEN_AUDIENCE?.trim() || 'resource';
   if (audience !== 'resource' && audience !== 'client-id') throw new Error('UNFOLD_MCP_TOKEN_AUDIENCE must be resource or client-id');
   const clientIds = [...new Set((env.UNFOLD_MCP_CLIENT_IDS ?? '').split(',').map(id => id.trim()).filter(Boolean))];
@@ -100,7 +107,7 @@ export function mcpHttpSettings(env: Record<string, string | undefined> = proces
   }
   const subjectNamespace = env.UNFOLD_MCP_SUBJECT_NAMESPACE?.trim() || undefined;
   if (subjectNamespace && subjectNamespace.length > 300) throw new Error('UNFOLD_MCP_SUBJECT_NAMESPACE must be at most 300 characters');
-  return { resource: resource.href, issuer, ...(jwksUrl ? { jwksUrl } : {}), clientIds, audience, scope, requestScopes, maxLifetimeMs, ...(subjectNamespace ? { subjectNamespace: subjectNamespace.replace(/\/$/, '') } : {}) };
+  return { resource: resource.href, issuer, ...(additionalIssuers.length ? { additionalIssuers } : {}), ...(jwksUrl ? { jwksUrl } : {}), clientIds, audience, scope, requestScopes, maxLifetimeMs, ...(subjectNamespace ? { subjectNamespace: subjectNamespace.replace(/\/$/, '') } : {}) };
 }
 
 /** The well-known path of a resource's protected resource metadata, with the resource's path inserted (RFC 9728 section 3.1). */
@@ -199,18 +206,18 @@ class KeySet {
 }
 
 /**
- * Checks JWT access tokens for one issuer: asymmetric signatures only, the issuer compared as an exact string, an
- * audience naming the resource, the accepted clients and short lifetimes.
+ * Checks JWT access tokens for the accepted issuers, each with its own signing keys: asymmetric signatures only, the
+ * issuer compared as an exact string, an audience naming the resource, the accepted clients and short lifetimes.
  */
 export class AccessTokenVerifier {
   private readonly settings: McpHttpSettings;
-  private readonly keys: KeySet;
+  private readonly keys: Map<string, KeySet>;
   private readonly now: () => number;
 
   constructor(settings: McpHttpSettings, options: { fetch?: typeof fetch; now?: () => number } = {}) {
     this.settings = settings;
     this.now = options.now ?? Date.now;
-    this.keys = new KeySet(settings.issuer, settings.jwksUrl, options.fetch ?? fetch, this.now);
+    this.keys = new Map([settings.issuer, ...(settings.additionalIssuers ?? [])].map(issuer => [issuer, new KeySet(issuer, issuer === settings.issuer ? settings.jwksUrl : undefined, options.fetch ?? fetch, this.now)]));
   }
 
   /** Verifies one access token; throws TokenRefused for any token this server must not accept. */
@@ -224,7 +231,9 @@ export class AccessTokenVerifier {
     if (!algorithm) throw new TokenRefused('the token is not signed with an accepted asymmetric algorithm');
     if (header.crit !== undefined) throw new TokenRefused('the token names critical header parameters this server does not understand');
     if (header.kid !== undefined && typeof header.kid !== 'string') throw new TokenRefused('the token\'s key id is not a string');
-    const key = await this.keys.key(header.kid);
+    const keys = typeof claims.iss === 'string' ? this.keys.get(claims.iss) : undefined;
+    if (!keys) throw new TokenRefused('the token was issued by another issuer');
+    const key = await keys.key(header.kid);
     if (key.kty !== algorithm.kty || (algorithm.curve && key.curve !== algorithm.curve) || (key.alg && key.alg !== header.alg)) throw new TokenRefused('the token\'s algorithm does not match its signing key');
     const signature = parts[2] ? strictBase64url(parts[2]) : undefined;
     if (!signature) throw new TokenRefused('the token\'s signature does not verify');
@@ -238,7 +247,6 @@ export class AccessTokenVerifier {
 
   private check(claims: Record<string, unknown>): AccessToken {
     const now = this.now();
-    if (claims.iss !== this.settings.issuer) throw new TokenRefused('the token was issued by another issuer');
     const audiences = (Array.isArray(claims.aud) ? claims.aud : [claims.aud]).filter((entry): entry is string => typeof entry === 'string');
     const forResource = audiences.some(entry => sameResource(entry, this.settings.resource));
     const forClient = !forResource && this.settings.audience === 'client-id' && audiences.some(entry => this.settings.clientIds.includes(entry));

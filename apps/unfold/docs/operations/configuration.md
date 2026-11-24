@@ -69,6 +69,7 @@ The chart renders `config:` from its values into the file, and its [values.schem
 | `UNFOLD_PLOEG_MCP_CLIENT_ID` | string |  |  | Public OAuth client registered for that server. |
 | `UNFOLD_MCP_RESOURCE` | URL |  |  | Exact public URL unfold-mcp is served at over HTTP, such as https://unfold.example/mcp; unset turns the HTTP transport off and refuses every other UNFOLD_MCP_ variable. |
 | `UNFOLD_MCP_ISSUER` | URL |  |  | Issuer of the access tokens unfold-mcp accepts; required with UNFOLD_MCP_RESOURCE. |
+| `UNFOLD_MCP_ADDITIONAL_ISSUERS` | comma-separated list |  |  | Further issuers on the same origin whose access tokens are accepted on the same terms, for a provider that gives every client an issuer of its own; clients are told about UNFOLD_MCP_ISSUER only. |
 | `UNFOLD_MCP_JWKS_URL` | URL |  |  | Signing keys of that issuer; discovered from the issuer when unset. |
 | `UNFOLD_MCP_TOKEN_AUDIENCE` | resource \| client-id | `resource` |  | Which aud a token must carry: the resource URL, or also one of UNFOLD_MCP_CLIENT_IDS. |
 | `UNFOLD_MCP_CLIENT_IDS` | comma-separated list |  |  | Client ids or Client ID Metadata Document URLs accepted; empty accepts every client of the issuer. |
