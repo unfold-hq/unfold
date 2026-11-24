@@ -248,7 +248,7 @@ function usable(entry, now) {
  * the refresh token and no other process renewed the session meanwhile (which forgets it), or `entry` itself when the
  * issuer could not be reached.
  */
-export async function refresh(configurationValues, entry, { env = process.env, store, fetcher = fetch, now = Date.now(), signal = AbortSignal.timeout(5000) } = {}) {
+export async function refresh(configurationValues, entry, { env = process.env, store = telemetryStore(env), fetcher = fetch, now = Date.now(), signal = AbortSignal.timeout(5000) } = {}) {
   if (!entry?.refreshToken) return null;
   let discovery;
   try { discovery = await discover(configurationValues.issuer, { env, fetcher, now, timeoutMs: 5000 }); } catch { return entry; }
