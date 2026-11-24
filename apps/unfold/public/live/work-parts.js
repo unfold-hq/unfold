@@ -73,7 +73,7 @@ function entryBody(entry, view, runDetail = null) {
     const words = entry.ending === 'failed' && entry.failure ? entry.failure : entry.verdict === 'approve' ? 'Approved' : entry.verdict === 'request_changes' ? 'Asked for changes' : endingWords[entry.ending];
     const runs = entry.count > 1 ? `${entry.count} Runs in a row, Runs ${entry.firstN}–${entry.n}` : `Run ${entry.n}`;
     const machine = entry.ending === 'machine' ? `<p class="lv-tl-text lv-tl-quiet">${entry.count > 1 ? 'Machines ended these Runs, not the agent; they do not count against the agent.' : 'The machine ended this Run, not the agent; it does not count against the agent.'}</p>` : '';
-    const now = entry.move ? `<p class="lv-tl-move"><span class="lv-tl-move-dot" aria-hidden="true"></span><span>${escape(entry.move.title)}</span><span class="lv-tl-detail">${escape(`${entry.move.calls} ${entry.move.calls === 1 ? 'call' : 'calls'} so far`)}</span></p>` : '';
+    const now = entry.move ? `<p class="lv-tl-move"><span class="lv-tl-move-dot" aria-hidden="true"></span><span>${escape(entry.move.title)}</span><span class="lv-tl-detail">${escape(`${entry.move.calls} ${entry.move.calls === 1 ? 'call' : 'calls'} so far`)}</span></p>` : entry.stepless ? '<p class="lv-tl-text lv-tl-quiet">This agent reports no steps while it works.</p>' : '';
     const said = entry.said && entry.ending !== 'live' ? `<p class="lv-tl-text" data-private>${escape(entry.said)}</p>` : '';
     const ticket = `<div class="lv-tl-ticket"><div class="lv-tl-ticket-main">${entryHead(entry, entry.role, `attempt ${entry.attempt} · ${runs}`, chip(words, tone))}${said}${machine}${now}</div>${runStub(entry, { opens: Boolean(runDetail) })}</div>`;
     return runDetail ? runOpening(entry, ticket, runDetail) : ticket;

@@ -75,6 +75,32 @@ test('given the Run row’s server entry, the live view shows exactly that healt
   assert.equal(healthEntry(model('landed')), null);
 });
 
+const twoRunning = (harness, transcriptRunId) => ({
+  detail: {
+    item: { id: '11', provider: 'clickup', externalId: 'x1', title: 'Two at once', team: 'demo', state: 'running', createdAt: new Date(fixtureNow - 900000).toISOString() },
+    shifts: [{ id: '12', openedAt: new Date(fixtureNow - 850000).toISOString(), budgetUsd: 6 }],
+    runs: [['22', 'analyst', 840001], ['23', 'tests', 840050]].map(([id, role, ago]) => ({ id, role, shiftId: '12', state: 'running', harness, startedAt: new Date(fixtureNow - ago).toISOString(), limits: { idleSeconds: 900, promptStartedAt: new Date(fixtureNow - ago).toISOString() } })),
+  },
+  transcript: [{ type: 'stage', key: 's1', at: new Date(fixtureNow - 839000).toISOString(), text: 'Harness started for role tests' }],
+  entries: [{ seq: 1, at: new Date(fixtureNow - 839000).toISOString(), kind: 'stage', text: 'Harness started for role tests' }],
+  transcriptRunId,
+  now: fixtureNow,
+});
+
+test('with two Runs at once the live sentence speaks for the Run whose transcript it reads', () => {
+  const live = liveModel(twoRunning('acp', '23'));
+  assert.deepEqual([live.running.id, live.followed.id], ['23', '23'], 'not the Run that started last');
+  assert.equal(liveSentence(live).head, 'Tests · Feature · Harness started for role tests');
+});
+
+test('a Run whose Harness reports no steps says so, with no move, no call count and no claim about changed files', () => {
+  const live = liveModel(twoRunning('openhands', '23'));
+  assert.deepEqual([live.moves, live.calls.total, live.transcriptKnown], [[], null, false]);
+  assert.deepEqual(live.runs.map(run => run.stepless), [true, true]);
+  const { head, sub } = liveSentence(live);
+  assert.deepEqual([head, sub], ['Tests is working.', 'This agent reports no steps while it works; its result shows when the Run ends.']);
+});
+
 test('moves start at a stage, or after a pause without one, and remember trouble', () => {
   const at = seconds => new Date(fixtureNow + seconds * 1000).toISOString();
   const call = (seconds, extra = {}) => ({ type: 'tool', id: `c${seconds}`, at: at(seconds), title: 'Run', toolKind: 'execute', status: 'completed', input: 'ls', paths: [], ...extra });

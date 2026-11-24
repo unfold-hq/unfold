@@ -1,6 +1,6 @@
 import { taskIdText, trackerOf } from '../core/trackers.js';
 import { failureReason } from '../core/states.js';
-import { combineHealth, healthMeta, runHealth } from '../core/run-health.js';
+import { combineHealth, healthMeta, reportsSteps, runHealth } from '../core/run-health.js';
 import { guardSignals, policyDrift } from '../core/guard.js';
 import { tripwireChecks, tripwireHitScore, tripwireMaxScore } from '../core/tripwire.js';
 import { activityOf, activityTime, moveActivities, tallyCalls } from '../core/activity.js';
@@ -253,6 +253,7 @@ export function liveModel({ detail, transcript = [], transcriptRunId, now, ticke
         id: String(run.id), n: position + 1, role: capital(run.role || 'agent'), writes: run.writes === true, state: run.state, status: runStatus(run), failure,
         machine: failure?.infra === true, startedAt: toMs(run.startedAt), finishedAt: run.state === 'running' ? null : toMs(run.finishedAt), seconds: runSeconds(run, now),
         costUsd: cost, costStatus: run.costStatus ?? 'unknown', tokensIn: isAmount(run.usage?.inputTokens) ? run.usage.inputTokens : null, tokensOut: isAmount(run.usage?.outputTokens) ? run.usage.outputTokens : null,
+        stepless: run.state === 'running' && !reportsSteps(run, !transcriptRunId || String(run.id) === String(transcriptRunId) ? entries : []),
         authorizedUsd: isAmount(run.authorizedUsd) ? run.authorizedUsd : null, outcome: run.outcome, verdict: run.verdict || null,
         said: String(run.solution || run.summary || '').split(/\n\s*\n/)[0].trim(),
       };
@@ -260,9 +261,11 @@ export function liveModel({ detail, transcript = [], transcriptRunId, now, ticke
     return { n: index + 1, id: key, openedAt: toMs(shift?.openedAt) ?? list[0]?.startedAt ?? null, closedAt: toMs(shift?.closedAt), closeReason: shift?.closeReason || '', budgetUsd: isAmount(shift?.budgetUsd) ? shift.budgetUsd : null, runs: list, lost: list.filter(run => run.machine).length };
   });
   const allRuns = attempts.flatMap(attempt => attempt.runs.map(run => ({ ...run, attempt: attempt.n })));
-  const running = allRuns.findLast(run => run.state === 'running') ?? null;
-  const followed = transcriptRunId ? allRuns.find(run => run.id === String(transcriptRunId)) ?? null : running;
-  const moves = movesOf(transcript, { now, live: Boolean(followed && followed.state === 'running') });
+  const asked = transcriptRunId ? allRuns.find(run => run.id === String(transcriptRunId)) ?? null : null;
+  const running = asked?.state === 'running' ? asked : allRuns.findLast(run => run.state === 'running') ?? null;
+  const followed = transcriptRunId ? asked : running;
+  const stepless = followed?.stepless === true;
+  const moves = movesOf(stepless ? [] : transcript, { now, live: Boolean(followed && followed.state === 'running') });
   const calls = moves.flatMap(move => move.calls);
   const byKind = calls.reduce((total, call) => ({ ...total, [call.kind]: (total[call.kind] ?? 0) + 1 }), {});
   const split = activityTime(calls, followed ? followed.finishedAt ?? now : null);
@@ -282,14 +285,15 @@ export function liveModel({ detail, transcript = [], transcriptRunId, now, ticke
   const firstStart = allRuns.reduce((min, run) => run.startedAt !== null && (min === null || run.startedAt < min) ? run.startedAt : min, null);
   const origin = toMs(ticketCreatedAt) ?? toMs(item.createdAt);
   const leaseLeft = item.lease?.expiresAt ? Math.round((toMs(item.lease.expiresAt) - now) / 1000) : null;
-  const known = transcriptKnown === true;
+  const read = transcriptKnown === true;
+  const known = read && !stepless;
   const lastActivity = !known ? null : calls.length ? calls.at(-1).at : followed?.startedAt ?? null;
   const signals = guardSignals(calls, { allowedHosts });
   const guard = { signals, drift: policyDrift(policy), allowedHosts, high: signals.filter(signal => signal.severity === 'high').length, source: signals.find(signal => signal.rule === 'injection') ?? null };
   const served = given?.data?.health ? given.data : null;
   const history = served && Array.isArray(served.history) ? served.history : null;
   const judgements = (history ?? verdicts ?? []).map(judgementOf).filter(Boolean).sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
-  const transcriptState = known ? 'loaded' : ['demo', 'unsupported', 'failed'].includes(transcriptMissing) ? transcriptMissing : 'loading';
+  const transcriptState = read ? 'loaded' : ['demo', 'unsupported', 'failed'].includes(transcriptMissing) ? transcriptMissing : 'loading';
   const ownTranscript = Boolean(running && followed && followed.id === running.id);
   const runningRun = running ? runs.find(run => String(run.id) === running.id) : null;
   const latestJudge = running ? (served ? served.judge ?? null : judgements.findLast(entry => entry.runId === running.id) ?? null) : null;
@@ -340,7 +344,7 @@ export function liveModel({ detail, transcript = [], transcriptRunId, now, ticke
     lease: item.lease ? { expiresAt: toMs(item.lease.expiresAt), renewedAt: toMs(item.lease.renewedAt), secondsLeft: leaseLeft } : null,
     moves,
     transcriptKnown: known,
-    transcriptMissing: known ? null : transcriptState === 'demo' ? 'The demo records no transcripts, so its calls are not shown.' : transcriptState === 'unsupported' ? 'This Ploeg does not report transcripts, so its calls are not shown.' : transcriptState === 'failed' ? 'Its calls could not be read.' : running ? 'Loading its calls…' : null,
+    transcriptMissing: known ? null : read ? 'This agent reports no steps while it works; its result shows when the Run ends.' : transcriptState === 'demo' ? 'The demo records no transcripts, so its calls are not shown.' : transcriptState === 'unsupported' ? 'This Ploeg does not report transcripts, so its calls are not shown.' : transcriptState === 'failed' ? 'Its calls could not be read.' : running ? 'Loading its calls…' : null,
     calls: { total: known ? calls.length : null, byKind, lastAt: lastActivity },
     work,
     activity: known && calls.length ? { ...split, current: followed?.state === 'running' ? moves.findLast(entry => entry.calls.length)?.activity ?? null : null } : null,
