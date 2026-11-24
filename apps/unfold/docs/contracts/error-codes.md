@@ -70,6 +70,7 @@ Codes Ploeg sends that Unfold does not name here pass through with Ploeg's own m
 | `link_token` | 400 | The pasted token does not look like a token of this provider. | Copy the token again exactly as the provider shows it. |
 | `link_busy` | 429 | Too many link attempts are waiting to finish. | Wait a few minutes, then link again. |
 | `link_profile` | 502 | The provider did not confirm which account the link belongs to. | Try again in a minute. If it keeps failing, check the token's permissions. |
+| `link_required` | 409 | The repository is cloned with your own forge link, and your account has none. | Link the forge under Settings › Linked accounts, then start again. |
 | `source_unlinked` | 409 | This task connection needs your own tracker account, and you have not linked one. | Link the tracker under Linked accounts, then try again. |
 
 ## Sessions

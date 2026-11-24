@@ -22,13 +22,14 @@ test('a failed session can be tried again from the beginning once its spend has 
     config.links = { gitlab: { baseUrl: 'https://gitlab.example', clientId: 'application-id-1234', scopes: ['read_api'] } };
   }, new Map<RuntimeKind, AgentRuntime>([['opencode', runtime]]));
   t.after(() => server.close());
-  const { cookie } = await login(server.url);
+  const { cookie, user } = await login(server.url);
+  server.app.store.setSecret(`link:gitlab:${user.id}`, { accessToken: 'glpat-fixture', method: 'token', login: 'person' });
   server.app.engine.broker = { mint: async (session: Session) => ({ key: 'sk-session-fixture-key', alias: 'a', reference: `unfold-${session.id}-${attempts}`, budgetUsd: session.budgetUsd }), revoke: async () => {}, spend: async () => 0 };
   const created = await request(server.url, '/api/sessions', { method: 'POST', body: createInput({ runtime: 'opencode' }), cookie, csrf: true });
   await request(server.url, `/api/sessions/${created.body.id}/start`, { method: 'POST', body: {}, cookie, csrf: true });
   const failed = await sessionUntil(server.url, created.body.id, session => session.status === 'failed', cookie);
   assert.equal(failed.failure?.category, 'workspace_setup');
-  assert.ok(failed.failure?.detail?.includes('no gitlab.example link'), failed.failure?.detail);
+  assert.ok(failed.failure?.detail?.includes('gitlab.example link exists but the clone was refused'), failed.failure?.detail);
   await sessionUntil(server.url, created.body.id, session => session.costStatus === 'settled', cookie);
   const retried = await request(server.url, `/api/sessions/${created.body.id}/retry`, { method: 'POST', body: {}, cookie, csrf: true });
   assert.equal(retried.status, 200, JSON.stringify(retried.body));

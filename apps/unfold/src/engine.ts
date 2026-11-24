@@ -255,6 +255,7 @@ export class Engine {
     const session = this.owned(id, user);
     await this.checkModelPolicy(session);
     if (session.status !== 'queued') throw new EngineError(409, 'invalid_state', 'Only a queued session can be started.');
+    this.requireCloneLink(session);
     return this.admitAndLaunch(session, user, 'start');
   }
 
@@ -727,6 +728,7 @@ export class Engine {
     if (session.status !== 'failed') throw new EngineError(409, 'invalid_state', 'Only a failed session can be tried again.');
     if (!session.failure || session.failure.promptAcceptance === 'unknown') throw new EngineError(409, 'submission_unconfirmed', 'Unfold cannot tell whether the agent received the first prompt, so trying again could do the same work and spend twice. Read its Activity, then start a new session if the work still needs doing.');
     if (this.active.has(id)) throw new EngineError(409, 'stopping', 'The previous attempt is still stopping. Wait until it has stopped, then try again.');
+    this.requireCloneLink(session);
     if (session.runtime !== 'demo') {
       if (this.store.getSecret<boolean>(`discovery:${id}`)) await this.discoverReservations(session);
       await this.reconcile(id);
@@ -1042,6 +1044,14 @@ export class Engine {
     const link = this.links.describeFor(session.ownerId, repository.url);
     if (!link) return undefined;
     return link.linked ? `Your ${link.host} link exists but the clone was refused. Unlink and link ${link.host} again under Linked accounts, then try again.` : `Your account has no ${link.host} link. Open Linked accounts, link ${link.host}, then try again.`;
+  }
+
+  private requireCloneLink(session: Session): void {
+    if (!this.links || session.runtime === 'demo' || this.config.kubernetes?.gitSecretName) return;
+    const repository = this.config.repositories.find(item => item.id === session.repositoryId);
+    if (!repository || repository.stored || repository.access) return;
+    const link = this.links.describeFor(session.ownerId, repository.url);
+    if (link && !link.linked) throw new EngineError(409, 'link_required', `Unfold clones ${repository.name} with your own ${link.host} link, and your account has none. Open Settings › Linked accounts, link ${link.host}, then start again.`);
   }
 
   private async checkModelPolicy(session: Session): Promise<void> {
