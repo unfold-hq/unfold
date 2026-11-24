@@ -10,8 +10,18 @@ import { shell } from '../shell.js';
 import { confirmAction } from './dialogs.js';
 
 const tokenHelp = {
-  gitlab: { where: 'In GitLab: Preferences › Access tokens, with read_api, read_repository and write_repository.', placeholder: 'glpat-…', without: 'Sessions cannot clone private repositories from this host until you link.' },
-  clickup: { where: 'In ClickUp: your avatar › Settings › Apps › API Token.', placeholder: 'pk_…', without: 'ClickUp task connections show nothing until you link.' },
+  gitlab: {
+    where: 'In GitLab: Preferences › Access tokens, with read_api, read_repository and write_repository.', placeholder: 'glpat-…',
+    gives: 'have the sessions you start in Unfold clone private repositories from this host as you, and read GitLab task connections with your own account.',
+    notFor: 'Work you hand to Ploeg does not need it: Ploeg clones with its own access.',
+    kept: 'Used for your requests only. Only the step that clones a repository gets it, never the agent.',
+  },
+  clickup: {
+    where: 'In ClickUp: your avatar › Settings › Apps › API Token.', placeholder: 'pk_…',
+    gives: 'pick ClickUp Lists by name under Connect a tracker, and see the tasks of ClickUp connections that read with each person’s own account.',
+    notFor: 'Handing tasks to Ploeg does not need it: that runs through the workbench’s own ClickUp member.',
+    kept: 'Used for your requests only and never given to an agent workspace.',
+  },
 };
 
 let loadError = null;
@@ -73,12 +83,12 @@ function linkCard(link) {
   const label = nameOf(link.provider);
   const help = tokenHelp[link.provider] || {};
   const id = `link-${escape(link.provider)}`;
-  const why = `<p class="account-why">${escape(help.without || `Link ${label} to use it here.`)}</p>`;
+  const why = help.gives ? `<p class="account-why"><strong>${link.linked ? 'With this link you can' : `Link ${escape(label)} to`}</strong> ${escape(help.gives)} ${escape(help.notFor)}</p>` : `<p class="account-why">Link ${escape(label)} to use it here.</p>`;
   let body;
   let note;
   if (link.linked) {
-    body = linkedFacts(link);
-    note = 'The workbench uses this link for you only and never hands it to an agent workspace.';
+    body = `${why}${linkedFacts(link)}`;
+    note = help.kept || 'Used for your requests only.';
   } else if (link.oauth) {
     body = `${why}<div class="account-primary">${act('data-action="link"', { label: `Link ${label}`, variant: 'primary', icon: 'link', data: { provider: link.provider } })}</div>${disclosure({ summary: 'Use a personal token instead', body: tokenForm(link), id: `${id}-token` })}`;
     note = `You sign in at ${label}; the workbench never sees your password.`;
