@@ -6,6 +6,7 @@ import { money, moneyHtml, parseAmount, plural, duration, time, dateTime, timeHt
 import { icon } from '../core/icons.js';
 import { markdown } from '../core/markdown.js';
 import { avatar, badge, button, card, chip, disclosure, dl, emptyState, iconButton, meter, skeleton, stateBadge, tabs, timeAgo, timeAt } from '../core/ui.js';
+import { askedForChanges, askedForChangesFate, askedForChangesTitle } from '../core/session-outcome.js';
 import { sessionStatus, verdict as verdictMeta, workItemState, workspacePhaseLabel, workspacePhaseProblem, executionStateText } from '../core/states.js';
 import { repoName, teamName, runtimeName, placementName, isActive, providerName, statusLabel } from '../core/lookup.js';
 import { observabilityLinks, dashboardLinks } from '../core/observability.js';
@@ -549,24 +550,26 @@ export function retryHold(session, { sharedExecution = false } = {}) {
 function failureMarkup(session) {
   const failure = session.failure;
   if (!failure && !session.blocker && session.status !== 'interrupted') return '';
-  const title = failure ? `${failureStage(failure)} failed` : session.status === 'interrupted' ? 'This session stopped' : 'This session is blocked';
-  const message = failure?.message || session.blocker || 'The runtime stopped before the role finished. Resume to continue; nothing restarts on its own.';
-  const { steps, notes } = remediationSteps(failure?.remediation);
+  const sentBack = askedForChanges(session);
+  const title = sentBack ? askedForChangesTitle(sentBack) : failure ? `${failureStage(failure)} failed` : session.status === 'interrupted' ? 'This session stopped' : 'This session is blocked';
+  const message = sentBack ? askedForChangesFate(session) : failure?.message || session.blocker || 'The runtime stopped before the role finished. Resume to continue; nothing restarts on its own.';
+  const { steps, notes } = sentBack ? { steps: ['Read the findings.', 'To have them fixed, start a new session and put the findings in its brief.', ...(session.candidate?.status === 'ready' ? ['To use the change as it is, take it from Repository handoff.'] : [])], notes: [] } : remediationSteps(failure?.remediation);
   const hold = session.status === 'failed' && canOperate() ? retryHold(session, { sharedExecution: Boolean(state.bootstrap.sharedExecution) }) : null;
   const statusLink = statusCauses.has(failure?.category) ? button({ label: 'Open Status', icon: 'monitor', href: `#status?from=${encodeURIComponent(session.id)}` }) : '';
   const investigateButton = investigation.id === session.id && investigation.result ? '' : button({ id: 'session-investigate', label: 'Investigate', icon: 'search', action: 'investigate', disabled: investigation.busy, busy: investigation.busy });
   const actions = (session.status === 'failed' && canOperate() ? `${hold === null ? button({ label: 'Try again', icon: 'refresh', variant: 'primary', action: 'retry' }) : hold === 'submission' ? button({ label: 'Read its Activity', icon: 'activity', variant: 'primary', action: 'tab', data: { id: 'stream' } }) : ''}${button({ label: 'Duplicate as a new session', icon: 'copy', variant: hold === 'ploeg' ? 'primary' : 'secondary', action: 'duplicate' })}${session.execution && !session.workItemClosedAt ? button({ label: 'Close its Work Item', icon: 'x-circle', action: 'close-work-item' }) : ''}${statusLink}` : statusLink) + investigateButton;
-  const facts = [submissions[failure?.promptAcceptance], failure?.automaticRetry === false ? 'No automatic retry will be started.' : '', hold === 'submission' ? 'Try again is not offered: if the first prompt did reach the agent, trying again would do the same work and spend twice. Read its Activity to see what the agent did, and start a new session only if the work still needs doing.' : hold === 'ploeg' ? 'A session Ploeg ran cannot start again. Duplicate as a new session fills in a new session with the same brief and budget; nothing runs or spends until you start it.' : hold === 'spend' ? 'Try again becomes available once spend is reconciled.' : ''].filter(Boolean);
+  const facts = [sentBack ? '' : submissions[failure?.promptAcceptance], failure?.automaticRetry === false ? 'No automatic retry will be started.' : '', hold === 'submission' ? 'Try again is not offered: if the first prompt did reach the agent, trying again would do the same work and spend twice. Read its Activity to see what the agent did, and start a new session only if the work still needs doing.' : hold === 'ploeg' ? 'A session Ploeg ran cannot start again. Duplicate as a new session fills in a new session with the same brief and budget; nothing runs or spends until you start it.' : hold === 'spend' ? 'Try again becomes available once spend is reconciled.' : ''].filter(Boolean);
   const body = [
     `<p class="session-failure-lead">${escape(message)}</p>`,
+    sentBack?.summary ? disclosure({ id: 'session-findings', open: true, summary: 'Findings', body: `<div data-private class="prose session-prose">${markdown(sentBack.summary)}</div>` }) : '',
     notes.length ? `<p class="session-failure-context">${notes.map(note => `<span>${escape(note)}</span>`).join(' ')}</p>` : '',
     steps.length ? `<div class="session-failure-steps"><h3 class="overline session-failure-steps-title">What to do</h3>${steps.length > 1 ? `<ol class="session-steps-list">${steps.map(step => `<li>${escape(step)}</li>`).join('')}</ol>` : `<p>${escape(steps[0])}</p>`}</div>` : '',
     facts.length ? `<p class="session-failure-facts">${facts.map(fact => `<span>${escape(fact)}</span>`).join(' ')}</p>` : '',
     failure?.detail ? disclosure({ id: 'session-failure-detail', plain: true, summary: 'Recorded error output', body: `<pre data-private class="session-pre" aria-label="Recorded error output">${escape(failure.detail)}</pre>` }) : '',
     investigation.id === session.id ? investigationMarkup() : '',
   ].join('');
-  const tone = session.status === 'interrupted' ? 'severe' : 'danger';
-  return `<section class="callout session-callout session-failure" data-tone="${tone}" aria-labelledby="session-failure-title"><span class="callout-icon" aria-hidden="true">${icon(tone === 'danger' ? 'x-circle' : 'zap')}</span><div class="callout-content"><h2 class="callout-title" id="session-failure-title">${escape(title)}</h2><div class="callout-body">${body}</div></div>${actions ? `<div class="callout-actions">${actions}</div>` : ''}</section>`;
+  const tone = sentBack ? 'attention' : session.status === 'interrupted' ? 'severe' : 'danger';
+  return `<section class="callout session-callout session-failure" data-tone="${tone}" aria-labelledby="session-failure-title"><span class="callout-icon" aria-hidden="true">${icon(sentBack ? 'eye' : tone === 'danger' ? 'x-circle' : 'zap')}</span><div class="callout-content"><h2 class="callout-title" id="session-failure-title">${escape(title)}</h2><div class="callout-body">${body}</div></div>${actions ? `<div class="callout-actions">${actions}</div>` : ''}</section>`;
 }
 
 const investigationClasses = { unfold_stall: 'Unfold stalled', ploeg_unreachable: 'Ploeg unreachable', ploeg_refused: 'Ploeg refused', unfold_restart: 'Unfold restarted', operator_stop: 'Stopped by a person', guard: 'Guard fired', unclear: 'No known pattern' };
@@ -902,11 +905,18 @@ export async function attachSession(id, { view, render: draw, here, inspect = ()
   return true;
 }
 
+function handoffNoticeMarkup(session) {
+  if (session.status !== 'completed' || deliveryGated(state) || session.candidate?.status !== 'ready' || session.candidate.fileCount === 0) return '';
+  const review = (session.runs ?? []).findLast(run => run.mode === 'read' && run.verdict);
+  const patch = session.candidate.formats?.includes('patch') ? `<div class="callout-actions">${button({ label: 'Download patch', icon: 'download', variant: 'primary', action: 'candidate-download', data: { format: 'patch' } })}</div>` : '';
+  return `<section class="callout session-callout" data-tone="review" aria-labelledby="session-handoff-title"><span class="callout-icon" aria-hidden="true">${icon('eye')}</span><div class="callout-content"><h2 class="callout-title" id="session-handoff-title">The change is ready for you</h2><div class="callout-body"><p>${review ? `${escape(verdictMeta(review.verdict).short)}. ` : ''}No pull request was opened, because this workbench publishes none for this repository. Read the change under Evidence, then take the patch or the Git bundle from Repository handoff and open the pull request yourself.</p></div></div>${patch}</section>`;
+}
+
 /** The session's own parts for a host view, drawn from the shared state: what it waits on, its controls, its evidence without the steering box, and its budget, hand-off, approval and details cards. It carries no Accept or Reject: the Work Item's one Review is its pull request (domain rule R22). Null while `id` is not the loaded session. */
 export function sessionParts(id) {
   const session = state.session;
   if (!session || session.id !== id) return null;
-  const decision = decisionMarkup(session, { review: false });
+  const decision = `${decisionMarkup(session, { review: false })}${handoffNoticeMarkup(session)}`;
   return {
     decision: decision ? `<div id="session-decision" tabindex="-1">${decision}</div>` : '',
     actions: headerActions(session),

@@ -177,3 +177,20 @@ test('a stuck Run without a failure reason reads as stuck, never as a worker tha
   const lostLease = model('running', input => { input.detail.runs = input.detail.runs.filter(run => run.id === '6').map(run => ({ ...run, outcome: 'failed' })); return input; });
   assert.deepEqual([lostLease.runs[0].status, lostLease.runs[0].machine], ['failed', true], 'a lost lease is a failed Run, not a stuck one');
 });
+
+test('work Ploeg calls done is merged only when a pull request or a merge is recorded', () => {
+  const input = scenarios.landed.input();
+  const bare = { ...input, detail: { ...input.detail, item: { ...input.detail.item, pullRequest: null }, runs: input.detail.runs.map(run => ({ ...run, outcome: run.outcome === 'pr_opened' || run.outcome === 'pr_updated' ? 'completed' : run.outcome })), events: [] } };
+  const statuses = live => Object.fromEntries(live.stages.map(stage => [stage.id, stage.status]));
+  const finished = liveModel(bare);
+  assert.equal(finished.landed, false);
+  assert.deepEqual(statuses(finished), { ask: 'done', wait: 'done', build: 'done', pr: 'unknown', review: 'unknown', merge: 'unknown', production: 'unknown' }, 'no stage after the build is claimed');
+  assert.deepEqual(liveSentence(finished), { head: 'Finished.', sub: 'No pull request is recorded.', tone: 'neutral' });
+  assert.equal(standingAnswers(finished).find(entry => entry.id === 'review').answer, 'No pull request is recorded for this Work Item.');
+  assert.deepEqual(flightLegs(finished).filter(leg => leg.kind === 'stop').map(leg => [leg.label, leg.note]), [['Finished', 'No pull request']]);
+  assert.equal(flightLegs(finished).some(leg => leg.parked), false, 'the plane does not park at Merge');
+
+  const merged = liveModel({ ...bare, detail: { ...bare.detail, events: [{ id: '1', action: 'work_item.done', at: new Date(bare.now).toISOString(), detail: { reason: 'pull request merged' } }] } });
+  assert.deepEqual([merged.landed, statuses(merged).merge, liveSentence(merged).head], [true, 'done', 'Landed.'], 'Ploeg said it was merged');
+  assert.match(standingAnswers(liveModel(input)).find(entry => entry.id === 'review').answer, /^It is merged/);
+});

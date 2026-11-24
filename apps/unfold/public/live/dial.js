@@ -37,7 +37,7 @@ export function shiftDial(model) {
   const budget = share !== null && share > 0 ? `<path class="${cx('lv-dial-spend', model.spend.over ? 'is-over' : share >= 0.8 ? 'is-high' : '')}" d="${arc(inner, 0, Math.max(0.01, share))}"></path>` : '';
   const live = model.runs.find(run => run.state === 'running');
   const [px, py] = live ? point(outer, 1 - 0.0001) : [0, 0];
-  const centre = model.running ? span(model.running.seconds) : model.state === 'done' ? 'Landed' : model.state === 'awaiting_review' ? 'Review' : model.state === 'needs_human' ? 'Stopped' : 'Waiting';
+  const centre = model.running ? span(model.running.seconds) : model.state === 'done' ? model.landed ? 'Landed' : 'Finished' : model.state === 'awaiting_review' ? 'Review' : model.state === 'needs_human' ? 'Stopped' : 'Waiting';
   const role = model.running?.role ?? (model.state === 'awaiting_review' ? 'Pull request open' : model.runs.find(run => run.status === 'pending')?.role ?? model.runs.at(-1)?.role ?? 'No Run yet');
   const tones = new Set(model.runs.map(run => run.state === 'running' ? 'live' : run.machine ? 'machine' : run.status === 'failed' ? 'failed' : ''));
   const keys = [['machine', 'infrastructure'], ['failed', 'agent failed'], ['live', 'running']].filter(([tone]) => tones.has(tone)).map(([tone, words]) => `<span class="lv-key is-${tone}">${words}</span>`).join('');

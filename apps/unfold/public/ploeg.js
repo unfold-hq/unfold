@@ -27,6 +27,7 @@ import { workView } from './live/work-view.js';
 import { workPage } from './live/pages.js';
 import { containmentPanel, needsContainment } from './live/containment.js';
 import { progressTitle, reconcileDetail, sessionProgress } from './core/progress.js';
+import { askedForChanges, askedForChangesFate, askedForChangesTitle } from './core/session-outcome.js';
 import { effortText, termTitle, trackerReference } from './core/terms.js';
 import { runTranscriptMarkup } from './run-transcript.js';
 import { workActionsMarkup } from './action-log.js';
@@ -767,9 +768,10 @@ function sessionPlan(detail, model, reason) {
   const duplicate = onePage && model.session ? ui.button({ label: 'Duplicate as a new session', icon: 'copy', variant: 'primary', action: 'duplicate' }) : '';
   const anew = duplicate || (onePage ? '' : open('primary', 'Open the session'));
   const close = session.workItemClosedAt ? '' : ui.button({ label: 'Close this Work Item', icon: 'x-circle', variant: anew ? 'secondary' : 'primary', action: 'work-session-close', data: { id: session.id } });
-  const failure = session.failure?.message ? `${session.failure.message} ` : '';
+  const sentBack = askedForChanges(session);
+  const failure = sentBack ? 'Read the findings above. ' : session.failure?.message ? `${session.failure.message} ` : '';
   const note = duplicate ? 'A session Ploeg ran cannot start again. Duplicate as a new session fills in a new session with the same brief and budget; nothing runs or spends until you start it.' : 'A session Ploeg ran cannot start again. Open the session and press Duplicate as a new session to start the same work with its own budget.';
-  const why = onePage && model.session?.decision ? ui.button({ label: 'Why it failed', icon: 'sessions', variant: 'ghost', action: 'work-section', data: { id: 'session-decision' } }) : '';
+  const why = onePage && model.session?.decision ? ui.button({ label: sentBack ? 'Read the findings' : 'Why it failed', icon: 'sessions', variant: 'ghost', action: 'work-section', data: { id: 'session-decision' } }) : '';
   const entry = { text: escape(`${failure}Start a new session for the same work, or close this Work Item if you no longer want it.`), actions: [anew, close, why].filter(Boolean), note: escape(note) };
   return { entries: [entry], primary: anew || close };
 }
@@ -780,7 +782,9 @@ function needsYouBox(detail, model, reason, plan) {
   const event = (detail.events || []).find(entry => entry.action === `work_item.${item.state}` && entry.detail?.reason);
   const question = waitingQuestion(detail, reason);
   const evidence = evidenceRuns(detail, reason).filter(run => !question || String(run.id) !== question.runId);
-  const why = [`<p class="work-decision-sentence">${escape(reason.sentence)}</p>`];
+  const driving = reason.code === 'operator_failed' ? drivingSession(detail, model.sessions) : null;
+  const sentBack = askedForChanges(driving);
+  const why = [`<p class="work-decision-sentence">${escape(sentBack ? `${askedForChangesTitle(sentBack)}. ${askedForChangesFate(driving)}` : reason.sentence)}</p>`];
   if (question) why.push(questionMarkup(question, { canAnswer: Boolean(model.canWrite), demo: Boolean(detail.demo), others: waitingQuestions(detail).filter(entry => entry.id !== question.id), resume: resumeOffer(detail) }));
   if (reason.headline && !(question && overlaps(question.text, reason.headline.split(' — ').at(-1))) && !evidence.some(run => overlaps(evidenceText(run, reason), reason.headline.split(' — ').at(-1)))) why.push(quote(reason.headline, event?.at));
   const shift = latestShift(detail);
