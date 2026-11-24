@@ -387,6 +387,10 @@ Links from sessions and Runs into the estate's Grafana.
 | `observability.tracesDatasource` | string |  | Datasource uid of traces. |
 | `observability.logsDatasource` | string |  | Datasource uid of logs. |
 | `observability.logsUrl` | string |  | Logs query API URL, for pod logs per Run. |
+| `observability.logsFields` | object |  | What the log store calls the fields that name a line's pod. |
+| `observability.logsFields.namespace` | string | `namespace` | Field with the Kubernetes namespace. |
+| `observability.logsFields.pod` | string | `pod` | Field with the pod name. |
+| `observability.logsFields.container` | string | `container` | Field with the container name. |
 | `observability.metricsUrl` | string |  | Metrics query API URL. |
 | `observability.traceQuery` | string |  | Trace query template. |
 | `observability.logsQuery` | string |  | Logs query template. |

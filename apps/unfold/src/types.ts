@@ -75,7 +75,7 @@ export type AppConfig = {
   /** The decider the tripwire asks (RFC-0008): an OpenAI-compatible gateway, Unfold's own key named by `keyEnv`, and a cap on requests per minute. Absent, the tripwire is off. */
   decider?: { baseUrl: string; keyEnv: string; model: string; name: string; requestsPerMinute: number };
   cardThemes?: { directory?: string; assetQuotaMb: number; ai?: { baseUrl: string; model: string; keyEnv: string; maxTokens: number; timeoutMs: number; requestsPerHour: number } };
-  observability?: { grafanaUrl?: string; dashboards?: Record<string, string>; tracesDatasource?: string; logsDatasource?: string; logsUrl?: string; metricsUrl?: string; traceQuery?: string; logsQuery?: string };
+  observability?: { grafanaUrl?: string; dashboards?: Record<string, string>; tracesDatasource?: string; logsDatasource?: string; logsUrl?: string; logsFields?: { namespace?: string; pod?: string; container?: string }; metricsUrl?: string; traceQuery?: string; logsQuery?: string };
   insight?: InsightConfig;
   /** The security audit's retention and OTLP endpoint (`src/audit/settings.ts`). */
   audit?: AuditConfig;
