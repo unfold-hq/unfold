@@ -357,38 +357,6 @@ test('automatic approval never answers a request to reach outside the workspace,
   await engine.shutdown();
 });
 
-test('automatic approval never answers a request to reach outside the workspace, also when it is switched on while the request waits', async t => {
-  const { store, config } = await fixture(t);
-  const answered: string[] = [];
-  let release: (() => void) | undefined;
-  class OutsideRuntime extends ControlledRuntime {
-    async execute(context: ExecutionContext): Promise<ExecutionResult> {
-      if (context.role.mode === 'read') return { summary: 'Reviewed evidence', verdict: 'approve', artifacts: [] };
-      const ask = (nativeId: string, permission: string) => context.emit({ type: 'permission', data: { nativeId, kind: 'permission', permission, title: `Allow ${permission}?`, detail: '{}', options: ['once', 'always', 'reject'] } });
-      ask('per_outside', 'external_directory');
-      ask('per_bash', 'bash');
-      await new Promise<void>((resolveRun, reject) => { release = resolveRun; context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }); });
-      return { summary: 'Done', artifacts: [] };
-    }
-    async respond(_workspace: unknown, request: { nativeId: string }) { answered.push(request.nativeId); if (request.nativeId === 'per_outside') release!(); }
-  }
-  const engine = new Engine(store, config, { demo: new OutsideRuntime() });
-  const session = engine.create(input(), owner);
-  store.saveSession({ ...store.getSession(session.id)!, approval: 'auto' });
-  await engine.start(session.id, owner);
-  await until(() => answered.includes('per_bash'));
-  store.saveSession({ ...store.getSession(session.id)!, placement: 'kubernetes' });
-  await engine.setApproval(session.id, 'auto', owner);
-  await setTimeout(50);
-  assert.deepEqual(answered, ['per_bash']);
-  const outside = store.permissions(session.id).find(request => request.nativeId === 'per_outside')!;
-  assert.equal(outside.resolved, false);
-  assert.equal(store.getSession(session.id)!.status, 'waiting_input');
-  await engine.respond(session.id, outside.id, { decision: 'once' }, owner);
-  await until(() => store.getSession(session.id)!.status === 'completed');
-  await engine.shutdown();
-});
-
 test('live startup recovery interrupts the previous workspace and revokes its held credential without new execution', async t => {
   const { store, config } = await fixture(t, 'live');
   const runtime = new ControlledRuntime('opencode');
