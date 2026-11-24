@@ -19,7 +19,7 @@ import { actionsCsv, actionsJson, engineRows, newestFirst, recordRow } from '../
 import { linkedChangedEvent } from './linked-sessions.js';
 import { answerDialogMarkup, answerField, noteDialogMarkup, noteLimit } from '../blackboard-view.js';
 import { answerLimit, answerNote, resumeOffer, waitingQuestion, waitingQuestions, writeError } from '../core/blackboard.js';
-import { detailReason, retryable, retryCaution } from '../core/reasons.js';
+import { detailReason, retryable } from '../core/reasons.js';
 import { retryMarkup, retryNotice } from '../start.js';
 import { attachSession, sessionParts } from './session.js';
 import { announcesTripwire, tripwireCheckLabel } from '../core/tripwire.js';
@@ -243,7 +243,7 @@ function observeActions() {
   work.stickyObserver?.disconnect();
   work.stickyObserver = null;
   const bar = $('.work-sticky-actions');
-  const primary = $('.work-status-actions .button.primary') || $('#work-decision .button.primary');
+  const primary = $('.work-status-actions .button') || $('#work-decision .button.primary');
   if (!bar || !primary || typeof IntersectionObserver !== 'function') return;
   work.stickyObserver = new IntersectionObserver(entries => { for (const entry of entries) bar.toggleAttribute('data-covered', entry.isIntersecting); }, { rootMargin: '0px 0px -96px 0px' });
   work.stickyObserver.observe(primary);
@@ -1289,7 +1289,7 @@ async function submitAnswer(data, form, event) {
 
 function retryDialog(detail) {
   const entry = { ...detail.item, latestShift: detail.shifts?.[0] ?? detail.item.latestShift ?? null };
-  const options = { form: 'work-retry', demo: Boolean(detail.demo || state.bootstrap?.mode === 'demo'), caution: retryCaution(detailReason(detail)) };
+  const options = { form: 'work-retry', demo: Boolean(detail.demo || state.bootstrap?.mode === 'demo'), caution: detailReason(detail)?.caution || '' };
   return { entry, markup: extra => retryMarkup(entry, { ...options, ...extra }) };
 }
 

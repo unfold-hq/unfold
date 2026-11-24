@@ -2,7 +2,7 @@ import { escape, safeUrl } from './core/dom.js';
 import { icon } from './core/icons.js';
 import * as format from './core/format.js';
 import { runOutcome, verdict as verdictMeta, runFailure, runFailureText, workItemState, tileDetail, unreportedOutcome, stoppedWorkIds } from './core/states.js';
-import { listReason, reasonGlyph, routingWarning, needsYouBlocks, waitingGroup, sessionDriven, sessionReason } from './core/reasons.js';
+import { listReason, reasonGlyph, routingWarning, needsYouBlocks, waitingGroup, sessionDriven, sessionReason, failedRunsFault, infraFault, retryCaution } from './core/reasons.js';
 import { workItemRef, reasonBand, mergeStateView } from './ploeg.js';
 import { taskChip, trackerName } from './core/trackers.js';
 import { trackerReference } from './core/terms.js';
@@ -59,7 +59,6 @@ const groups = [
 ];
 const origins = { split: 'Split from', clarify: 'Clarifies', discovered: 'Found while working on' };
 const kinds = { split: 'Split from other work.', clarify: 'Asks to clarify other work.', discovered: 'Found along the way.' };
-const infrastructure = new Set(['writing_run_killed_repeatedly', 'stale_infrastructure']);
 const amount = value => typeof value === 'number' && Number.isFinite(value);
 const moment = value => { const time = typeof value === 'number' ? value : Date.parse(value ?? ''); return Number.isFinite(time) ? time : null; };
 const after = (value, since) => since !== null && moment(value) !== null && moment(value) > since;
@@ -282,11 +281,7 @@ function drivingSession(entry, sessions) {
   return (sessions || []).filter(session => String(session.execution?.workItemId ?? '') === String(entry.id)).sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')))[0] || null;
 }
 
-function infraFault(entry, context, reason) {
-  if (reason && infrastructure.has(reason.code)) return { owner: 'the cluster' };
-  const last = context.lastFailure?.get(String(entry.id));
-  return last?.infra ? { owner: last.owner || 'the cluster' } : null;
-}
+const lastFailureOf = (entry, context) => context.lastFailure?.get(String(entry.id)) ?? null;
 
 function waitingActions(entry, context, reason) {
   const title = entry.title || `Work Item ${entry.id}`;
@@ -295,7 +290,7 @@ function waitingActions(entry, context, reason) {
   const failedCi = reason?.code === 'ci_failed';
   const session = stopped && (sessionReason(reason) || sessionDriven(entry));
   const retry = context.retryHere && stopped && !entry.question?.text && reason?.requeue && !session;
-  const infra = stopped && !entry.question?.text ? infraFault(entry, context, reason) : null;
+  const infra = stopped && !entry.question?.text ? infraFault(reason, lastFailureOf(entry, context)) : null;
   let primary = '';
   const more = [];
   if (pr && (entry.state === 'awaiting_review' || reason?.code === 'approved_to_merge')) primary = button({ id: `now-pr-${entry.id}`, label: failedCi ? 'Failing checks' : 'Pull request', icon: failedCi ? 'x-circle' : 'pull-request', size: 'sm', href: pr, external: true, ariaLabel: failedCi ? `Open the pull request for “${title}” to see why CI did not pass (opens in a new tab)` : `Open the pull request for “${title}” (opens in a new tab)` });
@@ -323,7 +318,7 @@ function waitingActions(entry, context, reason) {
       ? secondary({ id: `now-tracker-${entry.id}`, label: name ? `Close in ${name}` : 'Close the task', icon: 'x-circle', href: tracker, external: true, ariaLabel: `Close “${title}” in ${where}: Ploeg withdraws a stopped Work Item once its task is closed (opens in a new tab)` })
       : secondary({ id: `now-tracker-${entry.id}`, label: name ? `Open in ${name}` : 'Open the task', href: tracker, external: true, ariaLabel: `Open “${title}” in ${where} (opens in a new tab)` }));
   }
-  const grafana = (reason && infrastructure.has(reason.code)) || infra ? grafanaTeam(entry.team, context.grafanaUrl) : null;
+  const grafana = infraFault(reason) || infra ? grafanaTeam(entry.team, context.grafanaUrl) : null;
   if (grafana) more.push(secondary({ id: `now-grafana-${entry.id}`, label: 'Grafana', icon: 'activity', href: grafana, external: true, ariaLabel: `Open Grafana for the ${entry.team} Team (opens in a new tab)` }));
   const snooze = waitingGroup(entry) === 'needs' ? snoozeSlot(entry, 'work', title, context) : { toggle: '', options: '' };
   return `<div class="now-item-actions"${primary ? ' data-primary' : ''}><span class="now-action-primary" data-insight="now.row.primary">${primary}</span><span class="now-action-links" data-insight="now.row.link">${more.join('')}${snooze.toggle}</span></div>${snooze.options}`;
@@ -389,9 +384,8 @@ function lastRunLine(entry, context) {
 
 function infraLine(entry, context, reason) {
   if (entry.question?.text || !context.retryHere || !reason?.requeue || waitingGroup(entry) !== 'needs') return '';
-  const infra = infraFault(entry, context, reason);
-  if (!infra) return '';
-  return `<span class="now-why now-wrap now-infra-note">${escape(`Not the Work Item’s fault. Trying again is likely to fail the same way until ${infra.owner} is healthy, so check Status first.`)}</span>`;
+  const caution = retryCaution(reason, lastFailureOf(entry, context));
+  return caution ? `<span class="now-why now-wrap now-infra-note">${escape(caution)}</span>` : '';
 }
 
 function retryHere(reason, context) {
@@ -973,16 +967,16 @@ function unsnoozed(leftover, quiet) {
 }
 
 function failures(runs) {
-  const map = new Map();
+  const failed = new Map();
   for (const run of byFinish(runs)) {
     if (run.outcome !== 'failed' || run.shadow) continue;
     const key = String(run.workItemId);
-    const known = map.get(key);
-    const meta = runFailure(run);
-    if (known) { known.count += 1; known.infra = known.infra && Boolean(meta?.infra); continue; }
-    map.set(key, { label: meta?.label || 'Failed', text: firstSentence(runFailureText(run).reason), infra: Boolean(meta?.infra), owner: meta?.owner || '', role: run.role || '', round: run.round || null, count: 1 });
+    failed.set(key, [...(failed.get(key) || []), run]);
   }
-  return map;
+  return new Map([...failed].map(([key, list]) => {
+    const [run] = list;
+    return [key, { label: runFailure(run)?.label || 'Failed', text: firstSentence(runFailureText(run).reason), ...failedRunsFault(list), role: run.role || '', round: run.round || null, count: list.length }];
+  }));
 }
 
 function loopRecent(view, visible, held, context, hide) {

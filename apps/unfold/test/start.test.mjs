@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { handedMarkup, labelledTeam, pendingHandoffs, priorityOf, readiness, retryMarkup, retryNotice, reviewRoom, roomOf, routeOf, sheetMarkup, startCard, startLimit, startQueue, suggestedTeam, taskKey, whyHere } from '../public/start.js';
 import { namedDate } from '../public/core/format.js';
 import { loopCounts, loopMarkup } from '../public/now.js';
+import { retryCaution } from '../public/core/reasons.js';
 import { countsFromNow } from '../public/core/counts.js';
 
 const task = (id, extra = {}) => ({ provider: 'vikunja', id: String(id), revision: `r${id}`, title: `Task ${id}`, description: 'Make the totals round half up.\n\nAcceptance criteria:\n- the order page shows 2 decimals', url: `https://tracker.test/tasks/${id}`, status: 'open', updatedAt: `2026-10-18T0${id % 9}:00:00Z`, labels: [], ...extra });
@@ -255,7 +256,7 @@ test('the Try again dialog is one confirmation for Now and the Work Item page', 
   assert.match(page, /<button type="submit" class="button primary" id="loop-retry-submit">[^]*<span class="button-label">Try again<\/span>/, 'a caution never disables the restart');
   const demo = retryMarkup(entry, { demo: true, form: 'work-retry', caution: 'The Run fails again.' });
   assert.match(demo, /This is the demo: nothing restarts and nothing is spent\./);
-  assert.doesNotMatch(demo, /The Run fails again/, 'nothing restarts in the demo, so nothing can fail again');
+  assert.match(demo, /This is the demo: nothing restarts and nothing is spent\.<\/p><p>The Run fails again\.<\/p>/, 'the demo shows the caution the live dialog shows');
   assert.match(retryMarkup(entry, { error: 'Conflict' }), /<div role="alert"><div class="callout" data-tone="danger">/, 'a refusal is announced');
   assert.equal(retryNotice(entry, { fromRound: 1, demo: false }), 'Started “Stuck one” again from Round 1.');
   assert.equal(retryNotice({ id: '7' }, {}), 'Started “Work Item 7” again from Round 1.');
@@ -350,6 +351,7 @@ test('every Unstick row offers the buttons its reason names, and an infrastructu
   assert.match(primary('60'), /href="#status"[\s\S]*Check Status/, 'infrastructure failures lead with Status');
   assert.match(links('60'), /class="button ghost sm"[^>]*data-action="loop-retry" data-id="60"/, 'Try again stays, as a secondary button');
   assert.match(row('60'), /Trying again is likely to fail the same way until the cluster is healthy/);
+  assert.ok(row('60').includes(`<span class="now-why now-wrap now-infra-note">${retryCaution({ code: 'plan_exhausted' }, { infra: true, owner: 'the cluster' })}</span>`), 'the row and the Work Item page’s confirmation share one sentence');
 
   assert.match(row('61'), /now-fail-why" data-private>exit status 1</);
   assert.match(primary('61'), /data-action="loop-retry" data-id="61"[\s\S]*Try again/, 'an agent failure leads with Try again');

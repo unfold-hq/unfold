@@ -160,6 +160,28 @@ export async function run({ page, app, assert, screenshot }) {
     await page.locator('#ploeg-item-title').waitFor({ state: 'detached' });
     assert(sessionReads.length <= 1, `Work reads the sessions at most once, read ${sessionReads.length} times`);
 
+    await page.goto(`http://127.0.0.1:${app.server.address().port}/#work/112`);
+    await page.waitForFunction(() => document.activeElement?.id === 'ploeg-item-title');
+    const cautioned = page.locator('.work-status-actions [data-action="work-retry"]');
+    assert.equal(await cautioned.getAttribute('class'), 'button secondary', 'Try again is the quieter button when a new attempt is likely to fail the same way');
+    assert.equal(await page.locator('#app .button.primary[data-action="work-retry"]').count(), 0, 'and nowhere the primary one');
+    await cautioned.focus();
+    await page.keyboard.press('Enter');
+    await retryDialog.waitFor();
+    await retryDialog.getByText('Not the Work Item’s fault. Trying again is likely to fail the same way until the cluster is healthy, so check Status first.').waitFor();
+    await page.keyboard.press('Escape');
+    await retryDialog.waitFor({ state: 'detached' });
+    assert.equal(await page.evaluate(() => document.activeElement?.dataset.action), 'work-retry', 'Escape returns focus to Try again');
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.locator('.work-sticky-actions [data-action="work-retry"]').getAttribute('class'), 'button secondary', 'the phone bar carries the same quieter button');
+    await cautioned.scrollIntoViewIfNeeded();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.work-sticky-actions')).visibility === 'hidden');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForFunction(() => getComputedStyle(document.querySelector('.work-sticky-actions')).visibility === 'visible');
+    await page.setViewportSize({ width: 1440, height: 1040 });
+    await page.getByRole('button', { name: 'Close work item details' }).click();
+    await page.locator('#ploeg-item-title').waitFor({ state: 'detached' });
+
     await page.goto(`http://127.0.0.1:${app.server.address().port}/#card/109`);
     const card = page.locator('unfold-card.card-page-card');
     await card.locator('.gc:not([hidden])').waitFor();

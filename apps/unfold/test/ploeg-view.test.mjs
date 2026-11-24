@@ -923,7 +923,10 @@ test('a stuck Run whose clone failed is shown as a cause to fix, never as a ques
   const box = html.slice(html.indexOf('id="work-decision"'), html.indexOf('</section>', html.indexOf('id="work-decision"')));
   assert.match(box, /Not the Work Item’s fault: the cluster could not reach the repository’s host, so the builder’s Run stopped in Round 2 before any agent work was tried\./);
   assert.match(box, /Check DNS and the network from the cluster to the repository’s host, not the ticket\./);
-  assert.match(box, /Then press Try again\. Assigning the task to the Team again in [^<]* also starts it again\.<\/p><div class="work-step-actions"><button type="button" class="button primary" data-action="work-retry" data-id="111">/, 'the restart is offered after the cause, and the tracker stays the other way');
+  assert.match(box, /Then press Try again\. Assigning the task to the Team again in [^<]* also starts it again\.<\/p><div class="work-step-actions"><button type="button" class="button secondary" data-action="work-retry" data-id="111">/, 'the restart is offered after the cause, as the quieter button, and the tracker stays the other way');
+  assert.doesNotMatch(html, /class="button primary" data-action="work-retry"/, 'a restart that is likely to fail the same way is never the primary action');
+  assert.match(html, /<div class="work-status-actions"><button type="button" class="button secondary" data-action="work-retry" data-id="111">/, 'the status panel carries the same quieter button');
+  assert.match(html, /<div class="work-sticky-actions" role="group" aria-label="Next step"><button type="button" class="button secondary" data-action="work-retry" data-id="111">/, 'and so does the phone bar');
   assert.match(detailMarkup(detail, model({ detailId: '111' })), /Then assign the task to the Team again in/, 'a viewer is sent to the tracker');
   assert.doesNotMatch(html, /data-action="work-answer-open"/, 'answering cannot fix a clone, so no Answer is offered anywhere on the page');
   assert.doesNotMatch(html, /needs from you|class="work-question"|cannot finish in Round 2 without a person|Or answer in/);
@@ -986,4 +989,24 @@ test('a stopped Work Item offers Try again where the tracker sentence was, unles
   taken.shifts[0].closeReason = 'taken_over';
   taken.item.latestShift = taken.shifts[0];
   assert.doesNotMatch(detailMarkup(taken, model({ detailId: '110', canWrite: true })), /data-action="work-retry"/, 'hand-back continues it');
+});
+
+test('Try again is the quieter button whenever its confirmation adds a caution, also for an infrastructure cause', () => {
+  const killed = demoDetail('112');
+  const reason = detailReason(killed);
+  assert.deepEqual([reason.code, reason.caution], ['writing_run_killed_repeatedly', 'Not the Work Item’s fault. Trying again is likely to fail the same way until the cluster is healthy, so check Status first.']);
+  const plan = decisionPlan(killed, model({ detailId: '112', canWrite: true }), reason);
+  assert.match(plan.entries.at(-1).actions[0], /^<button type="button" class="button secondary" data-action="work-retry" data-id="112">/);
+  assert.equal(plan.primary, plan.entries.at(-1).actions[0], 'the status panel and the phone bar carry the same quieter button');
+  const page = detailMarkup(killed, model({ detailId: '112', canWrite: true }));
+  assert.match(page, /<div class="work-status-actions"><button type="button" class="button secondary" data-action="work-retry" data-id="112">/);
+  assert.match(page, /<div class="work-sticky-actions" role="group" aria-label="Next step"><button type="button" class="button secondary" data-action="work-retry" data-id="112">/);
+  assert.doesNotMatch(page, /class="button primary" data-action="work-retry"/);
+
+  const gateway = demoDetail('113');
+  assert.match(decisionPlan(gateway, model({ detailId: '113', canWrite: true }), detailReason(gateway)).primary, /class="button primary" data-action="work-retry" data-id="113"/, 'agents that failed by themselves leave Try again primary');
+  for (const run of gateway.runs) if (run.outcome === 'failed') run.failureReason = 'infra_llm';
+  const faulted = detailReason(gateway);
+  assert.equal(faulted.caution, 'Not the Work Item’s fault. Trying again is likely to fail the same way until the model gateway is healthy, so check Status first.', 'failed Runs that all failed on infrastructure name the part that has to be healthy');
+  assert.match(decisionPlan(gateway, model({ detailId: '113', canWrite: true }), faulted).primary, /class="button secondary" data-action="work-retry" data-id="113"/);
 });

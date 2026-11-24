@@ -1,7 +1,7 @@
 import './trackers-support.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { approvedToMerge, cloneFailure, closeReasonLabel, detailReason, listReason, needsYouBlocks, parseBudgetReason, parseStuckReason, retryable, retryCaution, routingWarning, sessionDriven, withdrawnReason } from '../public/core/reasons.js';
+import { approvedToMerge, cloneFailure, closeReasonLabel, detailReason, listReason, needsYouBlocks, parseBudgetReason, failedRunsFault, infraFault, parseStuckReason, retryable, retryCaution, routingWarning, sessionDriven, withdrawnReason } from '../public/core/reasons.js';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import { waitingGroup } from '../public/core/reasons.js';
 
@@ -451,6 +451,34 @@ test('a Try again after a failed clone warns by cause, and no other reason does'
   assert.equal(retryCaution(other), 'Nothing changed since it failed, so the same result is likely unless the cause was fixed.');
   assert.equal(retryable(unreachable), true, 'the restart is warned about, never blocked');
   const budget = detailReason({ item: { id: '1', state: 'needs_human', provider: 'vikunja', closeReason: 'budget_exhausted_before_fix_round' }, runs: [], events: [] });
-  assert.deepEqual([budget.variant, budget.cause, retryCaution(budget)], [null, null, '']);
+  assert.deepEqual([budget.variant, budget.cause, retryCaution(budget), budget.caution], [null, null, '', '']);
+  assert.deepEqual([unreachable.caution, access.caution], [retryCaution(unreachable), retryCaution(access)], 'the detail reason carries its caution');
   assert.equal(retryCaution(null), '');
+});
+
+test('an infrastructure cause warns with one sentence, shared by Now and the Work Item page', () => {
+  const sentence = owner => `Not the Work Item’s fault. Trying again is likely to fail the same way until ${owner} is healthy, so check Status first.`;
+  const killed = listReason({ id: '1', state: 'needs_human', closeReason: 'writing_run_killed_repeatedly' });
+  const stale = listReason({ id: '1', state: 'stale', infraFailures: 10 });
+  assert.deepEqual([stale.code, retryCaution(killed), retryCaution(stale)], ['stale_infrastructure', sentence('the cluster'), sentence('the cluster')]);
+  const capped = listReason({ id: '1', state: 'needs_human', closeReason: 'fix_round_cap_reached' });
+  assert.equal(retryCaution(capped), '');
+  assert.equal(retryCaution(capped, { infra: true, owner: 'the model gateway' }), sentence('the model gateway'), 'failed Runs that all failed on infrastructure name the part');
+  assert.equal(retryCaution(capped, { infra: true, owner: '' }), sentence('the cluster'));
+  assert.equal(retryCaution(capped, { infra: false, owner: 'the agent configuration' }), '');
+  assert.deepEqual([infraFault(killed), infraFault(capped), infraFault(capped, { infra: true, owner: 'the model gateway' })], [{ owner: 'the cluster' }, null, { owner: 'the model gateway' }]);
+
+  const failed = (failureReason, extra = {}) => ({ outcome: 'failed', failureReason, ...extra });
+  assert.deepEqual(failedRunsFault([failed('infra_llm'), failed('lease_lost')]), { infra: true, owner: 'the model gateway' }, 'the newest failed Run names the owner');
+  assert.deepEqual(failedRunsFault([failed('infra_node'), failed('agent_error')]), { infra: false, owner: 'the cluster' }, 'one agent failure and it is no longer only infrastructure');
+  assert.deepEqual(failedRunsFault([failed('infra_node'), failed('agent_error', { shadow: true }), { outcome: 'pr_opened' }]), { infra: true, owner: 'the cluster' }, 'shadow Runs and Runs that did not fail are left out');
+  assert.equal(failedRunsFault([{ outcome: 'stuck' }]), null);
+  assert.equal(failedRunsFault(null), null);
+
+  const detail = (closeReason, runs) => ({ item: { id: '1', state: 'needs_human', provider: 'vikunja', latestShift: { id: '9', closeReason, closedAt: '2026-10-01T10:00:00Z' } }, shifts: [{ id: '9', closeReason, closedAt: '2026-10-01T10:00:00Z' }], runs, events: [] });
+  const run = (id, shiftId, failureReason) => ({ id, shiftId, role: 'builder', round: 1, writes: true, state: 'finished', outcome: 'failed', failureReason });
+  assert.equal(detailReason(detail('writing_run_killed_repeatedly', [])).caution, sentence('the cluster'), 'the reason code alone is enough');
+  assert.equal(detailReason(detail('writing_run_failed_repeatedly', [run('3', '9', 'infra_llm'), run('2', '9', 'infra_llm')])).caution, sentence('the model gateway'), 'the failed Runs of the latest Shift');
+  assert.equal(detailReason(detail('writing_run_failed_repeatedly', [run('3', '9', 'agent_error'), run('2', '8', 'infra_llm')])).caution, '', 'an earlier attempt’s infrastructure fault does not count');
+  assert.equal(detailReason(detail('question_for_person', [run('3', '9', 'infra_llm')])).caution, '', 'no caution where Try again is not offered');
 });

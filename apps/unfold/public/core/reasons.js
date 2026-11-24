@@ -518,14 +518,45 @@ export function retryable(reason) {
   return Boolean(reason?.requeue);
 }
 
+const infrastructureCodes = new Set(['writing_run_killed_repeatedly', 'stale_infrastructure']);
+
 /**
- * The sentence a Try again confirmation adds when a new attempt meets the same cause unless someone fixed it: a failed
- * clone (`variant` `clone_failed`), worded by its `cause`. Empty for every other reason.
- * @param {{ variant?: string | null, cause?: string | null } | null | undefined} reason the detail reason
+ * What the failed Runs given have in common: `infra` when every one failed on infrastructure, and the `owner` of the
+ * newest one's fault. Shadow Runs and Runs that did not fail are left out. Null when none failed.
+ * @param {object[] | null | undefined} runs a Work Item's Runs, newest first
+ * @returns {{ infra: boolean, owner: string } | null}
+ */
+export function failedRunsFault(runs) {
+  const faults = (runs || []).filter(run => run.outcome === 'failed' && !run.shadow).map(runFailure);
+  return faults.length ? { infra: faults.every(fault => Boolean(fault?.infra)), owner: faults[0]?.owner || '' } : null;
+}
+
+/**
+ * The infrastructure that has to be healthy before a new attempt can end differently, or null. Either the reason says
+ * the cluster stopped the Work Item (`writing_run_killed_repeatedly`, `stale_infrastructure`), or its failed Runs all
+ * failed on infrastructure (`lastFailure`, from `failedRunsFault`), whose `owner` then names the part.
+ * @param {{ code?: string } | null | undefined} reason
+ * @param {{ infra?: boolean, owner?: string } | null} [lastFailure]
+ * @returns {{ owner: string } | null}
+ */
+export function infraFault(reason, lastFailure = null) {
+  if (infrastructureCodes.has(reason?.code)) return { owner: 'the cluster' };
+  return lastFailure?.infra ? { owner: lastFailure.owner || 'the cluster' } : null;
+}
+
+/**
+ * The one sentence that warns a person before Try again that a new attempt is likely to end the same way, for Now and
+ * the Work Item page alike; empty when nothing says so. A failed clone (`variant` `clone_failed`) is worded by its
+ * `cause`; an infrastructure fault (`infraFault`) names the part that has to be healthy. A page that shows it makes
+ * Try again the quieter button.
+ * @param {{ code?: string, variant?: string | null, cause?: string | null } | null | undefined} reason
+ * @param {{ infra?: boolean, owner?: string } | null} [lastFailure] what the Work Item's failed Runs have in common
  * @returns {string}
  */
-export function retryCaution(reason) {
-  return reason?.variant === 'clone_failed' ? retryCautions[reason.cause] || retryCautions.unknown : '';
+export function retryCaution(reason, lastFailure = null) {
+  if (reason?.variant === 'clone_failed') return retryCautions[reason.cause] || retryCautions.unknown;
+  const infra = infraFault(reason, lastFailure);
+  return infra ? `Not the Work Item’s fault. Trying again is likely to fail the same way until ${infra.owner} is healthy, so check Status first.` : '';
 }
 
 function cloneFailed(kind, run) {
@@ -563,8 +594,9 @@ function heldDetail(detail, shift, reason) {
  * whose every named check was cancelled it sets `variant` `ci_cancelled` and points the fix at re-running CI. For `run_stuck`
  * whose Run could not clone the repository (`cloneFailure`) it sets `variant` `clone_failed`: the sentence says the Work Item
  * is not at fault and no agent work was tried, and the fix points at the network or the bot's access; `cause` is then
- * `unreachable`, `access` or `unknown` (null for every other reason). Returns null unless the item is `needs_human` or
- * `stale`.
+ * `unreachable`, `access` or `unknown` (null for every other reason). `caution` is the `retryCaution` of a reason that
+ * names a restart, read with the failed Runs of the latest Shift, and empty otherwise. Returns null unless the item is
+ * `needs_human` or `stale`.
  */
 export function detailReason(detail) {
   const item = detail?.item;
@@ -620,13 +652,15 @@ export function detailReason(detail) {
       reason = { ...reason, sentence, fix: entry.fix, action: `${entry.fix} ${reason.requeue}` };
     }
   }
-  return {
+  const refined = {
     ...reason,
     variant,
     cause: clone,
     headline,
     run: run ? { id: run.id, role: run.role, round: run.round, text: run.stuckReason || run.summary || '', failure: failureReason(run.failureReason) } : null,
   };
+  const attempt = (detail.runs || []).filter(entry => !shift?.id || !entry.shiftId || entry.shiftId === shift.id).sort(newestFirst);
+  return { ...refined, caution: retryable(refined) ? retryCaution(refined, failedRunsFault(attempt)) : '' };
 }
 
 /**

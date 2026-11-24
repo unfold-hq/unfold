@@ -3,7 +3,7 @@ import { icon } from '../core/icons.js';
 import { clock, cx, escape, r, span, tokens, usd } from './parts.js';
 
 const endingWords = Object.freeze({ live: 'Working now', machine: 'Infrastructure fault', failed: 'Failed', cancelled: 'Cancelled', pending: 'Waiting for a worker', done: 'Landed' });
-const seatWords = Object.freeze({ live: 'Working', machine: 'Lost to a machine', failed: 'Failed', stuck: 'Stopped answering', cancelled: 'Cancelled', pending: 'Waiting', done: 'Landed' });
+const seatWords = Object.freeze({ live: 'Working', machine: 'Lost to a machine', failed: 'Failed', stuck: 'Asked for a person', cancelled: 'Cancelled', pending: 'Waiting', done: 'Landed' });
 const ledgerWords = Object.freeze({ proven: 'Proven', claimed: 'Claimed, not proven', running: 'Being checked now', open: 'No proof reported' });
 const dockGlyphs = Object.freeze({ stop: 'alert', review: 'eye', session: 'help-circle', linked: 'link', collision: 'alert' });
 
