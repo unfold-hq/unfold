@@ -12,7 +12,16 @@ const unreachable = 'http://127.0.0.1:9';
 const declaredProposals = ['chatSessionsProvider', 'chatArtifactIntegrations', 'chatInputNotification', 'treeViewMarkdownMessage', 'treeItemMarkdownLabel', 'statusBarItemTooltip', 'chatStatusItem', 'remoteAgentHost'];
 const readTools = ['unfold_now', 'unfold_get_work', 'unfold_find_work'];
 
+const shotUrl = process.env.UNFOLD_INTEGRATION_SHOT_URL;
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function shot(name) {
+  const response = await fetch(`${shotUrl}?name=${name}`, { method: 'POST' });
+  const text = await response.text();
+  assert.equal(response.status, 200, `the screenshot ${name} failed: ${text}`);
+  return text;
+}
 
 async function eventually(describe, probe, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
@@ -133,6 +142,20 @@ describe(`Unfold in VS Code ${target} ${vscode.version}`, function () {
     }
     await eventually('the demo answer again', async () => (await invoke('unfold_now')).startsWith(`Unfold at ${demoUrl}`));
   });
+
+  if (shotUrl) {
+    it('photographs Now and a Work Item ready for review', async function () {
+      await vscode.commands.executeCommand('workbench.action.closeAuxiliaryBar');
+      await vscode.commands.executeCommand('unfold.now.focus');
+      await vscode.commands.executeCommand('unfold.refresh');
+      await sleep(2_000);
+      await shot('now');
+      const item = now.waiting.find(entry => entry.state === 'awaiting_review') ?? now.waiting[0];
+      await vscode.commands.executeCommand('unfold.openWorkItem', { id: item.id, title: item.title });
+      await sleep(4_000);
+      await shot('work-item');
+    });
+  }
 
   if (insiders) {
     it('uses every Insiders proposal without a refusal', async function () {

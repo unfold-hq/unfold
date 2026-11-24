@@ -324,6 +324,8 @@ In both builds the suite checks that:
 
 In Stable the regular build declares no API proposal and has no `unfold.insiders.sendFeedback` command. In Insiders every declared proposal stays on and each was called without a refusal: the Sessions list, the chat artifact integration, the notice above the chat input, the tree view message and Markdown labels, the status bar hover, the chat status item and the remote agent host. The suite reads that from the extension's `exports`, whose `proposals()` returns `ProposalGuard`'s states and the proposals it used; it changes nothing.
 
+`UNFOLD_VSCODE_SCREENSHOTS=<directory>` also photographs each VS Code: Now in the sidebar, and the demo's Work Item that waits for review in its own tab, as `<target>-now.png` and `<target>-work-item.png`. The runner then starts VS Code with `--remote-debugging-port` on a free loopback port, and the suite asks the runner for each picture over a loopback HTTP endpoint, which takes it of the workbench window through the Chrome DevTools Protocol with Playwright. Without the variable neither port is opened and the photographing test does not run. The image in the [Unfold README](https://github.com/unfold-hq/unfold/blob/development/apps/unfold/README.md) comes from this.
+
 After each VS Code exits, the runner reads that VS Code's own logs and fails when VS Code refused a chat participant the extension registered (`Unknown agent: "unfold-…"`). VS Code reports that only in its renderer log, never to the extension, so no test inside VS Code sees it.
 
 It does not cover:
