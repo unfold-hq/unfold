@@ -25,7 +25,7 @@ type TreeEntry = { mode: string; blob: string; bytes: number };
 
 const limits = { files: 5000, fileBytes: 16 * 1024 * 1024, sourceBytes: 64 * 1024 * 1024, outputBytes: 128 * 1024 * 1024 };
 const names: Record<CandidateFormat, string> = { bundle: 'candidate.git.bundle', patch: 'candidate.patch', manifest: 'manifest.json', attestation: 'candidate.attestation.json', trace: 'candidate.trace.json' };
-const unavailableMessages: Record<string, string> = { capture_failed: 'The candidate could not be captured. The workspace is retained for manual review.', base_unavailable: 'The original Git base could not be established. Review the retained workspace manually.', unsupported_workspace: 'This workspace does not support complete candidate export. Use a provisioned local or Kubernetes workspace.', unsupported_repository: 'This repository uses a Git layout or file type this exporter does not support. Review the retained workspace manually.', secret_path: 'A sensitive file path blocks this export. Remove credentials from the change before creating a new session.', secret_content: 'A recognizable secret blocks this export. Remove the secret before creating a new session.', size_limit: 'The workspace exceeds the bounded export limits. Review the retained workspace or reduce the change.', workspace_changed: 'The workspace changed during capture. No partial candidate was published; review the retained workspace.', stop_unconfirmed: 'The previous runtime has not confirmed it stopped. Export remains blocked to avoid an inconsistent snapshot.', not_ready: 'A candidate is available after the session finishes preparing its review.' };
+const unavailableMessages: Record<string, string> = { capture_failed: 'The candidate could not be captured. The workspace is retained for manual review.', base_unavailable: 'The original Git base could not be established. Review the retained workspace manually.', unsupported_workspace: 'This workspace does not support complete candidate export. Use a provisioned local or Kubernetes workspace.', unsupported_repository: 'This repository uses a Git layout or file type this exporter does not support. Review the retained workspace manually.', secret_path: 'This change adds, edits or deletes a file whose name suggests credentials, which blocks the export. Leave that file out of the change before creating a new session.', secret_content: 'A recognizable secret blocks this export. Remove the secret before creating a new session.', size_limit: 'The workspace exceeds the bounded export limits. Review the retained workspace or reduce the change.', workspace_changed: 'The workspace changed during capture. No partial candidate was published; review the retained workspace.', stop_unconfirmed: 'The previous runtime has not confirmed it stopped. Export remains blocked to avoid an inconsistent snapshot.', not_ready: 'A candidate is available after the session finishes preparing its review.' };
 
 export function unavailableCandidate(reason = 'capture_failed'): Candidate { const code = Object.hasOwn(unavailableMessages, reason) ? reason : 'capture_failed'; return { status: 'unavailable', reason: code, message: unavailableMessages[code] }; }
 
@@ -38,9 +38,17 @@ const decode = (value: Buffer): string => new TextDecoder('utf-8', { fatal: true
 
 function safePath(path: string): string {
   if (!path || path.length > 4096 || path.includes('\0') || path.includes('\\') || isAbsolute(path) || path.split('/').some(part => !part || part === '.' || part === '..' || part.toLowerCase() === '.git')) reject('unsupported_repository');
+  return path;
+}
+
+function namesSecret(path: string): boolean {
   const components = path.toLowerCase().split('/');
   const leaf = components.at(-1)!;
-  if (components.some(part => ['.ssh', '.aws', '.kube', '.gnupg'].includes(part)) || /^(\.env(?:\..+)?|\.envrc|\.npmrc|\.pypirc|\.netrc|\.git-credentials|auth\.json|credentials(?:\..+)?|service[-_]account(?:\..+)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?)$/.test(leaf) && !/^\.env\.(?:example|sample|template)$/.test(leaf) || /\.(?:pem|key|p12|pfx)$/.test(leaf) || path.toLowerCase().endsWith('.docker/config.json')) reject('secret_path');
+  return components.some(part => ['.ssh', '.aws', '.kube', '.gnupg'].includes(part)) || /^(\.env(?:\..+)?|\.envrc|\.npmrc|\.pypirc|\.netrc|\.git-credentials|auth\.json|credentials(?:\..+)?|service[-_]account(?:\..+)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?)$/.test(leaf) && !/^\.env\.(?:example|sample|template)$/.test(leaf) || /\.(?:pem|key|p12|pfx)$/.test(leaf) || path.toLowerCase().endsWith('.docker/config.json');
+}
+
+function changeable(path: string): string {
+  if (namesSecret(safePath(path))) reject('secret_path');
   return path;
 }
 
@@ -152,6 +160,8 @@ async function readWorktreeFile(directory: string, path: string): Promise<{ mode
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
 }
 
+function blobId(content: Buffer): string { return createHash('sha1').update(Buffer.from(`blob ${content.length}\0`)).update(content).digest('hex'); }
+
 async function writeBlob(gitDirectory: string, content: Buffer): Promise<string> {
   const object = Buffer.concat([Buffer.from(`blob ${content.length}\0`), content]);
   const blob = createHash('sha1').update(object).digest('hex');
@@ -187,7 +197,6 @@ export async function captureLocalCandidate(options: CaptureOptions): Promise<Ca
     await writeFile(join(gitDirectory, 'info', 'exclude'), excludesBefore);
     await writeFile(join(gitDirectory, 'objects', 'info', 'alternates'), join(sourceGit, 'objects') + '\n');
     const base = await treeEntries(gitDirectory, directory, baseSha, signal);
-    for (const entry of base.values()) inspectContent(await git(['cat-file', 'blob', entry.blob], gitDirectory, directory, signal));
     const pathsOutput = await git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'], gitDirectory, directory, signal, undefined, sourceIndex);
     const selectedPaths = new Set(decode(pathsOutput).split('\0').filter(Boolean));
     const paths = [...new Set([...base.keys(), ...selectedPaths])].sort();
@@ -195,12 +204,18 @@ export async function captureLocalCandidate(options: CaptureOptions): Promise<Ca
     const current = new Map<string, TreeEntry>(); let sourceBytes = 0;
     for (const path of paths) {
       signal.throwIfAborted(); safePath(path);
+      const before = base.get(path);
+      if (namesSecret(path) && (!before || !selectedPaths.has(path))) reject('secret_path');
       if (!selectedPaths.has(path)) continue;
-      const entry = await readWorktreeFile(directory, path); if (!entry) continue;
+      const entry = await readWorktreeFile(directory, path);
+      if (namesSecret(path) && (!entry || entry.mode !== before!.mode || blobId(entry.content) !== before!.blob)) reject('secret_path');
+      if (!entry) continue;
       sourceBytes += entry.content.length; if (sourceBytes > limits.sourceBytes) reject('size_limit');
       inspectContent(entry.content);
       current.set(path, { mode: entry.mode, blob: await writeBlob(gitDirectory, entry.content), bytes: entry.content.length });
     }
+    const inspected = new Set([...current.values()].map(entry => entry.blob));
+    for (const entry of base.values()) if (!inspected.has(entry.blob)) inspectContent(await git(['cat-file', 'blob', entry.blob], gitDirectory, directory, signal));
     const records = [...current].map(([path, entry]) => `${entry.mode} ${entry.blob}\t${path}\0`).join('');
     await git(['read-tree', '--empty'], gitDirectory, directory, signal);
     await git(['update-index', '-z', '--index-info'], gitDirectory, directory, signal, Buffer.from(records));
@@ -219,7 +234,7 @@ export async function captureLocalCandidate(options: CaptureOptions): Promise<Ca
     for (const path of paths) {
       if (!selectedPaths.has(path)) continue;
       const entry = await readWorktreeFile(directory, path); const recorded = current.get(path);
-      if (!entry !== !recorded || entry && recorded && (entry.mode !== recorded.mode || createHash('sha1').update(Buffer.from(`blob ${entry.content.length}\0`)).update(entry.content).digest('hex') !== recorded.blob)) reject('workspace_changed');
+      if (!entry !== !recorded || entry && recorded && (entry.mode !== recorded.mode || blobId(entry.content) !== recorded.blob)) reject('workspace_changed');
     }
     const files: CandidateFile[] = [];
     for (const path of paths) {
@@ -254,7 +269,7 @@ export async function persistRemoteCandidate(dataDir: string, sessionId: string,
     identity(sessionId);
     if (manifest.sessionId !== sessionId || manifest.version !== 1 || manifest.verification !== 'not_performed' || manifest.publication !== 'not_performed' || !Array.isArray(manifest.files) || manifest.files.length > limits.files || bundle.length > limits.outputBytes || patch.length > limits.outputBytes || manifest.downloads.bundle.sha256 !== sha256(bundle) || manifest.downloads.patch.sha256 !== sha256(patch) || manifest.downloads.bundle.bytes !== bundle.length || manifest.downloads.patch.bytes !== patch.length) reject('capture_failed');
     revision(manifest.baseSha); revision(manifest.snapshotBaseSha); revision(manifest.headSha); revision(manifest.treeSha);
-    for (const file of manifest.files) safePath(file.path);
+    for (const file of manifest.files) changeable(file.path);
     const root = resolve(dataDir, 'candidates'); await mkdir(root, { recursive: true, mode: 0o700 });
     try { const existing = JSON.parse(decode(await boundedRead(join(root, sessionId, names.manifest)))) as CandidateManifest; if (existing.sessionId !== sessionId || existing.repositoryId !== manifest.repositoryId || existing.baseSha !== manifest.baseSha) reject('capture_failed'); await readCandidate(dataDir, sessionId, 'bundle'); await readCandidate(dataDir, sessionId, 'patch'); return metadata(existing); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     temporary = await mkdtemp(join(root, `.capture-${sessionId}-`));

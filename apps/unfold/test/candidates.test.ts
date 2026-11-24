@@ -83,7 +83,7 @@ test('candidate capture ignores repository hooks, local configuration and conten
   } finally { await rm(options.root, { recursive: true, force: true }); }
 });
 
-test('candidate capture fails closed on sensitive new paths and tracked base secrets', async () => {
+test('candidate capture fails closed on sensitive new paths and deleted base secrets', async () => {
   for (const tracked of [false, true]) {
     const options = await fixture();
     try {
@@ -91,6 +91,70 @@ test('candidate capture fails closed on sensitive new paths and tracked base sec
       if (tracked) { git(options.directory, 'add', '.env'); git(options.directory, 'commit', '-m', 'sensitive base'); options.baseSha = await pinCandidateBase(options.directory); await rm(join(options.directory, '.env')); }
       const result = await captureLocalCandidate(options); assert.equal(result.status, 'unavailable'); assert.equal(result.reason, 'secret_path');
       assert.deepEqual(await readdir(join(options.dataDir, 'candidates')), []);
+    } finally { await rm(options.root, { recursive: true, force: true }); }
+  }
+});
+
+test('a file the base already tracks under a sensitive name does not block a change to other files', async () => {
+  const options = await fixture();
+  try {
+    for (const name of ['.env.testing.pipeline', '.npmrc']) await writeFile(join(options.directory, name), 'BASE_ONLY=placeholder\n');
+    git(options.directory, 'add', '-f', '.env.testing.pipeline', '.npmrc'); git(options.directory, 'commit', '-m', 'names already in the base'); options.baseSha = await pinCandidateBase(options.directory);
+    await writeFile(join(options.directory, 'source.txt'), 'a change elsewhere\n');
+    const candidate = await captureLocalCandidate(options); assert.equal(candidate.status, 'ready', candidate.reason);
+    const manifest = JSON.parse((await readCandidate(options.dataDir, options.sessionId, 'manifest')).content.toString());
+    assert.deepEqual(manifest.files.map((file: { path: string }) => file.path), ['source.txt']);
+    const patch = await readCandidate(options.dataDir, options.sessionId, 'patch');
+    assert.doesNotMatch(patch.content.toString(), /BASE_ONLY|\.env|\.npmrc/, 'the patch shows nothing of the untouched file');
+    const bundle = await readCandidate(options.dataDir, options.sessionId, 'bundle');
+    for (const path of ['.env.testing.pipeline', 'nested/.env', 'keys/host.pem']) {
+      const named = { ...manifest, files: [{ ...manifest.files[0], path }] };
+      assert.equal((await persistRemoteCandidate(join(options.root, 'remote'), options.sessionId, named, bundle.content, patch.content)).reason, 'secret_path', `a remote manifest that changes ${path} is refused`);
+    }
+    assert.equal((await persistRemoteCandidate(join(options.root, 'remote'), options.sessionId, manifest, bundle.content, patch.content)).status, 'ready');
+  } finally { await rm(options.root, { recursive: true, force: true }); }
+});
+
+test('changing a file the base tracks under a sensitive name still blocks the export, however it changes', async () => {
+  const changes: Record<string, (directory: string, file: string) => Promise<unknown> | unknown> = {
+    edited: (_directory, file) => writeFile(file, 'BASE_ONLY=edited\n'),
+    'made executable': (_directory, file) => chmod(file, 0o755),
+    deleted: (_directory, file) => rm(file),
+    'replaced by a link': async (_directory, file) => { await rm(file); await symlink('source.txt', file); },
+    untracked: (directory, file) => { git(directory, 'rm', '--cached', '-q', '.env.testing.pipeline'); return rm(file); },
+  };
+  for (const [how, change] of Object.entries(changes)) {
+    const options = await fixture();
+    try {
+      const file = join(options.directory, '.env.testing.pipeline');
+      await writeFile(file, 'BASE_ONLY=placeholder\n', { mode: 0o644 });
+      git(options.directory, 'add', '-f', '.env.testing.pipeline'); git(options.directory, 'commit', '-m', 'name already in the base'); options.baseSha = await pinCandidateBase(options.directory);
+      await change(options.directory, file);
+      assert.equal((await captureLocalCandidate(options)).reason, 'secret_path', how);
+      assert.deepEqual(await readdir(join(options.dataDir, 'candidates')), [], `${how}: nothing is published`);
+    } finally { await rm(options.root, { recursive: true, force: true }); }
+  }
+});
+
+test('a recognizable secret in a file the base already tracks still blocks the export', async () => {
+  const options = await fixture();
+  try {
+    await writeFile(join(options.directory, '.env.testing.pipeline'), ['-----BEGIN ', 'PRIVATE KEY-----'].join(''));
+    git(options.directory, 'add', '-f', '.env.testing.pipeline'); git(options.directory, 'commit', '-m', 'secret in the base'); options.baseSha = await pinCandidateBase(options.directory);
+    await writeFile(join(options.directory, 'source.txt'), 'a change elsewhere\n');
+    assert.equal((await captureLocalCandidate(options)).reason, 'secret_content');
+  } finally { await rm(options.root, { recursive: true, force: true }); }
+});
+
+test('a recognizable secret that only the base holds blocks the export, whether the change edits or deletes its file', async () => {
+  for (const change of [(file: string) => writeFile(file, 'rotated\n'), (file: string) => rm(file)]) {
+    const options = await fixture();
+    try {
+      const file = join(options.directory, 'settings.txt');
+      await writeFile(file, ['-----BEGIN ', 'PRIVATE KEY-----'].join(''));
+      git(options.directory, 'add', 'settings.txt'); git(options.directory, 'commit', '-m', 'secret in the base'); options.baseSha = await pinCandidateBase(options.directory);
+      await change(file);
+      assert.equal((await captureLocalCandidate(options)).reason, 'secret_content');
     } finally { await rm(options.root, { recursive: true, force: true }); }
   }
 });
