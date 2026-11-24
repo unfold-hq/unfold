@@ -290,6 +290,41 @@ test('permission requests survive durable reads, require owner response and cann
   await engine.shutdown();
 });
 
+test('automatic approval answers every tool permission the agent raises, including a sub-agent\'s, and leaves questions to the person', async t => {
+  const { store, config } = await fixture(t);
+  const answered: { nativeId: string; decision?: string }[] = [];
+  let questionAnswered: (() => void) | undefined;
+  class SubAgentRuntime extends ControlledRuntime {
+    async execute(context: ExecutionContext): Promise<ExecutionResult> {
+      if (context.role.mode === 'read') return { summary: 'Reviewed evidence', verdict: 'approve', artifacts: [] };
+      context.emit({ type: 'permission', data: { nativeId: 'per_child_bash', kind: 'permission', title: 'Allow bash?', detail: JSON.stringify({ permission: 'bash', patterns: ['find /workspace/repository/app -type f', 'sort'], always: ['find *', 'sort *'] }), options: ['once', 'always', 'reject'] } });
+      await until(() => answered.length === 1);
+      context.emit({ type: 'permission', data: { nativeId: 'que_child', kind: 'question', title: 'Agent needs your answer', detail: 'Which directory first?', questions: [{ question: 'Which directory first?' }] } });
+      await new Promise<void>((resolveRun, reject) => { questionAnswered = resolveRun; context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true }); });
+      return { summary: 'Explored every directory through sub-agents', artifacts: [] };
+    }
+    async respond(_workspace: unknown, request: { nativeId: string; kind: string }, answer: { decision?: string }) {
+      if (request.kind === 'question') questionAnswered!();
+      else answered.push({ nativeId: request.nativeId, decision: answer.decision });
+    }
+  }
+  const engine = new Engine(store, config, { demo: new SubAgentRuntime() });
+  const session = engine.create(input(), owner);
+  store.saveSession({ ...store.getSession(session.id)!, approval: 'auto' });
+  await engine.start(session.id, owner);
+  await until(() => store.permissions(session.id).some(request => request.kind === 'question'));
+  assert.deepEqual(answered, [{ nativeId: 'per_child_bash', decision: 'once' }]);
+  const [tool, question] = [...store.permissions(session.id)].sort((a, b) => a.kind.localeCompare(b.kind));
+  assert.equal(tool.resolved, true);
+  assert.ok(store.events(session.id).some(event => event.type === 'permission.resolved' && event.actor === 'system' && (event.data as { automatic?: boolean }).automatic === true));
+  await setTimeout(50);
+  assert.equal(store.getPermission(question.id)!.resolved, false);
+  assert.equal(store.getSession(session.id)!.status, 'waiting_input');
+  await engine.respond(session.id, question.id, { answers: [['app']] }, owner);
+  await until(() => store.getSession(session.id)!.status === 'completed');
+  await engine.shutdown();
+});
+
 test('live startup recovery interrupts the previous workspace and revokes its held credential without new execution', async t => {
   const { store, config } = await fixture(t, 'live');
   const runtime = new ControlledRuntime('opencode');

@@ -827,7 +827,21 @@ export class Engine {
     if (request.resolved || !this.active.has(id) || session.status !== 'waiting_input') throw new EngineError(409, 'request_expired', 'This question no longer waits for an answer. Reload the session to see what it waits for now.');
     if (request.kind === 'permission' && !['once', 'always', 'reject'].includes(answer?.decision ?? '')) throw new EngineError(400, 'invalid_answer', 'Choose once, always or reject.');
     if (request.kind === 'question' && (!Array.isArray(answer?.answers) || answer.answers.length > 50 || answer.answers.some(values => !Array.isArray(values) || values.length > 50 || values.some(value => typeof value !== 'string' || value.length > 10000)))) throw new EngineError(400, 'invalid_answer', 'Question answers must be arrays of strings.');
-    if (this.authority?.current(id)) await this.authority.command(session, 'message', { text: `Operator answered request ${request.id}: ${request.kind === 'permission' ? answer.decision : 'structured answers recorded in the workbench'}` }, user.id);
+    return this.answer(session, request, answer, user.id, 'Operator');
+  }
+
+  private async answerAutomatically(id: string, requestId: string): Promise<void> {
+    const session = this.store.getSession(id);
+    const request = this.store.getPermission(requestId);
+    if (!session || !request || request.resolved || request.kind !== 'permission' || session.approval !== 'auto' || !this.active.has(id) || session.status !== 'waiting_input') return;
+    try { await this.answer(session, request, { decision: 'once' }, 'system', 'Automatic approval'); }
+    catch (error) { console.error(JSON.stringify({ level: 'warn', event: 'approval.automatic_failed', session: id, request: requestId, message: String(error instanceof Error ? error.message : error).slice(0, 200) })); }
+  }
+
+  private async answer(session: Session, request: PermissionRequest, answer: { decision?: 'once' | 'always' | 'reject'; answers?: string[][] }, actor: string, answeredBy: string): Promise<Session> {
+    const id = session.id;
+    const requestId = request.id;
+    if (this.authority?.current(id)) await this.authority.command(session, 'message', { text: `${answeredBy} answered request ${request.id}: ${request.kind === 'permission' ? answer.decision : 'structured answers recorded in the workbench'}` }, actor === 'system' ? session.ownerId : actor);
     if (request.nativeId.startsWith('brief:')) {
       const waiting = this.briefs.get(id);
       if (!waiting) throw new EngineError(409, 'request_expired', 'This question no longer waits for an answer. Reload the session to see what it waits for now.');
@@ -845,7 +859,7 @@ export class Engine {
       current.status = 'running';
       for (const run of current.runs) if (run.status === 'waiting_input') run.status = 'running';
     }
-    this.save(current, 'permission.resolved', user.id, { requestId, decision: answer.decision, answered: request.kind === 'question' });
+    this.save(current, 'permission.resolved', actor, { requestId, decision: answer.decision, answered: request.kind === 'question', ...(actor === 'system' ? { automatic: true } : {}) });
     return current;
   }
 
@@ -1385,6 +1399,7 @@ export class Engine {
     }
     if (event.type === 'status' && data.status === 'waiting_input') { session.status = 'waiting_input'; run.status = 'waiting_input'; }
     this.save(session, event.type, actor, recorded, runId);
+    if (event.type === 'permission' && data.kind !== 'question' && session.approval === 'auto' && typeof data.requestId === 'string') void this.answerAutomatically(id, data.requestId);
   }
 
   /** A stopped managed session whose spend Ploeg may have settled since Unfold last asked, at most once per `settlementReadMs`. */
