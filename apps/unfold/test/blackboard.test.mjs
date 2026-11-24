@@ -230,6 +230,10 @@ test('when Ploeg offers to resume, answering every question of the Round resumes
   assert.doesNotMatch(older, /value="resume"|Resume Round/, 'an older ploegd offers no resume');
   const page = detailMarkup({ ...detail, demo: false }, model({ detailId: '109', canWrite: true }));
   assert.match(page, /One more question from the same Round[^]*Answer all/);
+  const order = markup => [...markup.matchAll(/Question (\d): “([^”]*)”/g)].map(match => [match[1], match[2]]);
+  assert.deepEqual(order(page), [['1', 'Must the API answer 422 or is 400 fine?'], ['2', 'And for a quantity of zero?']]);
+  assert.deepEqual(order(page), order(html), 'the page and the dialog number the questions alike');
+  assert.doesNotMatch(answerDialogMarkup({ ...detail, demo: false }, questions.slice(0, 1)), /Question 1/, 'a single question needs no number');
   assert.match(page, /can resume Round 3 on the same branch: this Round up to US\$\s0,40, in total up to US\$\s2,25/);
 });
 
