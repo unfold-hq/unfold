@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { createWriteStream, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { createServer as createHttpServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { downloadAndUnzipVSCode, runTests, runVSCodeCommand } from '@vscode/test-electron';
@@ -9,6 +10,7 @@ const extensionRoot = resolve(import.meta.dirname, '../..');
 const appRoot = resolve(extensionRoot, '../..');
 const work = mkdtempSync(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'ufvs-'));
 const keep = process.env.UNFOLD_VSCODE_TEST_KEEP === '1';
+const screenshotDir = process.env.UNFOLD_VSCODE_SCREENSHOTS ? resolve(process.env.UNFOLD_VSCODE_SCREENSHOTS) : undefined;
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 for (const name of Object.keys(process.env)) if (name === 'ELECTRON_RUN_AS_NODE' || name.startsWith('VSCODE_')) delete process.env[name];
@@ -95,19 +97,52 @@ function refusals(userData) {
   return logFiles(join(userData, 'logs')).flatMap(file => readFileSync(file, 'utf8').split('\n').filter(line => refusedByVsCode.test(line)).map(line => `${file}: ${line.trim()}`));
 }
 
+async function workbenchPage(browser) {
+  const pages = browser.contexts().flatMap(context => context.pages());
+  return pages.find(page => page.url().includes('workbench')) ?? pages[0];
+}
+
+async function startCamera(name, debugPort) {
+  const { chromium } = await import('playwright');
+  mkdirSync(screenshotDir, { recursive: true });
+  let browser;
+  const server = createHttpServer(async (request, response) => {
+    const shot = new URL(request.url, 'http://127.0.0.1').searchParams.get('name') ?? '';
+    if (request.method !== 'POST' || !/^[a-z0-9-]{1,40}$/.test(shot)) { response.writeHead(400).end(); return; }
+    try {
+      browser ??= await chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
+      const page = await workbenchPage(browser);
+      const file = join(screenshotDir, `${name}-${shot}.png`);
+      await page.screenshot({ path: file });
+      response.writeHead(200, { 'content-type': 'text/plain' }).end(file);
+    } catch (error) {
+      response.writeHead(500, { 'content-type': 'text/plain' }).end(error instanceof Error ? error.message : String(error));
+    }
+  });
+  const port = await freePort();
+  await new Promise(resolveListen => server.listen(port, '127.0.0.1', resolveListen));
+  return { url: `http://127.0.0.1:${port}/shot`, close: async () => { await browser?.close().catch(() => undefined); server.close(); } };
+}
+
 async function runTarget(name, vsix, demoUrl) {
   const target = targets[name];
   const vscodeExecutablePath = await downloadAndUnzipVSCode({ version: target.version, cachePath: join(extensionRoot, '.vscode-test') });
   const profile = prepareProfile(name, demoUrl);
   await runVSCodeCommand([...profileArgs(profile), '--install-extension', vsix, '--force'], { version: target.version, cachePath: join(extensionRoot, '.vscode-test') });
   process.stdout.write(`\n== ${name}: ${vscodeExecutablePath}\n`);
-  await runTests({
-    vscodeExecutablePath,
-    extensionDevelopmentPath: resolve(import.meta.dirname, 'host'),
-    extensionTestsPath: resolve(import.meta.dirname, 'suite', 'index.cjs'),
-    launchArgs: [profile.workspace, ...profileArgs(profile), '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', ...target.launchArgs],
-    extensionTestsEnv: { UNFOLD_INTEGRATION_TARGET: name, UNFOLD_INTEGRATION_EXTENSION: target.extensionId, UNFOLD_INTEGRATION_DEMO_URL: demoUrl, UNFOLD_INTEGRATION_SETTINGS: profile.settings },
-  });
+  const debugPort = screenshotDir ? await freePort() : undefined;
+  const camera = debugPort ? await startCamera(name, debugPort) : undefined;
+  try {
+    await runTests({
+      vscodeExecutablePath,
+      extensionDevelopmentPath: resolve(import.meta.dirname, 'host'),
+      extensionTestsPath: resolve(import.meta.dirname, 'suite', 'index.cjs'),
+      launchArgs: [profile.workspace, ...profileArgs(profile), '--disable-workspace-trust', '--skip-welcome', '--skip-release-notes', ...target.launchArgs, ...(debugPort ? [`--remote-debugging-port=${debugPort}`] : [])],
+      extensionTestsEnv: { UNFOLD_INTEGRATION_TARGET: name, UNFOLD_INTEGRATION_EXTENSION: target.extensionId, UNFOLD_INTEGRATION_DEMO_URL: demoUrl, UNFOLD_INTEGRATION_SETTINGS: profile.settings, ...(camera ? { UNFOLD_INTEGRATION_SHOT_URL: camera.url } : {}) },
+    });
+  } finally {
+    await camera?.close();
+  }
   const refused = refusals(profile.userData);
   if (refused.length) throw new Error(`VS Code refused what the extension registered, which only its own logs show:\n${refused.join('\n')}`);
 }
@@ -129,3 +164,4 @@ try {
 }
 if (failed.length) { process.stderr.write(`The VS Code integration suite failed in: ${failed.join(', ')}\n`); process.exit(1); }
 process.stdout.write(`The VS Code integration suite passed in: ${names.join(', ')}\n`);
+if (screenshotDir) process.stdout.write(`Screenshots in ${screenshotDir}\n`);
