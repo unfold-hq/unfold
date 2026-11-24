@@ -98,9 +98,9 @@ test('the line at the top of Now links each count and keeps the line Now already
   assert.equal(glanceMessage(core, { needs: 0, review: 0 }, { status: 'unknown' }, ''), 'Nothing waits on you');
 });
 
-test('a title cannot add links or emphasis, and only rows that wait on the person are bold', () => {
+test('a title cannot add links or emphasis, and only rows that wait on the person are bold, without escapes in the tree label', () => {
   assert.equal(escapeMarkdown('[x](command:evil) *b*'), '\\[x\\]\\(command:evil\\) \\*b\\*');
-  assert.equal(decisiveLabel('Fix [it]', true), '**Fix \\[it\\]**');
+  assert.equal(decisiveLabel('Round half-cent totals [it]', true), '**Round half-cent totals [it]**', 'a tree label shows its inside literally, so an escape would show as a backslash');
   assert.equal(decisiveLabel('Fix it', false), 'Fix it');
   assert.deepEqual(targetCommand({ kind: 'session', id: 's1', title: 'x' }), { command: 'unfold.open', arguments: ['s1'] });
   assert.deepEqual(targetCommand({ kind: 'now' }), { command: 'unfold.now.focus', arguments: [] });

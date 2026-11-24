@@ -151,9 +151,9 @@ export function glanceMessage(core: Core, waiting: Waiting, spend: TodaySpend, e
   return [parts.join(' · '), existing ? escapeMarkdown(existing) : ''].filter(Boolean).join('\n\n');
 }
 
-/** The Markdown label of a Now row: the title in bold when the row needs the person or waits for their review, as written otherwise. */
+/** The Markdown label of a Now row: the title in bold when the row needs the person or waits for their review, as written otherwise. A tree label renders only emphasis that wraps the whole string and shows everything inside it literally, so the title is not escaped. */
 export function decisiveLabel(title: string, decisive: boolean): string {
-  return decisive ? `**${escapeMarkdown(title)}**` : escapeMarkdown(title);
+  return decisive ? `**${title}**` : title;
 }
 
 /** The status bar hover, read when it opens: what waits, each running Run or session with its Role, time and cost so far, and today's spend. */
