@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { createHash, createHmac, generateKeyPairSync, randomBytes, sign, type KeyObject } from 'node:crypto';
 import { ploegDemo } from '../src/ploeg-demo.ts';
 import { application } from './api-support.ts';
-import { AccessTokenVerifier, TokenRefused, mcpHttpSettings, metadataDocumentClientId, type McpHttpSettings } from '../src/mcp-auth.ts';
+import { AccessTokenVerifier, TokenRefused, mcpHttpSettings, metadataDocumentClientId, resourceMetadata, type McpHttpSettings } from '../src/mcp-auth.ts';
 import { createMcpHttp } from '../src/mcp-http.ts';
 import { createMcpServer } from '../src/mcp.ts';
 import { unfoldMcpIcons, type McpIcon } from '../src/mcp-icons.ts';
@@ -324,6 +324,32 @@ test('the verifier accepts ES256, and refetches keys for an unknown key id at mo
   assert.equal(idp.fetched.jwks, 2);
   const forged = { alg: 'RS256', kid: 'ec-1', sign: (data: Buffer) => ec.signer.sign(data) };
   await assert.rejects(verifier.verify(jwt(forged, claims())), /algorithm does not match its signing key/);
+});
+
+test('a token of an additional issuer is accepted, checked with the keys of the issuer it names, and clients hear of the first issuer only', async t => {
+  const first = rsaSigner();
+  const second = rsaSigner();
+  const main = await identityProvider([{ publicKey: first.publicKey, kid: 'rsa-1' }]);
+  const other = await identityProvider([{ publicKey: second.publicKey, kid: 'rsa-1' }]);
+  t.after(async () => { await main.close(); await other.close(); });
+  const settings = settingsFor(main.issuer, { additionalIssuers: [other.issuer], clientIds: ['unfold-mcp', 'unfold-mcp-chat'], audience: 'client-id' });
+  const verifier = new AccessTokenVerifier(settings);
+  assert.equal(await refusal(verifier, jwt(first.signer, claimsFor(main.issuer, { aud: 'unfold-mcp' }))), 'accepted');
+  assert.equal(await refusal(verifier, jwt(second.signer, claimsFor(other.issuer, { aud: 'unfold-mcp-chat', azp: 'unfold-mcp-chat' }))), 'accepted');
+  assert.match(await refusal(verifier, jwt(first.signer, claimsFor(other.issuer, { aud: 'unfold-mcp' }))), /signature does not verify/, 'one issuer cannot sign for another');
+  assert.match(await refusal(verifier, jwt(first.signer, claimsFor('https://elsewhere.example.test/', { aud: 'unfold-mcp' }))), /another issuer/);
+  assert.match(await refusal(new AccessTokenVerifier(settingsFor(main.issuer)), jwt(second.signer, claimsFor(other.issuer))), /another issuer/, 'off unless configured');
+  assert.deepEqual(resourceMetadata(settings).authorization_servers, [main.issuer]);
+});
+
+test('UNFOLD_MCP_ADDITIONAL_ISSUERS: same origin, not repeated, and not beside one key set', () => {
+  const env = { UNFOLD_MCP_RESOURCE: resource, UNFOLD_MCP_ISSUER: 'https://sso.example.test/application/o/a/' };
+  assert.deepEqual(mcpHttpSettings({ ...env, UNFOLD_MCP_ADDITIONAL_ISSUERS: 'https://sso.example.test/application/o/b/, https://sso.example.test/application/o/c/' })?.additionalIssuers, ['https://sso.example.test/application/o/b/', 'https://sso.example.test/application/o/c/']);
+  assert.equal(mcpHttpSettings(env)?.additionalIssuers, undefined);
+  assert.throws(() => mcpHttpSettings({ ...env, UNFOLD_MCP_ADDITIONAL_ISSUERS: 'https://other.example.test/application/o/b/' }), /same origin/);
+  assert.throws(() => mcpHttpSettings({ ...env, UNFOLD_MCP_ADDITIONAL_ISSUERS: env.UNFOLD_MCP_ISSUER }), /repeats UNFOLD_MCP_ISSUER/);
+  assert.throws(() => mcpHttpSettings({ ...env, UNFOLD_MCP_ADDITIONAL_ISSUERS: 'nonsense' }), /http\(s\) URL/);
+  assert.throws(() => mcpHttpSettings({ ...env, UNFOLD_MCP_JWKS_URL: 'https://sso.example.test/jwks/', UNFOLD_MCP_ADDITIONAL_ISSUERS: 'https://sso.example.test/application/o/b/' }), /keys of one issuer/);
 });
 
 test('UNFOLD_MCP_* settings: off without a resource, no default domains, and strict about shape', () => {

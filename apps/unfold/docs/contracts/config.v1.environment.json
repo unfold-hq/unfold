@@ -41,6 +41,7 @@
     { "name": "UNFOLD_PLOEG_MCP_CLIENT_ID", "type": "string", "description": "Public OAuth client registered for that server." },
     { "name": "UNFOLD_MCP_RESOURCE", "type": "URL", "description": "Exact public URL unfold-mcp is served at over HTTP, such as https://unfold.example/mcp; unset turns the HTTP transport off and refuses every other UNFOLD_MCP_ variable." },
     { "name": "UNFOLD_MCP_ISSUER", "type": "URL", "description": "Issuer of the access tokens unfold-mcp accepts; required with UNFOLD_MCP_RESOURCE." },
+    { "name": "UNFOLD_MCP_ADDITIONAL_ISSUERS", "type": "comma-separated list", "description": "Further issuers on the same origin whose access tokens are accepted on the same terms, for a provider that gives every client an issuer of its own; clients are told about UNFOLD_MCP_ISSUER only." },
     { "name": "UNFOLD_MCP_JWKS_URL", "type": "URL", "description": "Signing keys of that issuer; discovered from the issuer when unset." },
     { "name": "UNFOLD_MCP_TOKEN_AUDIENCE", "type": "resource | client-id", "default": "resource", "description": "Which aud a token must carry: the resource URL, or also one of UNFOLD_MCP_CLIENT_IDS." },
     { "name": "UNFOLD_MCP_CLIENT_IDS", "type": "comma-separated list", "description": "Client ids or Client ID Metadata Document URLs accepted; empty accepts every client of the issuer." },
