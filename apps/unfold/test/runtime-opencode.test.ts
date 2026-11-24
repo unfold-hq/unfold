@@ -134,7 +134,7 @@ test('a pending permission OpenCode cannot list arrives through the event stream
   assert.equal(result.verdict, 'approve');
   assert.equal(events.filter(event => event.type === 'runtime.permission_list_unreadable').length, 1, 'the session records once that the list could not be read');
   assert.equal(logged.filter(line => line.includes('"event":"runtime.permission_list_unreadable"') && line.includes('"session":"session"')).length, 1, logged.join('\n'));
-  assert.equal(events.some(event => event.type === 'permission' && event.data.nativeId === 'perm_one'), true);
+  assert.equal(events.find(event => event.type === 'permission' && event.data.nativeId === 'perm_one')?.data.permission, 'grep', 'the request names which permission it asks for');
   assert.equal(calls.includes('POST /permission/perm_one/reply'), true);
   assert.ok(calls.indexOf('GET /permission') < calls.indexOf('POST /permission/perm_one/reply'));
 });

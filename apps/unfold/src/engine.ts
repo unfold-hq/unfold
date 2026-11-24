@@ -96,6 +96,8 @@ export class EngineError extends Error {
   constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code; }
 }
 
+function automaticallyAnswerable(request: PermissionRequest): boolean { return request.kind === 'permission' && request.permission !== 'external_directory'; }
+
 export class Engine {
   store: Store;
   config: AppConfig;
@@ -175,7 +177,7 @@ export class Engine {
     session.approval = approval;
     this.save(session, 'approval.changed', user.id, { approval });
     if (approval === 'auto') for (const request of this.store.permissions(id)) {
-      if (request.resolved || request.kind !== 'permission') continue;
+      if (request.resolved || !automaticallyAnswerable(request)) continue;
       try { await this.respond(id, request.id, { decision: 'always' }, user); } catch { break; }
     }
     return this.store.getSession(id)!;
@@ -833,7 +835,7 @@ export class Engine {
   private async answerAutomatically(id: string, requestId: string): Promise<void> {
     const session = this.store.getSession(id);
     const request = this.store.getPermission(requestId);
-    if (!session || !request || request.resolved || request.kind !== 'permission' || session.approval !== 'auto' || !this.active.has(id) || session.status !== 'waiting_input') return;
+    if (!session || !request || request.resolved || !automaticallyAnswerable(request) || session.approval !== 'auto' || !this.active.has(id) || session.status !== 'waiting_input') return;
     try { await this.answer(session, request, { decision: 'once' }, 'system', 'Automatic approval'); }
     catch (error) { console.error(JSON.stringify({ level: 'warn', event: 'approval.automatic_failed', session: id, request: requestId, message: String(error instanceof Error ? error.message : error).slice(0, 200) })); }
   }
@@ -1387,7 +1389,7 @@ export class Engine {
       const nativeId = String(data.nativeId ?? randomUUID());
       let request = this.store.permissions(id).find(item => item.nativeId === nativeId && item.runId === runId);
       if (!request) {
-        request = { id: randomUUID(), sessionId: id, runId, nativeId, kind: data.kind === 'question' ? 'question' : 'permission', title: String(data.title ?? 'Operator input requested'), detail: String(data.detail ?? ''), ...(Array.isArray(data.options) ? { options: data.options.map(String) } : {}), ...(Array.isArray(data.questions) ? { questions: data.questions } : {}), resolved: false };
+        request = { id: randomUUID(), sessionId: id, runId, nativeId, kind: data.kind === 'question' ? 'question' : 'permission', ...(typeof data.permission === 'string' ? { permission: data.permission } : {}), title: String(data.title ?? 'Operator input requested'), detail: String(data.detail ?? ''), ...(Array.isArray(data.options) ? { options: data.options.map(String) } : {}), ...(Array.isArray(data.questions) ? { questions: data.questions } : {}), resolved: false };
         this.store.savePermission(request);
       }
       session.status = 'waiting_input'; run.status = 'waiting_input';

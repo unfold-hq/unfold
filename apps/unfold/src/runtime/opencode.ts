@@ -268,7 +268,7 @@ export class OpenCodeRuntime implements AgentRuntime {
         if (typeof p.id !== 'string' || pending.has(p.id)) return;
         pending.add(p.id);
         const question = event.type === 'question.asked';
-        emit({ type: 'permission', data: { nativeId: p.id, kind: question ? 'question' : 'permission', title: question ? 'Agent needs your answer' : `Allow ${p.permission ?? 'action'}?`, detail: question ? (p.questions ?? []).map((q: WireRecord) => q.question).join('\n') : JSON.stringify({ permission: p.permission, patterns: p.patterns, always: p.always }), ...(question ? { questions: p.questions } : { options: ['once', 'always', 'reject'] }) } });
+        emit({ type: 'permission', data: { nativeId: p.id, kind: question ? 'question' : 'permission', title: question ? 'Agent needs your answer' : `Allow ${p.permission ?? 'action'}?`, detail: question ? (p.questions ?? []).map((q: WireRecord) => q.question).join('\n') : JSON.stringify({ permission: p.permission, patterns: p.patterns, always: p.always }), ...(question ? { questions: p.questions } : { ...(typeof p.permission === 'string' ? { permission: p.permission } : {}), options: ['once', 'always', 'reject'] }) } });
       }
       if (event.type === 'permission.replied' || event.type === 'question.replied' || event.type === 'question.rejected') {
         pending.delete(p.requestID);

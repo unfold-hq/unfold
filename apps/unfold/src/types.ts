@@ -48,7 +48,7 @@ export type Event = { id: number; sessionId: string; type: string; at: string; a
 export type WorkspaceWaitPhase = 'scheduling' | 'capacity' | 'creating' | 'image_unavailable' | 'container_error' | 'cloning' | 'starting' | 'connecting';
 export type WorkspaceWait = { sessionId: string; phase: WorkspaceWaitPhase; since: string; reason?: string };
 export type Workspace = { id: string; backend: 'demo' | 'local' | 'external' | 'docker' | 'kubernetes'; directory: string; endpoint?: string; nativeSessionId?: string; metadata?: Record<string, string> };
-export type PermissionRequest = { id: string; sessionId: string; runId: string; nativeId: string; kind: 'permission' | 'question'; title: string; detail: string; options?: string[]; questions?: unknown[]; resolved?: boolean };
+export type PermissionRequest = { id: string; sessionId: string; runId: string; nativeId: string; kind: 'permission' | 'question'; permission?: string; title: string; detail: string; options?: string[]; questions?: unknown[]; resolved?: boolean };
 export type ModelConfig = { id: string; name: string; providerId: string; modelId: string };
 export type AppConfig = {
   delivery?: DeliveryConfig;
