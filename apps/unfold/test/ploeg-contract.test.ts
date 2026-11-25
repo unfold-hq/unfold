@@ -145,6 +145,11 @@ test('codes Ploeg defines only in its code (close reasons, needs_human reasons, 
   for (const [, value] of ploegSourceOutsideHttpRefusals.matchAll(/\b(?:reason[A-Z]\w*|CloseReason\w+)\s*=\s*"([^"]+)"/g)) {
     assert(close.values.some(entry => entry.value === value), `Ploeg defines the Shift close reason "${value}". Add it to ${table}, set "close-reason", with what Unfold shows for it (mark it as a gap if Unfold does not word it yet).`);
   }
+  for (const [, name] of ploegSourceOutsideHttpRefusals.matchAll(/\breason[A-Z]\w*\s*=\s*string\(work\.(\w+)\)/g)) {
+    const value = new RegExp(`\\b${name}\\s+\\w+\\s*=\\s*"([^"]+)"`).exec(ploegSource)?.[1];
+    assert(value, `Ploeg closes a Shift with the reason work.${name}, whose value was not found in apps/ploeg/pkg.`);
+    assert(close.values.some(entry => entry.value === value), `Ploeg closes a Shift with the reason "${value}" (work.${name}). Add it to ${table}, set "close-reason", with what Unfold shows for it (mark it as a gap if Unfold does not word it yet).`);
+  }
   const audit = sets['audit-event'];
   for (const [, value] of ploegSource.matchAll(/["'](\b(?:work_item|created_work_item|follow_up|review|round|run|shift|lease|checkpoint|operator|delivery|llm|pull_request|pull_request_comment|deploy|ask)\.[a-z_]*[a-z])["']/g)) {
     assert(row(audit, value), `Ploeg writes the audit action "${value}". Add it to ${table}, set "audit-event", with the label apps/unfold/public/core/states.js \`auditEvent\` gives it (mark it as a gap if that is only the humanized fallback).`);

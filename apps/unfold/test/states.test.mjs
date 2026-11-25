@@ -199,6 +199,7 @@ test('audit events read in plain words from their action and kept detail, and un
   assert.equal(label('lease.expired'), 'Worker stopped responding · Ploeg retries');
   assert.equal(auditEvent({ action: 'run.claimed', detail: { role: 'implementer', round: 2, writes: true, authorizedUsd: 1.5 } }).detail, 'Up to US$\u00a01,50 authorized');
   assert.equal(label('work_item.proposed'), 'Proposed by an agent');
+  assert.equal(label('operator.work_item.admitted'), 'Handed to the Team');
   assert.deepEqual(auditEvent({ action: 'work_item.rejected', detail: { reason: 'duplicate of DEMO-3' } }), { label: 'Rejected', tone: 'neutral', glyph: 'circle-slash', detail: 'Duplicate of DEMO-3' });
   assert.deepEqual([label('work_item.withdrawn', { reason: 'withdrawn_unassigned' }), auditEvent({ action: 'work_item.withdrawn', detail: { reason: 'withdrawn_unassigned' } }).detail], ['Withdrawn', 'The task was unassigned from the Team.']);
   assert.deepEqual([label('shift.closed', { reason: 'fix_round_cap_reached' }), auditEvent({ action: 'shift.closed', detail: { reason: 'fix_round_cap_reached' } }).detail], ['Attempt closed', 'The fix Rounds ran out']);

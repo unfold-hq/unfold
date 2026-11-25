@@ -83,6 +83,16 @@ const copy = {
     sentence: 'The agent reviewer failed on every try, so no agent reviewed this work, and Ploeg did not mark it ready for review.',
     fix: 'Read the reviewer’s failed Runs to see why. Review the change yourself, or fix the reviewer’s model or setup.',
   },
+  credential_leak: {
+    chip: 'Credential leaked',
+    sentence: 'A Run leaked one of its credentials, so Ploeg stopped instead of retrying and tried to close the pull request. The history says whether that worked.',
+    fix: 'Rotate the credential and read the commits on the branch before anything from it is merged.',
+  },
+  shared_budget_spent: {
+    chip: 'Shared model budget spent',
+    sentence: 'A LiteLLM budget wider than the Run’s own key, such as the Team’s, is spent, so the model gateway refused the agent and Ploeg stopped instead of retrying.',
+    fix: 'Raise or reset the spent budget in LiteLLM.',
+  },
   writing_run_failed_repeatedly: {
     chip: 'Writer kept failing',
     sentence: 'The writer failed three times in one Round without writing the branch, so Ploeg stopped trying.',
@@ -209,7 +219,7 @@ const number = value => typeof value === 'number' && Number.isFinite(value);
 
 const held = (spent, reserved) => number(spent) && number(reserved) && reserved > 0 && reserved >= spent;
 
-const exactCodes = new Set(['plan_exhausted', 'fix_round_cap_reached', 'checks_not_passed', 'ci_not_finished', 'ci_not_passed', 'review_failed', 'budget_exhausted_before_fix_round', 'writing_run_failed_repeatedly', 'writing_run_killed_repeatedly', 'operator_failed', 'operator_interrupted', 'operator_expired', 'operator_paused', 'operator_waiting_input']);
+const exactCodes = new Set(['plan_exhausted', 'fix_round_cap_reached', 'checks_not_passed', 'ci_not_finished', 'ci_not_passed', 'review_failed', 'credential_leak', 'shared_budget_spent', 'budget_exhausted_before_fix_round', 'writing_run_failed_repeatedly', 'writing_run_killed_repeatedly', 'operator_failed', 'operator_interrupted', 'operator_expired', 'operator_paused', 'operator_waiting_input']);
 
 const sessionCodes = new Set(['operator_failed', 'operator_interrupted', 'operator_expired', 'operator_paused', 'operator_waiting_input', 'operator_stopped']);
 
@@ -276,6 +286,8 @@ const reasonGlyphs = Object.freeze({
   ci_not_finished: 'clock',
   ci_not_passed: 'x-circle',
   review_failed: 'eye-off',
+  credential_leak: 'shield',
+  shared_budget_spent: 'coins',
   writing_run_failed_repeatedly: 'x-circle',
   writing_run_killed_repeatedly: 'zap',
   person_question: 'help-circle',
@@ -426,6 +438,7 @@ function relevantRun(detail, reason, closeReason) {
   if (['writing_run_failed_repeatedly', 'writing_run_killed_repeatedly', 'stale_attempts', 'stale_infrastructure', 'budget_held'].includes(reason.code)) return runs.find(run => run.writes && (run.outcome === 'failed' || run.failureReason)) || runs.find(run => run.outcome === 'failed' || run.failureReason) || null;
   if (['checks_not_passed', 'ci_not_finished', 'ci_not_passed'].includes(reason.code)) return runs.find(run => run.writes && (run.outcome === 'pr_opened' || run.outcome === 'pr_updated')) || null;
   if (reason.code === 'review_failed') return runs.find(run => !run.writes && !run.shadow && (run.outcome === 'failed' || run.failureReason)) || null;
+  if (Object.hasOwn(parkedCautions, reason.code)) return runs.find(run => run.outcome === 'failed' && run.failureReason === reason.code) || null;
   if (reason.code === 'unknown') return runs.find(run => run.outcome === 'stuck') || null;
   return null;
 }
@@ -508,6 +521,11 @@ const retryCautions = {
   unknown: 'Nothing changed since it failed, so the same result is likely unless the cause was fixed.',
 };
 
+const parkedCautions = Object.freeze({
+  credential_leak: 'A new attempt does not undo the leak. Rotate the credential and read the pushed commits first.',
+  shared_budget_spent: 'The Run fails again until the spent budget is raised or reset in LiteLLM.',
+});
+
 /**
  * Whether a person may start the Work Item again from Unfold with Try again: its reason names a restart (`requeue`),
  * so it is not a question, a take-over, a merge that waits or a reason its driving session acts on.
@@ -547,7 +565,8 @@ export function infraFault(reason, lastFailure = null) {
 /**
  * The one sentence that warns a person before Try again that a new attempt is likely to end the same way, for Now and
  * the Work Item page alike; empty when nothing says so. A failed clone (`variant` `clone_failed`) is worded by its
- * `cause`; an infrastructure fault (`infraFault`) names the part that has to be healthy. A page that shows it makes
+ * `cause`; a leaked credential and a spent shared budget, after which Ploeg never retries, say what has to happen first;
+ * an infrastructure fault (`infraFault`) names the part that has to be healthy. A page that shows it makes
  * Try again the quieter button.
  * @param {{ code?: string, variant?: string | null, cause?: string | null } | null | undefined} reason
  * @param {{ infra?: boolean, owner?: string } | null} [lastFailure] what the Work Item's failed Runs have in common
@@ -555,6 +574,7 @@ export function infraFault(reason, lastFailure = null) {
  */
 export function retryCaution(reason, lastFailure = null) {
   if (reason?.variant === 'clone_failed') return retryCautions[reason.cause] || retryCautions.unknown;
+  if (Object.hasOwn(parkedCautions, reason?.code ?? '')) return parkedCautions[reason.code];
   const infra = infraFault(reason, lastFailure);
   return infra ? `Not the Work Item’s fault. Trying again is likely to fail the same way until ${infra.owner} is healthy, so check Status first.` : '';
 }

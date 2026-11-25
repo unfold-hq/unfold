@@ -22,6 +22,8 @@ test('every needs-human close reason code gets a chip, a sentence and an action 
     ci_not_finished: 'CI did not finish',
     ci_not_passed: 'CI did not pass',
     review_failed: 'Reviewer kept failing',
+    credential_leak: 'Credential leaked',
+    shared_budget_spent: 'Shared model budget spent',
     'budget exhausted: pool 3.00, spent 2.97, reserved 0.10': 'Budget ran out',
     'run stuck: reviewer round 2': 'Agent is stuck',
     'plan removed from configuration': 'Team plan removed',
@@ -35,6 +37,28 @@ test('every needs-human close reason code gets a chip, a sentence and an action 
     assert(reason.action.startsWith(reason.fix) && reason.action.endsWith(reason.requeue), code);
     assert.equal(reason.trackerUrl, 'https://tracker.test/tasks/624', code);
   }
+});
+
+test('a credential leak says to rotate the credential before anyone tries again, and points at the Run that leaked it', () => {
+  const run = (id, failureReason) => ({ id, shiftId: '9', role: 'implementer', round: 1, writes: true, state: 'finished', outcome: 'failed', failureReason, stuckReason: '', summary: `Run ${id}` });
+  const reason = detailReason({ item: item('credential_leak'), shifts: [shift('credential_leak')], runs: [run('3', 'agent_error'), run('2', 'credential_leak')], events: [] });
+  assert.equal(reason.code, 'credential_leak');
+  assert.match(reason.fix, /^Rotate the credential/);
+  assert.match(reason.sentence, /stopped instead of retrying/);
+  assert.equal(reason.run.id, '2');
+  assert.equal(retryable(reason), true, 'the restart is warned about, never blocked');
+  assert.match(reason.caution, /Rotate the credential/);
+  assert.equal(closeReasonLabel('credential_leak'), 'A Run leaked a credential');
+});
+
+test('a spent shared budget points at the budget in LiteLLM, not at the Team’s budget or the ticket', () => {
+  const run = { id: '2', shiftId: '9', role: 'reviewer', round: 1, writes: false, state: 'finished', outcome: 'failed', failureReason: 'shared_budget_spent', stuckReason: '', summary: 'the Team budget is spent' };
+  const reason = detailReason({ item: item('shared_budget_spent'), shifts: [shift('shared_budget_spent')], runs: [run], events: [] });
+  assert.equal(reason.code, 'shared_budget_spent');
+  assert.match(reason.fix, /LiteLLM/);
+  assert.equal(reason.run.text, 'the Team budget is spent');
+  assert.match(reason.caution, /fails again until/);
+  assert.equal(closeReasonLabel('shared_budget_spent'), 'A shared model budget is spent');
 });
 
 test('plan_exhausted in needs_human names both causes, never "out of attempts"', () => {
