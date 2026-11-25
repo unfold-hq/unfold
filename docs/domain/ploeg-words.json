@@ -413,6 +413,20 @@
           "mcp": "ci_not_passed"
         },
         {
+          "value": "credential_leak",
+          "ploegSource": "pkg/shiftengine/credentialleak.go",
+          "label": "A Run leaked a credential",
+          "chip": "Credential leaked",
+          "mcp": "credential_leak"
+        },
+        {
+          "value": "shared_budget_spent",
+          "ploegSource": "pkg/shiftengine/budgetspent.go",
+          "label": "A shared model budget is spent",
+          "chip": "Shared model budget spent",
+          "mcp": "shared_budget_spent"
+        },
+        {
           "value": "writing_run_failed_repeatedly",
           "ploegSource": "pkg/shiftengine/failedwriter.go",
           "label": "The writer kept failing",
@@ -975,6 +989,12 @@
           "value": "operator.admitted",
           "ploegTerm": "Operator Execution",
           "label": "An Unfold session took over",
+          "mcp": "not exposed"
+        },
+        {
+          "value": "operator.work_item.admitted",
+          "ploegTerm": "Work Item",
+          "label": "Handed to the Team",
           "mcp": "not exposed"
         },
         {

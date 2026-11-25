@@ -68,6 +68,8 @@ const reasonText: Record<string, string> = {
   pool_exhausted: 'it used up its budget',
   plan_exhausted: 'every planned round of work ran without a change being approved',
   review_failed: 'no agent could review it: the reviewer kept failing',
+  credential_leak: 'a run leaked one of its credentials',
+  shared_budget_spent: 'a model budget it shares with other work is spent',
   fix_round_cap_reached: 'its fix rounds ran out',
   budget_exhausted_before_fix_round: 'its budget ran out before another fix round',
   writing_run_failed_repeatedly: 'the agent writing the change kept failing',

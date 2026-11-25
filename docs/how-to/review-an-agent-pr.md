@@ -27,6 +27,8 @@ The Shift's close reason tells you why it stopped ([reviewloop.go](../../apps/pl
 | `budget_exhausted_before_fix_round` | The Shift pool could not pay for another fix round. |
 | `budget exhausted: pool …, spent …, reserved …` | The Shift pool could not pay for the next planned Round. |
 | `writing_run_failed_repeatedly`, `writing_run_killed_repeatedly` | The writer never finished ([failedwriter.go](../../apps/ploeg/pkg/shiftengine/failedwriter.go)). |
+| `credential_leak` | A Run leaked one of its credentials. Ploeg never retries it and tries to close the pull request. Rotate the credential and read the pushed commits first ([credentialleak.go](../../apps/ploeg/pkg/shiftengine/credentialleak.go), [ADR-0105](../../apps/ploeg/docs/adrs/0105-a-credential-leak-parks-the-work-item-and-closes-its-pull-request.md)). |
+| `shared_budget_spent` | A LiteLLM budget wider than the Run's own key is spent. Raise or reset it in LiteLLM, then restart the Work Item ([budgetspent.go](../../apps/ploeg/pkg/shiftengine/budgetspent.go), [ADR-0111](../../apps/ploeg/docs/adrs/0111-a-spent-litellm-budget-wider-than-the-runs-key-parks-the-work-item.md)). |
 
 A Shift that closes with `review_approved`, `plan_exhausted` or `review_failed` after a writer opened or updated the pull request settles the Work Item as `awaiting_review`. A `plan_exhausted` or `review_failed` close whose last review after that writer asked for changes settles as `needs_human` instead. Every other close reason, and a `stuck` Run, settles it as `needs_human` ([engine.go](../../apps/ploeg/pkg/shiftengine/engine.go)). No agent merges. The ticket stays open until you merge or close the pull request; see [After you merge or close](#after-you-merge-or-close).
 

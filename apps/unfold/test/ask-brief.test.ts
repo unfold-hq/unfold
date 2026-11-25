@@ -106,7 +106,7 @@ test('a pull request on done or withdrawn work is never called open', () => {
 });
 
 test('every Shift close reason Ploeg sends reads as words, never as a code', () => {
-  for (const reason of ['plan_exhausted', 'review_failed', 'fix_round_cap_reached', 'budget_exhausted_before_fix_round', 'writing_run_failed_repeatedly', 'writing_run_killed_repeatedly']) {
+  for (const reason of ['plan_exhausted', 'review_failed', 'fix_round_cap_reached', 'budget_exhausted_before_fix_round', 'writing_run_failed_repeatedly', 'writing_run_killed_repeatedly', 'credential_leak', 'shared_budget_spent']) {
     const text = briefText(workItemBrief(detail({ state: 'needs_human', latestShift: { ...detail().item.latestShift!, closeReason: reason } })));
     assert.doesNotMatch(text, new RegExp(reason.replace(/_/g, '[ _]')), reason);
   }

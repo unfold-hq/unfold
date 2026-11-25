@@ -134,6 +134,8 @@ MCP: unfold_get_work passes `closeReason` through on each Shift; unfold_now and 
 | `checks_not_passed` | The checks did not pass | Checks did not pass | same |  |
 | `ci_not_finished` | CI was still running when Ploeg stopped waiting | CI did not finish | same |  |
 | `ci_not_passed` | CI failed for a reason the writer cannot fix | CI did not pass | same |  |
+| `credential_leak` | A Run leaked a credential | Credential leaked | same |  |
+| `shared_budget_spent` | A shared model budget is spent | Shared model budget spent | same |  |
 | `writing_run_failed_repeatedly` | The writer kept failing | Writer kept failing | same |  |
 | `writing_run_killed_repeatedly` | The cluster kept stopping the writer | Cluster kept stopping the writer | same |  |
 | `withdrawn_unassigned` | The task was unassigned from the Team | — | same |  |
@@ -273,6 +275,7 @@ MCP: not exposed; unfold_get_work quotes the reason of the latest `work_item.<st
 | `infra_cap` | [Lease](glossary.md#lease) | Infrastructure kept failing; Ploeg stopped | not exposed |  |
 | `checkpoint.written` | [Checkpoint](glossary.md#checkpoint) | Wrote a checkpoint | not exposed |  |
 | `operator.admitted` | [Operator Execution](glossary.md#operator-execution) | An Unfold session took over | not exposed |  |
+| `operator.work_item.admitted` | [Work Item](glossary.md#work-item) | Handed to the Team | not exposed |  |
 | `operator.admission_expired` | [Operator Execution](glossary.md#operator-execution) | The Unfold session never started | not exposed |  |
 | `operator.attribution_refused` | [Work Item](glossary.md#work-item) | Ploeg refused a change that did not prove who made it | not exposed |  |
 | `delivery.candidate_admitted` | [Delivery Candidate](glossary.md#delivery-candidate) | Delivery candidate admitted | not exposed |  |

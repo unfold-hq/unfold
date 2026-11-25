@@ -387,6 +387,8 @@ const closeLabels = {
   checks_not_passed: ['The checks did not pass', 'attention'],
   ci_not_finished: ['CI was still running when Ploeg stopped waiting', 'attention'],
   ci_not_passed: ['CI failed for a reason the writer cannot fix', 'attention'],
+  credential_leak: ['A Run leaked a credential', 'danger'],
+  shared_budget_spent: ['A shared model budget is spent', 'danger'],
   fix_round_cap_reached: ['The fix Rounds ran out', 'attention'],
   budget_exhausted_before_fix_round: ['The budget ran out before a fix Round', 'attention'],
   writing_run_failed_repeatedly: ['The writer kept failing', 'danger'],
@@ -537,6 +539,7 @@ export function auditEvent(entry) {
     case 'infra_cap': return event('Infrastructure kept failing; Ploeg stopped', 'severe', 'zap', failures);
     case 'checkpoint.written': return event(detail.phase ? (Object.hasOwn(checkpointPhases, detail.phase) ? checkpointPhases[detail.phase].label : `Checkpoint: ${words(detail.phase)}`) : 'Wrote a checkpoint', 'neutral', Object.hasOwn(checkpointPhases, detail.phase ?? '') ? checkpointPhases[detail.phase].glyph : 'branch', said);
     case 'operator.admitted': return event('An Unfold session took over', 'neutral', 'sessions', said);
+    case 'operator.work_item.admitted': return event('Handed to the Team', 'neutral', 'inbox', said);
     case 'operator.admission_expired': return event('The Unfold session never started', 'neutral', 'clock', said);
     case 'operator.attribution_refused': return event('Ploeg refused a change that did not prove who made it', 'attention', 'lock', '');
     case 'delivery.candidate_admitted': return event('Delivery candidate admitted', 'neutral', 'inbox', said);
