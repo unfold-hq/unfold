@@ -59,7 +59,7 @@ export function answeredNotResumed(detail) {
 }
 
 /**
- * The question a stopped Work Item waits on a person for, or null. In order: the newest question to a person that
+ * The question a stopped Work Item waits on a person for, or null. In order: the oldest question to a person that
  * Ploeg marks `waitingForPerson` (it has an `id` to answer); the close message of a `question_for_person` Shift when
  * the detail lists no questions; and, for an older ploegd, the stuck reason of the Run that stopped the item, because
  * there an agent that needs a person says so. A stuck Run whose clone failed (`variant` `clone_failed`) asks nothing,
@@ -74,7 +74,7 @@ export function waitingQuestion(detail, reason) {
   if (item?.state !== 'needs_human') return null;
   const runs = detail.runs || [];
   const when = runId => { const run = runs.find(entry => String(entry.id) === String(runId)); return run?.finishedAt || run?.startedAt || null; };
-  const waiting = detailQuestions(detail).filter(entry => entry.to === 'person' && entry.waitingForPerson).at(-1);
+  const waiting = detailQuestions(detail).find(entry => entry.to === 'person' && entry.waitingForPerson);
   if (waiting) return { id: waiting.id, text: waiting.text, typed: true, runId: waiting.runId, role: waiting.role, round: waiting.round, at: when(waiting.runId) };
   if (reason?.code === 'person_question') {
     if (answeredNotResumed(detail).length) return null;
