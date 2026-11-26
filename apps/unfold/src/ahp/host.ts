@@ -51,6 +51,8 @@ const rootChannel = 'ahp-root://';
 const applicationVersion = (() => { try { return String(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version); } catch { return 'unknown'; } })();
 const pollMs = 300;
 const maxTurnsInSnapshot = 200;
+const unknownTurnsCursor = 'This chat has no older turns before that cursor. Reopen the chat for a fresh one.';
+const turnsPageSize = (limit: unknown) => Number.isInteger(limit) && (limit as number) > 0 ? Math.min(limit as number, maxTurnsInSnapshot) : maxTurnsInSnapshot;
 const maxKnownClients = 1000;
 
 /** The decoded path of a `file:` URI the folder picker names, without a trailing slash; undefined for any other URI. */
@@ -1456,6 +1458,38 @@ export class AgentHost {
     }
   }
 
+  /**
+   * Loads the page of turns before `cursor` into the client's window of a session's chat with a `chat/turnsLoaded` sent
+   * before the answer, as AHP's `fetchTurns` requires. Only a session's own chat cuts its history; every other chat sends
+   * its whole history, so it has no cursor to recognise.
+   */
+  private fetchTurns(client: Client, params: Json): Json {
+    const { channel, cursor } = params;
+    if (typeof channel !== 'string') throw new RpcError(codes.invalidParams, 'channel is required');
+    if (cursor !== undefined && typeof cursor !== 'string') throw new RpcError(codes.invalidParams, 'cursor must be a string');
+    const turns = this.pagedTurns(client.user, channel);
+    if (cursor === undefined) return {};
+    const at = turns ? turns.findIndex(turn => String(turn.id) === cursor) : -1;
+    if (at < 0) throw new RpcError(codes.invalidParams, unknownTurnsCursor);
+    const start = Math.max(0, at - turnsPageSize(params.limit));
+    const action = { type: 'chat/turnsLoaded', turns: turns!.slice(start, at), ...(start > 0 ? { turnsNextCursor: String(turns![start].id) } : {}) };
+    this.send(client, { jsonrpc: '2.0', method: 'action', params: { channel, action, serverSeq: ++this.serverSeq } });
+    return {};
+  }
+
+  private pagedTurns(user: User, channel: string): Json[] | undefined {
+    if (parseSideChat(channel)) return undefined;
+    const parsed = parseChannel(channel);
+    if (!parsed) throw new RpcError(codes.notFound, 'Unknown channel');
+    if (parsed.kind !== 'chat') throw new RpcError(codes.invalidParams, 'channel must be a chat');
+    if (isWorkItemSession(parsed.id)) return undefined;
+    const pending = this.pending.get(parsed.id);
+    if (pending ? this.mayView(user, pending.user.id) : this.chats.has(parsed.id) && this.chats.owns(user, parsed.id)) return undefined;
+    const session = pending || this.chats.has(parsed.id) ? undefined : this.sessionFor(user, channel);
+    if (!session) throw new RpcError(codes.sessionNotFound, 'Unfold has no such session, or it is not yours. Reopen it from the Unfold view.');
+    return parsed.run ? undefined : this.projection(session).turns;
+  }
+
   private answersPing(client: Client, message: Json): boolean {
     return typeof message === 'object' && message !== null && typeof message.method !== 'string' && ('result' in message || 'error' in message) && this.heartbeats.answered(client, message.id);
   }
@@ -1653,7 +1687,7 @@ export class AgentHost {
       this.workItems.watch();
       this.resumeActiveClient(params.clientId, Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]);
       const snapshots = await this.resubscribe(client, method, Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]);
-      return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', version: this.config.mode === 'demo' ? 'demo' : 'live' }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available || client.offersSideChats ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}), ...(client.offersSideChats ? { [sideChatWithoutContextMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
+      return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', title: this.config.mode === 'demo' ? 'Unfold demo' : 'Unfold', version: applicationVersion }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available || client.offersSideChats ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}), ...(client.offersSideChats ? { [sideChatWithoutContextMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
     }
     if (method === 'reconnect' && !client.initialized) {
       const known = typeof params.clientId === 'string' ? this.knownClients.get(params.clientId) : undefined;
@@ -1680,7 +1714,7 @@ export class AgentHost {
       case 'disposeTerminal': if (parseTerminalChannel(String(params.channel))) throw new RpcError(codes.permissionDenied, noClientTerminals); client.terminals?.delete(String(params.channel)); return {};
       case 'disposeSession': return this.disposeSession(client, params);
       case 'disposeChat': return this.disposeSideChat(client, String(params.channel ?? ''));
-      case 'fetchTurns': return {};
+      case 'fetchTurns': return this.fetchTurns(client, params);
       case 'completions': return { items: this.completionItems(client, params) };
       case 'resourceRead': {
         if (typeof params.uri !== 'string') throw new RpcError(codes.invalidParams, 'uri is required');
