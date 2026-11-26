@@ -104,15 +104,15 @@ Not to be confused with: MCP is also Microsoft Certified Professional; do not co
 | Steward | MCP Skills Over MCP Working Group (AAIF) (foundation) |
 | Status | stabilising |
 | Latest | [SEP-2640 Final (merged 2026-09-13); extension at Beta (SEP-3392 lifecycle); targets base revision 2026-07-28 2026-09-13](https://github.com/modelcontextprotocol/experimental-ext-skills) |
-| Radar | **assess**: Fit is good but adoption decided it: the extension is Beta with no Claude or VS Code consumer and no Go SDK release, so T10 has not fired; consistent with the 2026-10-13 and 2026-10-30 'wait, ship skills in plugins'. |
-| Moves when | Claude Code or VS Code appears under Skills in the MCP client matrix, or the Go SDK releases the extension (T10). |
+| Radar | **assess**: Fit is good and adoption is moving: T10 fired when VS Code (2026-11-23) and Claude Code (2026-11-24) appeared under Skills in the MCP client matrix. The ring stays assess until the owner decides whether unfold-mcp turns mcp.skills on by default (S12 of the 2026-11-26 dossier), because the wire format VS Code's Copilot runtime uses is not readable in its source and the Go SDK has not released the extension. |
+| Moves when | The owner turns mcp.skills on by default after a client is seen loading Unfold's skills over MCP, or the Go SDK releases the extension so ploeg-mcp can serve a Team's skills (T10 fired on 2026-11-23). |
 | Competes with | — |
 | Complements | [Agent Skills (SKILL.md)](definition.md#agent-skills), [MCP Apps (MCP extension, SEP-1865)](client-ui.md#mcp-apps) |
 | Builds on | [Agent Skills (SKILL.md)](definition.md#agent-skills) |
 | Superseded by | — |
-| Decisions | [0092-a-team-pins-its-skills-in-a-catalogue-that-ploegd-fetches-once-and-serves-by-digest](../../../../../apps/ploeg/docs/adrs/0092-a-team-pins-its-skills-in-a-catalogue-that-ploegd-fetches-once-and-serves-by-digest.md), [0083-a-run-is-told-which-skills-bear-on-its-work-item](../../../../../apps/ploeg/docs/adrs/0083-a-run-is-told-which-skills-bear-on-its-work-item.md), [2026-10-13-sharing-agent-skills](../../../../../apps/ploeg/docs/research/2026-10-13-sharing-agent-skills.md), [2026-10-30-mcp-extensions-fit](../../../../../apps/unfold/docs/research/2026-10-30-mcp-extensions-fit.md), [2026-10-13-protocol-integration-gaps](../../../../../apps/unfold/docs/research/2026-10-13-protocol-integration-gaps.md) |
+| Decisions | [0092-a-team-pins-its-skills-in-a-catalogue-that-ploegd-fetches-once-and-serves-by-digest](../../../../../apps/ploeg/docs/adrs/0092-a-team-pins-its-skills-in-a-catalogue-that-ploegd-fetches-once-and-serves-by-digest.md), [0083-a-run-is-told-which-skills-bear-on-its-work-item](../../../../../apps/ploeg/docs/adrs/0083-a-run-is-told-which-skills-bear-on-its-work-item.md), [2026-10-13-sharing-agent-skills](../../../../../apps/ploeg/docs/research/2026-10-13-sharing-agent-skills.md), [2026-10-30-mcp-extensions-fit](../../../../../apps/unfold/docs/research/2026-10-30-mcp-extensions-fit.md), [2026-10-13-protocol-integration-gaps](../../../../../apps/unfold/docs/research/2026-10-13-protocol-integration-gaps.md), [2026-11-19-vscode-1-147-maximal-integration](../../../../../apps/unfold/docs/research/2026-11-19-vscode-1-147-maximal-integration.md) |
 | Watchlist | T10 |
-| Reviewed | 2026-11-04 |
+| Reviewed | 2026-11-26 |
 
 | Use case | Where | How | Effort | Value |
 | --- | --- | --- | --- | --- |
@@ -122,7 +122,7 @@ Not to be confused with: MCP is also Microsoft Certified Professional; do not co
 | Proposed: digests checked against the catalogue | VS Code extension, Claude Code plugin | Proposed: the plugin compares the served skill digest with the Team's pinned digest and warns on drift. | S | No stale skill silently differs from what Runs use. |
 | Proposed: skills for the Agents window chat | AHP host | Proposed: the Unfold chat of ADR 0049 loads skills from the same server. | S | One skill source for every surface. |
 
-**Shipped adoption:** Implementations list and client matrix linked from the repo, contents not verified (https://github.com/modelcontextprotocol/experimental-ext-skills)
+**Shipped adoption:** Implementations list and client matrix linked from the repo, contents not verified (https://github.com/modelcontextprotocol/experimental-ext-skills); MCP client matrix: VS Code GitHub Copilot under Skills since 2026-11-23, Claude Code since 2026-11-24 (https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/extensions/client-matrix.mdx); unfold-mcp serves the plugin's skills behind the flag mcp.skills, off by default; what VS Code does with them is unproven (Unfold's VS Code 1.148 dossier of 2026-11-26)
 
 **Open problems:** No releases; 14 open issues (https://github.com/modelcontextprotocol/experimental-ext-skills/issues)
 
