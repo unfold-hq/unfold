@@ -289,6 +289,7 @@ export class AgentHost {
   private readonly preparation = new PreparationProgress<Client>((client, params) => { if (this.clients.has(client) && client.initialized) this.send(client, { jsonrpc: '2.0', method: 'root/progress', params }); });
   private readonly heartbeat: ReturnType<typeof setInterval>;
   private readonly departing = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly lostSessions = new WeakMap<Client, string[]>();
   /** How long an active client whose last connection closed keeps its place, waiting for its reconnect: 30 seconds, as in VS Code's own host. */
   activeClientGraceMs = 30_000;
   /** The host's clock for provisional-session expiry; a test replaces it. */
@@ -1431,7 +1432,9 @@ export class AgentHost {
       const result = await this.request(client, message.method, params);
       this.send(client, { jsonrpc: '2.0', id: message.id, result });
       if (message.method === 'reconnect') this.reloadChatHistories(client, result?.snapshots);
+      this.announceLostSessions(client);
     } catch (error) {
+      this.lostSessions.delete(client);
       const rpc = error instanceof RpcError ? error : new RpcError(codes.internal, error instanceof Error && 'status' in error ? publicError(error, true).message : catalogueMessage('internal_error'));
       this.send(client, { jsonrpc: '2.0', id: message.id, error: { code: rpc.code, message: rpc.message, ...(rpc.data !== undefined ? { data: rpc.data } : {}) } });
       if (rpc.code === codes.unsupportedVersion) { this.clients.delete(client); client.connection.close(1000, 'Unsupported protocol version'); }
@@ -1603,6 +1606,33 @@ export class AgentHost {
     return snapshot;
   }
 
+  /**
+   * Subscribes each channel an `initialize` or `reconnect` names and leaves out, logged by its path, each one that does not
+   * resolve, so one lost channel never fails the whole request. A session or chat channel whose session is gone or not the
+   * person's is kept to be announced as removed once the answer is sent; the announcement says no more than the error would.
+   */
+  private async resubscribe(client: Client, method: string, channels: unknown[]): Promise<Json[]> {
+    const snapshots: Json[] = [];
+    const lost = new Map<string, string>();
+    for (const channel of channels) {
+      if (channel === rootChannel) { snapshots.push(await this.subscribe(client, rootChannel)); continue; }
+      try { snapshots.push(await this.subscribe(client, channel as string)); }
+      catch (error) {
+        logUnanswered(method, channel);
+        const parsed = typeof channel === 'string' && error instanceof RpcError && error.code === codes.sessionNotFound ? parseChannel(channel) : undefined;
+        if (parsed && !parsed.run && parsed.kind !== 'changeset' && !lost.has(parsed.id)) lost.set(parsed.id, parsed.kind === 'session' ? channel as string : sessionChannel(parsed.id, client.scheme));
+      }
+    }
+    if (lost.size) this.lostSessions.set(client, [...lost.values()]);
+    return snapshots;
+  }
+
+  private announceLostSessions(client: Client): void {
+    const lost = this.lostSessions.get(client);
+    this.lostSessions.delete(client);
+    if (lost && client.subscriptions.has(rootChannel)) for (const session of lost) this.send(client, { jsonrpc: '2.0', method: 'root/sessionRemoved', params: { channel: rootChannel, session } });
+  }
+
   private remember(clientId: string, user: User, scheme: SessionScheme, clientInfo: Client['clientInfo'], protocolVersion: string): void {
     this.knownClients.remember(clientId, { userId: user.id, scheme, protocolVersion, ...(clientInfo ? { clientInfo } : {}) });
   }
@@ -1620,8 +1650,7 @@ export class AgentHost {
       this.remember(params.clientId, client.user, client.scheme, client.clientInfo, negotiated);
       this.workItems.watch();
       this.resumeActiveClient(params.clientId, Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]);
-      const snapshots: Json[] = [];
-      for (const channel of Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]) snapshots.push(await this.subscribe(client, channel));
+      const snapshots = await this.resubscribe(client, method, Array.isArray(params.initialSubscriptions) ? params.initialSubscriptions : [rootChannel]);
       return { protocolVersion: negotiated, serverSeq: this.serverSeq, serverInfo: { name: 'unfold', version: this.config.mode === 'demo' ? 'demo' : 'live' }, defaultDirectory: repositoriesDirectory, environment: { pathStyle: 'posix' }, ...(this.automations.available ? { automations: this.automations.capabilities() } : {}), ...(declaresSessionUris || this.automations.available || client.offersSideChats ? { _meta: { ...(declaresSessionUris ? { [sessionUrisMeta]: true } : {}), ...(this.automations.available ? { [autonomousAutomationsMeta]: true } : {}), ...(client.offersSideChats ? { [sideChatWithoutContextMeta]: true } : {}) } } : {}), snapshots, ...(this.chatAsks.offered ? { completionTriggerCharacters: ['/'] } : {}), terminalCommandPrefix: undefined };
     }
     if (method === 'reconnect' && !client.initialized) {
@@ -1634,7 +1663,7 @@ export class AgentHost {
     }
     if (!client.initialized) throw new RpcError(codes.invalidRequest, 'initialize first');
     switch (method) {
-      case 'reconnect': { const snapshots: Json[] = []; for (const channel of Array.isArray(params.subscriptions) ? params.subscriptions : []) snapshots.push(await this.subscribe(client, channel)); return { type: 'snapshot', snapshots }; }
+      case 'reconnect': return { type: 'snapshot', snapshots: await this.resubscribe(client, method, Array.isArray(params.subscriptions) ? params.subscriptions : []) };
       case 'subscribe': { if (typeof params.channel !== 'string') throw new RpcError(codes.invalidParams, 'channel is required'); return { snapshot: await this.subscribe(client, params.channel) }; }
       case 'listSessions': return { items: [...this.visible(client.user).map(session => this.summary(session, client)), ...this.chats.list(client.user, client), ...await this.workItemSummaries(client)] };
       case 'resolveSessionConfig': if (params.provider === chatProvider && this.chats.available) return this.chats.resolve(client.user, params.config);
