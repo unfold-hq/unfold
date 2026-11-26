@@ -28,7 +28,7 @@ The owner asked on 2026-11-04 for the whole landscape, five uses per standard fo
 ## Decision Drivers
 
 * A trigger on the watchlist should reach a reviewer when it fires, without anyone remembering to look.
-* Use the machinery the repository already has: Renovate, Forgejo Actions, generated docs checked by docs-check.
+* Use the machinery the repository already has: Renovate, the CI workflows (Forgejo Actions when this was decided, GitHub Actions since 2026-11-11), generated docs checked by docs-check.
 * Only pull requests: reviewable and revertable. No tickets or messages created by a job.
 * A version bump of a spec is a question, never an automatic merge.
 * The survey costs nothing when no model is configured.
@@ -46,7 +46,7 @@ Chosen option: **the catalogue with Renovate and a weekly survey**. Renovate cat
 
 * **The catalogue** is [`standards.yaml`](../research/agent-standards/standards.yaml): 160 standards in twelve layers and 30 concepts. Each standard records its steward, status, latest version, relations, five uses for Unfold, a ring with its reason, a flip trigger, the decisions it bears on and the watchlist ids it feeds. [`scripts/agent-standards.py`](../../../../scripts/agent-standards.py) checks it and generates the pages, and docs-check fails on a broken rule or a stale page.
 * **Renovate** reads each one-line `watch` entry of kind `github-releases`, `github-tags` or `ietf-draft` through a custom manager. The IETF datatracker is a custom datasource. Renovate opens one pull request per standard, of type `docs`, so it never cuts a release, and never automerges.
-* **The survey** runs in [`on_agent_standards.yml`](../../../../.forgejo/workflows/on_agent_standards.yml) every Monday, off until `AGENT_STANDARDS_SURVEY_ENABLED` is set. It reads feeds newer than each entry's review and new IETF drafts, triages them with a model only if one is configured, and opens a pull request only when it found something. It never edits the catalogue itself.
+* **The survey** runs in [`on_agent_standards.yml`](../../../../.github/workflows/on_agent_standards.yml) every Monday, off until `AGENT_STANDARDS_SURVEY_ENABLED` is set. It reads feeds newer than each entry's review and new IETF drafts, triages them with a model only if one is configured, and opens a pull request only when it found something. It never edits the catalogue itself.
 * **The narrative** stays in dossiers. [The 2026-11-04 dossier](../research/2026-11-04-agent-standards-landscape.md) is the first one built on the catalogue.
 
 ### Consequences
@@ -60,7 +60,7 @@ Chosen option: **the catalogue with Renovate and a weekly survey**. Renovate cat
 ### Confirmation
 
 * `mise run docs-check` runs [`agent-standards.test.py`](../../../../scripts/agent-standards.test.py), which proves each rule rejects its fixture and that the committed pages match the catalogue.
-* [`workflow-policy.test.cjs`](../../../../scripts/workflow-policy.test.cjs) proves the survey is off by default, holds only `WEBGRIP_CI_TOKEN` and the optional model key, and pushes only its own branch.
+* [`github-workflow-policy.test.cjs`](../../../../scripts/github-workflow-policy.test.cjs) proves the survey runs only in `unfold-hq/unfold`, and that the workflows use only the repository secrets on its allow-list, the survey's optional model key among them; the survey pushes with the workflow's own `GITHUB_TOKEN`, which is not a repository secret. That it is off until `AGENT_STANDARDS_SURVEY_ENABLED` is `true`, and that it pushes only its own `docs/agent-standards-survey-<week>` branch, is in the workflow's condition and in [`agent-standards-survey.py`](../../../../scripts/agent-standards-survey.py), and no test pins either yet.
 * `renovate-config-validator --strict renovate.json` passes.
 
 ## Pros and Cons of the Options
@@ -84,3 +84,13 @@ Chosen option: **the catalogue with Renovate and a weekly survey**. Renovate cat
 
 * Procedure: [Keep the agent-standards catalogue current](../../../../docs/how-to/keep-the-agent-standards-catalogue-current.md).
 * [System ADR-0050](../../../../docs/adr/adr-0050-unfold-integrates-through-open-standards-and-registries-and-never-locks-a-customer-in.md): Unfold integrates through open standards. The catalogue is the list it chooses from.
+
+## Update 2026-11-26: the pointers follow the move to GitHub Actions
+
+The decision is unchanged. CI moved from Forgejo Actions to GitHub Actions on 2026-11-11, the Forgejo workflows were removed on 2026-11-16, and three pointers in this record still named the Forgejo setup. Checked against the tree on 2026-11-26 and corrected above:
+
+* the survey workflow was `.forgejo/workflows/on_agent_standards.yml` and is [`.github/workflows/on_agent_standards.yml`](../../../../.github/workflows/on_agent_standards.yml);
+* the policy test was `scripts/workflow-policy.test.cjs` and is [`scripts/github-workflow-policy.test.cjs`](../../../../scripts/github-workflow-policy.test.cjs);
+* the survey's token was a Forgejo CI secret and is the workflow's own `GITHUB_TOKEN`.
+
+The Confirmation line on the policy test also claimed more than the GitHub test checks. It now says which two properties no test pins.
