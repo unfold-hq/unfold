@@ -10,4 +10,6 @@ VS Code's Agents window lists your Unfold sessions next to your other agents. Si
 
 If the status bar says **not connected**, click it: it offers **Reconnect** and a troubleshooting guide. The Agents window's **Agent Host** output channel says why a connection failed.
 
-The Agents window needs VS Code 1.141 or later, and asks for GitHub sign-in before it shows anything.
+The extension runs in the Agents window from VS Code 1.143. A desktop VS Code 1.145 or later opens the Agents window without a GitHub sign-in when only agents such as Unfold's are connected; VS Code for the Web still asks for one first.
+
+Your laptop can sleep: the agents run in Ploeg, and the Agents window catches up when it wakes.
