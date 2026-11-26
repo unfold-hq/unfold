@@ -82,6 +82,8 @@ export type ForgeAccess = { gitUser?: string; nested?: boolean };
  * never placed in a URL or argument list, a lease-guarded `git push` that never overwrites a branch someone else moved,
  * and bounded JSON calls that refuse redirects.
  */
+const isPublicationFailure = (error: unknown): boolean => { const code = (error as { code?: unknown } | null)?.code; return typeof code === 'string' && code.startsWith('publi'); };
+
 export class ForgeConnection {
   readonly config: PublisherConfig;
   private readonly plainHttp: boolean;
@@ -134,12 +136,12 @@ export class ForgeConnection {
     let response: Response;
     try {
       response = await fetch(url, { method: init.method ?? 'GET', headers: { ...headers(), ...(init.body === undefined ? {} : { 'content-type': 'application/json' }) }, body: init.body === undefined ? undefined : JSON.stringify(init.body), redirect: 'manual', signal: AbortSignal.timeout(15000) });
-    } catch (error) { if ((error as { code?: string })?.code?.startsWith('publi')) throw error; return deliveryFailure('publication_forge_unavailable'); }
+    } catch (error) { if (isPublicationFailure(error)) throw error; return deliveryFailure('publication_forge_unavailable'); }
     const chunks: Uint8Array[] = []; let size = 0;
     if (response.body) {
       const reader = response.body.getReader();
       try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.byteLength; if (size > 4 * 1024 * 1024) deliveryFailure('publication_response_too_large'); chunks.push(part.value); } }
-      catch (error) { if ((error as { code?: string })?.code?.startsWith('publi')) throw error; return deliveryFailure('publication_forge_unavailable'); }
+      catch (error) { if (isPublicationFailure(error)) throw error; return deliveryFailure('publication_forge_unavailable'); }
       finally { await reader.cancel().catch(() => undefined); }
     }
     const text = Buffer.concat(chunks).toString('utf8');
