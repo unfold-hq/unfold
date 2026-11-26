@@ -123,7 +123,7 @@ test('a repeated subscribe, also with a flowControl offer, gets a snapshot, and 
   const chat = defaultChatOf(session);
   await client.rpc('createSession', { channel: session, provider: 'unfold', workingDirectories: [`${repositoriesDirectory}/order-service`], config: { team: 'delivery', budgetUsd: '1', title: 'Subscriptions' } });
   const first = await client.rpc('subscribe', { channel: session });
-  const again = await client.rpc('subscribe', { channel: session, flowControl: { receive: { maxFrames: 4 } } });
+  const again = await client.rpc('subscribe', { channel: session, flowControl: { receive: { windowBytes: 1048576, maxFrameBytes: 262144 } } });
   assert.equal(again.snapshot.resource, session);
   assert.deepEqual(again.snapshot.state, first.snapshot.state, 'the same snapshot, not an error');
   await client.rpc('subscribe', { channel: chat });
