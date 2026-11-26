@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse as parseYaml } from 'yaml';
 import { buildMarketplace, connectionPlugin, mcpEndpoint } from '../scripts/agent-plugin-marketplace.mjs';
 
 const repository = fileURLToPath(new URL('../../../', import.meta.url));
@@ -149,6 +150,10 @@ test('a Copilot session gets the six commands, each naming the Claude Code route
   const agent = frontmatterOf(readFileSync(join(copilot, 'agents/unfold.agent.md'), 'utf8'));
   assert.equal(agent.name, 'Unfold');
   assert.equal(agent.tools, "['unfold/*']", 'the agent can use only the unfold MCP server\'s tools');
+  const header = parseYaml(readFileSync(join(copilot, 'agents/unfold.agent.md'), 'utf8').match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '');
+  assert.equal(header['argument-hint'], 'What waits for me, or a Work Item to follow or hand off', 'VS Code 1.148 reads argument-hint from the top level');
+  assert.equal(header.vscode?.['welcome-message'], 'Ask what waits for you in Unfold, why a Work Item stopped and what it cost, or hand off work and follow it to a pull request.', 'VS Code 1.148 reads welcome-message from the vscode map');
+  assert.ok(header.vscode['welcome-message'].length <= 160, 'the welcome message stays one short sentence');
   assert.deepEqual(readdirSync(join(copilot, 'rules')), ['unfold.instructions.md']);
   const rule = readFileSync(join(copilot, 'rules/unfold.instructions.md'), 'utf8');
   assert.equal(frontmatterOf(rule).applyTo, '"**"', 'the rule applies in every session');
