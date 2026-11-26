@@ -197,8 +197,22 @@ test('a pull request to development runs the fast jobs, and the merge queue, a m
     }
   }
   assert.equal(pr.jobs.typecheck.steps.at(-1).run, 'mise -C apps/unfold exec -- npm run typecheck');
-  assert.equal(pr.jobs['vscode-integration'].steps.at(-1).run, 'xvfb-run -a mise run vscode-integration', 'the extension runs in a real, headless VS Code');
+  assert.deepEqual(pr.jobs['vscode-integration'].steps.at(-1), { if: "steps.scope.outputs.run == 'true'", uses: './.github/actions/vscode-integration' }, 'the pull request runs the suite through the same action as the weekly run');
+  assert.equal(actions['vscode-integration'].runs.steps.at(-1).run, 'xvfb-run -a mise run vscode-integration', 'the extension runs in a real, headless VS Code');
   assert.deepEqual(pr.jobs['vscode-integration'].steps.find(step => step.id === 'scope').env, { EVENT: '${{ github.event_name }}', ...range }, 'the suite reads the same range as the other pull request checks');
+});
+
+test('the VS Code integration suite also runs weekly and on command against the current Stable and Insiders, one leg each, blocking nothing', () => {
+  const schedule = workflows['on_schedule.yml'];
+  assert.deepEqual(Object.keys(schedule.on).sort(), ['schedule', 'workflow_dispatch']);
+  const job = schedule.jobs['vscode-integration'];
+  assert.equal(job.if, guard);
+  assert.deepEqual(job.strategy, { 'fail-fast': false, matrix: { target: ['stable', 'insiders'] } }, 'a red Insiders leg does not cancel the Stable one');
+  assert.deepEqual(job.steps.at(-1), { uses: './.github/actions/vscode-integration', with: { targets: '${{ matrix.target }}' } });
+  assert.deepEqual(job.permissions, undefined, 'it keeps the workflow\'s read-only token');
+  assert.equal(job.env.MISE_AUTO_INSTALL, 'false');
+  for (const { file, job: other } of allJobs()) assert.ok(![].concat(other.needs ?? []).includes('vscode-integration') || file === 'on_pull_request.yml', `${file}: nothing waits for the weekly run`);
+  assert.equal(actions['vscode-integration'].inputs.targets.default, 'stable,insiders');
 });
 
 test('the pull request gate waits for every job except the advisory ones, and passes only when each that had to run succeeded', () => {
