@@ -4780,7 +4780,7 @@ paths:
       tags: [Ploeg]
       operationId: getConnectGitlab
       summary: 'What the Connect GitLab page shows'
-      description: 'The GitLab address (`links.gitlab.baseUrl`, else https://gitlab.com) and GitLab''s new-token page filled in with a name, a description and the `api` scope; whether this Ploeg serves the connect and register steps (from its `forge-connections` and `targets` read routes) and each method: `gitlab_service_account` is served only once the pinned Ploeg bundle records it in `src/ploeg-steps.json`, and a method Ploeg''s configuration refused the last time carries `refused` with `method_not_allowed`. Also the GitLab connections Ploeg holds (never a secret), the second-forge state and the Integration Accounts Unfold stored with the state Ploeg reports now. It asks Ploeg only reads and writes nothing.'
+      description: 'The GitLab address (`links.gitlab.baseUrl`, else https://gitlab.com) and GitLab''s new-token page filled in with a name, a description and the `api` scope; whether this Ploeg serves the connect and register steps (from its `forge-connections` and `targets` read routes) and each method: `gitlab_service_account` is served when the pinned Ploeg bundle is at least the release `src/ploeg-steps.json` records for it (0.2.0-rc.131), and a method Ploeg''s configuration refused the last time carries `refused` with `method_not_allowed`. Also the GitLab connections Ploeg holds (never a secret), the second-forge state and the Integration Accounts Unfold stored with the state Ploeg reports now. It asks Ploeg only reads and writes nothing.'
       x-unfold-role: viewer
       responses:
         '200':

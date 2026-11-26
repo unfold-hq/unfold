@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { hashPassword } from '../src/auth.ts';
 import { GitlabConnections, gitlabRefusalTable, tokenPage } from '../src/gitlab-connections.ts';
 import { errorCatalogue } from '../src/error-catalogue.ts';
-import { ploegSteps } from '../src/onboarding.ts';
+import { Onboarding, ploegSteps } from '../src/onboarding.ts';
 import { PloegOperatorRefusal } from '../src/ploeg.ts';
 import { Store } from '../src/store.ts';
 import { ensureIntegrationSchema } from '../src/integration-store.ts';
@@ -21,7 +21,7 @@ const flowState = `st${randomBytes(16).toString('hex')}`;
 const secrets = [serviceToken, ownerToken, flowState];
 
 type Call = { method: string; url: string; body: Record<string, unknown> };
-type FakeOptions = { served?: boolean; refuseMethod?: string; refuseComplete?: string; mints?: boolean; otherForge?: boolean; refuseTarget?: string; inUse?: boolean };
+type FakeOptions = { served?: boolean; refuseMethod?: string; refuseComplete?: string; mints?: boolean; refuseTarget?: string; inUse?: boolean };
 
 async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
   const calls: Call[] = [];
@@ -36,7 +36,7 @@ async function fakePloeg(t: TestContext, options: FakeOptions = {}) {
     const send = (status: number, value: unknown) => res.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify({ schemaVersion: '1.0', ...(value as object) }));
     const refuse = (status: number, code: string, message = `refused: ${code}`, extra: object = {}) => send(status, { error: { code, message, ...extra } });
     if (req.method === 'GET' && path === 'teams') return send(200, { teams: [{ id: 'bronze', paused: false, queueDepth: 0, roles: [], assignees: [], pinnedScopes: [] }] });
-    if (req.method === 'GET' && path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: options.otherForge ? [{ key: 'site', label: 'site', forge: 'github', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready', reason: '', lastForgeEventAt: null, boards: [] }] : [] });
+    if (req.method === 'GET' && path === 'connections') return send(200, { checkedAt: null, eventWindowDays: 30, boards: [], repositories: [] });
     if (options.served === false && (path === 'forge-connections' || path === 'targets')) return res.writeHead(404).end();
     const connection = { id: 'gitlab-acme', port: 'forge', kind: 'gitlab', instance: 'gitlab', method: 'token', account: { id: '77', login: 'unfold-bot' }, source: 'runtime', state: 'active', invalidReason: null, canMint: options.mints === true, label: 'Unfold service account', revision: 1, secrets: { token: { store: 'kv', path: 'forge/gitlab-acme', version: 1 } }, lastProbe: null, usedBy: [], createdBy: 'oidc-admin', createdAt: '2026-11-19T10:00:00Z', updatedBy: 'oidc-admin', updatedAt: '2026-11-19T10:00:00Z' };
     if (req.method === 'GET' && path === 'forge-connections') return send(200, { connections: calls.some(call => call.url.endsWith('/complete') && call.body.token === serviceToken) ? [connection] : [], nextCursor: null });
@@ -118,8 +118,8 @@ test('an Admin pastes a service account’s token; Ploeg gets it once and Unfold
   assert.deepEqual(overview.body.served, { connect: true, register: true });
   assert.equal(overview.body.tokenPage, 'https://gitlab.com/-/user_settings/personal_access_tokens?name=Unfold%20setup&description=Temporary%3A%20Ploeg%20creates%20its%20service%20account%20with%20it%2C%20then%20revokes%20it.&scopes=api');
   const serviceAccount = overview.body.methods.find((entry: { method: string }) => entry.method === 'gitlab_service_account');
-  assert.equal(serviceAccount.served, false, 'the pinned Ploeg does not serve the service-account method');
-  assert.match(serviceAccount.text, /does not create a GitLab service account from a temporary Owner token yet/);
+  assert.equal(serviceAccount.served, true, 'the pinned Ploeg serves the service-account method');
+  assert.equal(serviceAccount.text, null);
 
   const connected = await request(api.url, '/api/onboarding/gitlab/connections', { method: 'POST', cookie, body: { method: 'token', token: serviceToken } });
   assert.equal(connected.status, 201, connected.text);
@@ -165,17 +165,6 @@ test('an Admin pastes a service account’s token; Ploeg gets it once and Unfold
   assertNowhere(rows, output(), responses);
 });
 
-test('until the pinned Ploeg serves gitlab_service_account, the Owner token is refused with ploeg_step_unavailable and sent nowhere', async t => {
-  const output = captureOutput(t);
-  const { api, ploeg, cookie } = await live(t);
-  const refused = await request(api.url, '/api/onboarding/gitlab/connections', { method: 'POST', cookie, body: { method: 'service_account', token: ownerToken, group: 'acme' } });
-  assert.equal(refused.status, 503);
-  assert.equal(refused.body.error.code, 'ploeg_step_unavailable');
-  assert.match(refused.body.error.message, /waits for the release after 0\.2\.0-rc\.130 that includes ploeg-hq\/ploeg#464, not released yet/);
-  assert.deepEqual(ploeg.writes(), []);
-  assertNowhere(everyRow(api.app.store.db), output(), [refused.text]);
-});
-
 test('a method the installation does not allow is refused with method_not_allowed, and the page says so next time', async t => {
   const output = captureOutput(t);
   const { api, ploeg, cookie } = await live(t, { refuseMethod: 'token' });
@@ -201,16 +190,13 @@ test('a refusal Ploeg words with the pasted token is answered without it', async
   assertNowhere(everyRow(api.app.store.db), output(), [refused.text]);
 });
 
-test('a token of the wrong shape, someone who is not an Admin and an installation on another forge are refused before anything is sent', async t => {
-  const { api, ploeg, cookie } = await live(t, { otherForge: true });
+test('a token of the wrong shape and someone who is not an Admin are refused before anything is sent', async t => {
+  const { api, ploeg, cookie } = await live(t);
   const short = await request(api.url, '/api/onboarding/gitlab/connections', { method: 'POST', cookie, body: { method: 'token', token: 'short' } });
   assert.equal(short.status, 400);
   assert.equal(short.body.error.code, 'connection_token_invalid');
   const badGroup = await request(api.url, '/api/onboarding/gitlab/connections', { method: 'POST', cookie, body: { method: 'service_account', token: ownerToken, group: '../etc' } });
   assert.equal(badGroup.body.error.code, 'invalid_input');
-  const second = await request(api.url, '/api/onboarding/gitlab/connections', { method: 'POST', cookie, body: { method: 'token', token: serviceToken } });
-  assert.equal(second.status, 409);
-  assert.equal(second.body.error.code, 'second_forge_unsupported');
   api.app.store.addUser({ id: 'dev', name: 'dev', role: 'operator', passwordHash: hashPassword('dev-password-271828') });
   const { cookie: developer } = await login(api.url, 'dev', 'dev-password-271828');
   const forbidden = await request(api.url, '/api/onboarding/gitlab/connections', { method: 'POST', cookie: developer, body: { method: 'token', token: serviceToken } });
@@ -276,6 +262,65 @@ test('with a Ploeg that serves gitlab_service_account, the Owner token and group
   assert.match(JSON.stringify(facts), /"group":"acme"/);
   assert(!everyRow(store.db).includes(ownerToken));
   assert.equal(tokenPage('https://gitlab.example.com/').split('?')[0], 'https://gitlab.example.com/-/user_settings/personal_access_tokens');
+});
+
+async function pinnedTo(t: TestContext, pinned: string, otherForge = false) {
+  const directory = await mkdtemp(join(tmpdir(), 'unfold-gitlab-'));
+  const sent: string[] = [];
+  const store = new Store(join(directory, 'gitlab.sqlite'));
+  ensureIntegrationSchema(store.db, '2026-11-26T10:00:00.000Z');
+  t.after(async () => { try { store.close(); } catch {} await rm(directory, { recursive: true, force: true }); });
+  const connections = async () => ({ demo: false, supported: true, checkedAt: null, eventWindowDays: 30, repositories: otherForge ? [{ key: 'site', label: 'site', forge: 'github', owner: 'acme', repo: 'site', baseBranch: 'main', readiness: 'ready' as const, reason: '', lastForgeEventAt: null, boards: [] }] : [], boards: [], unrouted: [], fetchedAt: '' });
+  const steps = new Onboarding({ store, pinned, ploeg: { connections, routing: async () => ({ all: [] }), serves: async () => true }, config: { repositories: [], taskSources: [] } });
+  const gitlab = new GitlabConnections({
+    db: store.db, store,
+    ploeg: {
+      isDemo: false,
+      connections,
+      operatorCall: async (_user, path, options) => {
+        sent.push(path);
+        const method = (options?.body as { method?: string } | undefined)?.method ?? 'token';
+        if (path === 'connection-flows') return { flow: { id: 'flow-1', method, expiresAt: '2026-11-26T10:15:00Z', state: flowState }, next: {} };
+        if (path === 'connection-flows/complete') return { connection: { id: 'gitlab-acme', kind: 'gitlab', instance: 'gitlab', method: 'token', account: { login: 'unfold-bot' }, source: 'runtime', state: 'active', canMint: true }, replayed: false };
+        throw new PloegOperatorRefusal(404, 'not_found', 'not found', {});
+      },
+    },
+    steps,
+    repositories: { admitRegistration: () => undefined, register: () => { throw new Error('unused'); }, repositories: () => [] },
+    stored: async () => true, audit: () => undefined, pinned, plan: ploegSteps, gitlabUrl: 'https://gitlab.example.com/',
+  });
+  return { gitlab, sent, store };
+}
+
+const gitlabAdmin = { id: 'admin-1', name: 'Admin', role: 'admin' as const };
+
+test('Ploeg 0.2.0-rc.131 is the first release that mints a Run’s GitLab credential through a connection', () => {
+  assert.deepEqual(ploegSteps.gitlab.mint, { record: 'Ploeg ADR-0203', release: '0.2.0-rc.131' });
+});
+
+test('below Ploeg 0.2.0-rc.131, the Owner token is refused with ploeg_step_unavailable naming that release and sent nowhere', async t => {
+  const output = captureOutput(t);
+  const { gitlab, sent, store } = await pinnedTo(t, '0.2.0-rc.130');
+  const refused = await gitlab.connect(gitlabAdmin, { method: 'service_account', token: ownerToken, group: 'acme' }).then(() => null, (error: unknown) => error as Error & { status?: number; code?: string });
+  assert(refused, 'the Owner token is refused');
+  assert.equal(refused.status, 503);
+  assert.equal(refused.code, 'ploeg_step_unavailable');
+  assert.match(refused.message, /Ploeg 0\.2\.0-rc\.131 adds it\./);
+  assert.deepEqual(sent, []);
+  assertNowhere(everyRow(store.db), output(), [refused.message]);
+});
+
+test('below Ploeg 0.2.0-rc.131, an installation on another forge is refused GitLab with second_forge_unsupported naming that release', async t => {
+  const { gitlab, sent } = await pinnedTo(t, '0.2.0-rc.130', true);
+  await assert.rejects(gitlab.connect(gitlabAdmin, { method: 'token', token: serviceToken }), (error: unknown) => error instanceof Error && (error as { code?: string }).code === 'second_forge_unsupported' && /needs Ploeg 0\.2\.0-rc\.131/.test(error.message));
+  assert.deepEqual(sent, []);
+});
+
+test('from Ploeg 0.2.0-rc.131, an installation on another forge connects GitLab beside it', async t => {
+  const { gitlab, sent } = await pinnedTo(t, '0.2.0-rc.131', true);
+  const done = await gitlab.connect(gitlabAdmin, { method: 'token', token: serviceToken });
+  assert.equal(done.connection.id, 'gitlab-acme');
+  assert.deepEqual(sent, ['connection-flows', 'connection-flows/complete']);
 });
 
 test('a GitLab project refused for its webhook or the account’s role is shown with the fix', async t => {

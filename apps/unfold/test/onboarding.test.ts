@@ -11,7 +11,7 @@ import type { AppConfig, User } from '../src/types.ts';
 import { Store } from '../src/store.ts';
 import { InsightService } from '../src/insight.ts';
 import { PloegClient, PloegError, type PloegConnections, type PloegTeam } from '../src/ploeg.ts';
-import { Onboarding, compareReleases, pinnedRelease, ploegSteps, secondForgeOpen, type ChecklistLine, type StoredEntries } from '../src/onboarding.ts';
+import { Onboarding, compareReleases, pinnedRelease, ploegSteps, secondForgeOpen, type ChecklistLine, type StepId, type StoredEntries } from '../src/onboarding.ts';
 import { application, configuration, request } from './api-support.ts';
 
 const admin: User = { id: 'admin-1', name: 'Admin', role: 'admin' };
@@ -240,6 +240,36 @@ test('the pinned Ploeg bundle comes from ploeg-release.json, and the step record
   for (const step of ploegSteps.steps) assert(step.read === null || /^[a-z][a-z-]+$/.test(step.read), `${step.id} names an operator read route`);
 });
 
+const firstReleases: Record<StepId, string> = {
+  'connect-github': '0.2.0-rc.112',
+  'connect-gitlab': '0.2.0-rc.131',
+  'connect-gitlab-service-account': '0.2.0-rc.131',
+  'register-repositories': '0.2.0-rc.115',
+  'connect-clickup': '0.2.0-rc.112',
+  'read-scopes': '0.2.0-rc.111',
+  'prepare-repository': '0.2.0-rc.113',
+  'bind-lists': '0.2.0-rc.114',
+  'connect-claude': '0.2.0-rc.128',
+};
+const releaseBefore = (release: string) => release.replace(/\d+$/, number => String(Number(number) - 1));
+
+test('every onboarding step names the first Ploeg release that ships it', () => {
+  assert.deepEqual(Object.fromEntries(ploegSteps.steps.map(step => [step.id, step.release])), firstReleases);
+});
+
+for (const [id, release] of Object.entries(firstReleases) as [StepId, string][]) {
+  test(`${id} is offered on the pinned Ploeg and refused before ${release}, naming that release`, async t => {
+    const step = ploegSteps.steps.find(entry => entry.id === id)!;
+    assert(compareReleases(pinnedRelease(), release) >= 0, `the pinned Ploeg ${pinnedRelease()} is ${release} or later`);
+    const store = await withStore(t);
+    const pinned = setup(t, store, fakePloeg({ served: step.read ? { [step.read]: true } : {} }));
+    assert.equal((await pinned.available(admin, id)).served, true, `the pinned Ploeg serves ${id}`);
+    const older = setup(t, store, fakePloeg({ teams: [team('bronze', dayCap)] }), {}, undefined, undefined, releaseBefore(release));
+    assert.equal((await older.available(admin, id)).served, false, `Ploeg ${releaseBefore(release)} does not serve ${id}`);
+    await assert.rejects(older.admit(admin, id, 'bronze'), (error: unknown) => error instanceof PloegError && error.status === 503 && error.code === 'ploeg_step_unavailable' && error.message.includes(`Ploeg ${release} adds it.`) && !error.message.includes('not released yet'));
+  });
+}
+
 async function ploegServer(t: TestContext, answers: Record<string, number>, bodies: Record<string, unknown> = {}) {
   const env = `UNFOLD_ONBOARDING_TEST_${randomBytes(6).toString('hex').toUpperCase()}`;
   process.env[env] = randomBytes(24).toString('hex');
@@ -263,8 +293,8 @@ test('a step whose read route answers 404 is refused with ploeg_step_unavailable
   const store = await withStore(t);
   const upstream = await ploegServer(t, {});
   const ploeg = new PloegClient({ ...configuration('/unused', 'live'), ploeg: upstream.config });
-  const onboarding = new Onboarding({ store, ploeg, now: clock, config: { repositories: [], taskSources: [] } });
-  await assert.rejects(onboarding.admit(admin, 'bind-lists'), (error: unknown) => error instanceof PloegError && error.status === 503 && error.code === 'ploeg_step_unavailable' && /Ploeg ADR-0186, not released yet/.test(error.message));
+  const onboarding = new Onboarding({ store, ploeg, now: clock, pinned: '0.2.0-rc.112', config: { repositories: [], taskSources: [] } });
+  await assert.rejects(onboarding.admit(admin, 'bind-lists'), (error: unknown) => error instanceof PloegError && error.status === 503 && error.code === 'ploeg_step_unavailable' && /Ploeg 0\.2\.0-rc\.114 adds it\./.test(error.message));
   await assert.rejects(onboarding.admit(admin, 'prepare-repository'), (error: unknown) => error instanceof PloegError && error.code === 'ploeg_step_unavailable', 'a step without a read route is gated on the pinned bundle');
   await assert.rejects(onboarding.admit(developer, 'bind-lists'), (error: unknown) => error instanceof PloegError && error.status === 403);
   assert.deepEqual(upstream.seen, [{ method: 'GET', path: '/api/v1/operator/tracker-bindings' }], 'only the read route was asked, never a write, and nothing for a refused person or a step without a route');

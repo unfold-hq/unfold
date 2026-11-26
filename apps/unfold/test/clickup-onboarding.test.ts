@@ -97,8 +97,7 @@ async function setup(t: TestContext, options: { served?: Record<string, boolean>
   const served = { 'tracker-connections': true, 'tracker-bindings': true, ...options.served };
   const teams = options.teams ?? [capped('delivery', { usd: 20, period: 'day', periodEnd: '2026-11-19T00:00:00Z', remainingUsd: 20 })];
   const reads = { connections: async () => wiring(), routing: async () => ({ all: teams }), serves: async (_user: User, route: string) => served[route as keyof typeof served] ?? false };
-  const steps = options.scopesReleased ? { ...ploegSteps, steps: ploegSteps.steps.map(step => step.id === 'read-scopes' ? { ...step, release: '0.2.0-rc.110' } : step) } : ploegSteps;
-  const onboarding = new Onboarding({ store, ploeg: reads, now: clock, pinned: '0.2.0-rc.110', steps, config: { repositories: config.repositories, taskSources: [] } });
+  const onboarding = new Onboarding({ store, ploeg: reads, now: clock, pinned: options.scopesReleased ? '0.2.0-rc.111' : '0.2.0-rc.110', steps: ploegSteps, config: { repositories: config.repositories, taskSources: [] } });
   const connections = new TrackerConnections(store, config, { enforced: false, now: clock, log: () => undefined });
   const client = new PloegClient(config);
   const changes: ClickUpChange[] = [];
