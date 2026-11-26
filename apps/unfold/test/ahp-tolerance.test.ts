@@ -69,7 +69,7 @@ test('a pending message without kind is AHP 1.1\'s default, queued, and becomes 
 
 test('AHP 1.1 subscribe and reconnect options are ignored: the host still answers with ordinary snapshots', { timeout: testTimeout(60_000) }, async t => {
   const { client, clientId, session } = await startedSession(t);
-  const subscribed = await client.rpc('subscribe', { channel: session, flowControl: { receive: { maxFrames: 4 } } });
+  const subscribed = await client.rpc('subscribe', { channel: session, flowControl: { receive: { windowBytes: 1048576, maxFrameBytes: 262144 } } });
   assert.equal(subscribed.snapshot.resource, session);
   assert.ok(subscribed.snapshot.state.defaultChat);
   const again = await client.rpc('reconnect', { channel: 'ahp-root://', clientId, lastSeenServerSeq: 0, subscriptions: [session], windows: { [session]: { cursor: 'unknown' } } });

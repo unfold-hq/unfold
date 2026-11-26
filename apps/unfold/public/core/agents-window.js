@@ -18,6 +18,25 @@ export function normalizedAgentHostAddress(address) {
 }
 
 /**
+ * The address VS Code 1.148 keeps for a host an extension registers through `chat.registerRemoteAgentHost`
+ * (`parseRemoteAgentHostAddress` in `platform/agentHost/common/remoteAgentHostAddress.ts`): `http` reads as `ws` and `https` as
+ * `wss`, `ws://` is dropped and `wss://` kept, the host is lowercased, a default port, a root path and `tkn` are dropped, and
+ * any other query stays. '' for an address VS Code refuses.
+ */
+export function registeredAgentHostAddress(address) {
+  const text = String(address ?? '').trim();
+  if (!text) return '';
+  try {
+    const url = new URL(/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(text) ? text : `ws://${text}`);
+    const protocol = { 'ws:': 'ws:', 'http:': 'ws:', 'wss:': 'wss:', 'https:': 'wss:' }[url.protocol.toLowerCase()];
+    if (!protocol || !url.host) return '';
+    url.searchParams.delete('tkn');
+    const path = url.pathname !== '/' ? url.pathname : '';
+    return `${protocol === 'wss:' ? 'wss://' : ''}${url.host}${path}${url.search}`;
+  } catch { return ''; }
+}
+
+/**
  * The connection authority VS Code 1.142 derives from a `chat.remoteAgentHosts` address (`agentHostAuthority` in
  * `platform/agentHost/common/agentHostUri.ts`): `local` becomes `remote_local`, a lowercase alphanumeric address stays,
  * a lowercase host-like address replaces `:` with `__`, and anything else is `hex-` and its UTF-8 bytes in lowercase hex.
@@ -41,13 +60,15 @@ export function parseSessionUri(uri) {
 /**
  * The link that opens one agent-host session in VS Code's Agents window, as VS Code 1.142's
  * `buildExternalOpenSessionLinkUri` builds it: `<protocol>://agents/agent-host-session/<scheme>/<id>?connectionAuthority=<authority>`.
- * `session` is the URI the host gave that client; `address` is the host's `chat.remoteAgentHosts` address. '' when any part is unusable,
+ * `session` is the URI the host gave that client; `address` is the host's `chat.remoteAgentHosts` address, or with `registered` the
+ * address an extension registered, which VS Code canonicalises first ({@link registeredAgentHostAddress}). '' when any part is unusable,
  * and for an address that carries a connection token, so a link never holds one.
  */
-export function agentsWindowSessionLink({ protocol = vscodeUrlProtocols.stable, session, address }) {
+export function agentsWindowSessionLink({ protocol = vscodeUrlProtocols.stable, session, address, registered = false }) {
+  const keyed = registered ? registeredAgentHostAddress(address) : address;
   const parsed = parseSessionUri(session);
-  const authority = agentHostAuthority(address);
-  if (!parsed || !authority || carriesConnectionToken(address) || !/^[a-z][a-z0-9+.-]*$/.test(String(protocol))) return '';
+  const authority = agentHostAuthority(keyed);
+  if (!parsed || !authority || carriesConnectionToken(keyed) || !/^[a-z][a-z0-9+.-]*$/.test(String(protocol))) return '';
   return `${protocol}://agents/agent-host-session/${parsed.scheme}/${parsed.id}?connectionAuthority=${encodeURIComponent(authority)}`;
 }
 
