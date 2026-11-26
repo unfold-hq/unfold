@@ -58,7 +58,7 @@ export type Core = {
   elapsedClock(seconds: number | null | undefined): string;
   changedFiles(session: unknown): { file: string; added: number; removed: number; before?: string; after?: string; artifactId: string }[];
   agentHostAuthority(address: string): string;
-  agentsWindowSessionLink(options: { protocol?: string; session: string; address: string }): string;
+  agentsWindowSessionLink(options: { protocol?: string; session: string; address: string; registered?: boolean }): string;
   waitingQuestions(detail: unknown): WaitingQuestionShape[];
   waitingQuestion(detail: unknown, reason: unknown): WaitingQuestionShape | null;
   answerNote(question: { text: string; role?: string; round?: number | null }, answer: string): string;

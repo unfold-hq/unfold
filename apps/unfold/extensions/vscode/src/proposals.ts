@@ -90,7 +90,7 @@ export function enableProposedApiCommand(id = insidersExtensionId): string {
 export function proposalsOffNotice(off: readonly ProposalState[], id = insidersExtensionId): string | undefined {
   if (!off.length) return undefined;
   const parts = off.map(state => `${proposalParts[state.name]} (${state.name})`).join('; ');
-  return `Unfold Insiders works like the regular extension, with these experimental parts off: ${parts}. VS Code turns them on only in VS Code Insiders started with ${enableProposedApiCommand(id)}, or with "${id}" under "enable-proposed-api" in argv.json.`;
+  return `Unfold Insiders works like the regular extension, with these experimental parts off: ${parts}. VS Code turns them on when it starts with --enable-proposed-api ${id}, in Insiders (${enableProposedApiCommand(id)}) and in Stable alike, or with "${id}" under "enable-proposed-api" in argv.json.`;
 }
 
 export function offNoticeKey(off: readonly ProposalState[]): string {

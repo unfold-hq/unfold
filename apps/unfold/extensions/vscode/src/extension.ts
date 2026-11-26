@@ -20,7 +20,7 @@ import { SessionPanels, type PanelHost, type PanelTab, type InstructionOutcome }
 import { presentation, situation, safeHttpsUrl, spendLabel, isolatedPlacement, placementLabel, presentationFor, plainText, providerNames } from './status.js';
 import { setApproval as chooseApproval, type ApprovalChoice } from './approval.js';
 import { linkedAccounts, type AccountChoice } from './accounts.js';
-import { SettingsFileError, agentHostStore, agentHostTokenId, agentsWindowPlan, agentsWindowState, agentsWindowFolder, agentsWindowStatusText, agentsWindowSubject, foldersByLastPick, type AgentHostFolder, attachAgentHost, type AgentsWindowLinkView, type AgentsWindowState, type AttachedClient, connectionAddress, detachAgentHost, editorWindowOf, isAgentsWindowWorkspace, probeAgentHostToken, registeredAgentHost, userSettingsFile, type AgentHostStore, type AttachOutcome, type IssuedAgentHost } from './agent-host.js';
+import { SettingsFileError, agentHostStore, agentHostTokenId, agentsWindowPlan, agentsWindowState, agentsWindowFolder, agentsWindowStatusText, agentsWindowSubject, foldersByLastPick, type AgentHostFolder, attachAgentHost, type AgentsWindowLinkView, type AgentsWindowState, type AttachedClient, connectionAddress, detachAgentHost, editorWindowOf, isAgentsWindowWorkspace, probeAgentHostToken, registerAgentHostInPlaceOfEntry, registeredAgentHost, registeredAgentsWindowPlan, type RegistrationResult, userSettingsFile, type AgentHostStore, type AttachOutcome, type IssuedAgentHost } from './agent-host.js';
 import { SessionTree, TaskTree, type SessionEntry, type TaskEntry } from './tree.js';
 import { TaskPanels, type TaskPanelHost } from './task-panel.js';
 import { checkOutWorkItemBranch, gitApi } from './checkout.js';
@@ -838,14 +838,29 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
   }
 
   private async registerAgentHost(target: UnfoldClient, address: string): Promise<AttachOutcome | undefined> {
-    const token = await this.reusableAgentHostToken(target, address);
+    const key = this.agentHostKey(target);
+    const outcome = await registerAgentHostInPlaceOfEntry({
+      store: () => this.agentHostStore(),
+      address,
+      storedToken: await this.context.secrets.get(key),
+      probe: token => probeAgentHostToken(address, token),
+      mint: () => this.mintAgentHostToken(target),
+      remember: token => this.context.secrets.store(key, token),
+      retire: token => this.retireAgentHostToken(target, token),
+      register: token => this.registerAgentHostWith(target, address, token),
+    });
+    if (outcome.result === 'unavailable') { this.unregisterAgentHost(); void this.noticeProposalsOff(); return undefined; }
+    return { status: outcome.result === 'unchanged' ? 'unchanged' : 'attached', minted: outcome.minted, registered: true };
+  }
+
+  private registerAgentHostWith(target: UnfoldClient, address: string, token: string): RegistrationResult {
     const current = this.agentHostRegistration;
-    if (current && current.origin === target.origin && current.address === address && current.token === token) return { status: 'unchanged', minted: false, registered: true };
+    if (current && current.origin === target.origin && current.address === address && current.token === token) return 'unchanged';
     const registration = this.proposals.use('remoteAgentHost', () => vscode.chat.registerRemoteAgentHost(registeredAgentHost(address, token)));
-    if (!registration) { this.unregisterAgentHost(); void this.noticeProposalsOff(); return undefined; }
+    if (!registration) return 'unavailable';
     current?.registration.dispose();
     this.agentHostRegistration = { origin: target.origin, address, token, registration };
-    return { status: 'attached', minted: false, registered: true };
+    return 'registered';
   }
 
   private unregisterAgentHost(): void {
@@ -982,11 +997,11 @@ class Workbench implements vscode.Disposable, PanelHost, TaskPanelHost {
       if (error instanceof ApiError && error.status === 404) throw new Error(subject.kind === 'work-items' ? 'This Work Item has no session in your Agents window: Ploeg does not show it to you there, or an Unfold session drives it.' : 'This session is not in your Agents window, or your account cannot see it.');
       throw error;
     }
-    let entries;
     const registered = this.agentHostRegistration?.origin === target.origin ? this.agentHostRegistration : undefined;
-    try { entries = registered ? [{ address: registered.address, name: 'Unfold' }] : await this.agentHostStore().read(); }
+    const build = (options: { protocol: string; session: string; address: string; registered?: boolean }) => this.core.agentsWindowSessionLink(options);
+    let plan;
+    try { plan = registered ? registeredAgentsWindowPlan(view, registered.address, vscode.env.uriScheme, build) : agentsWindowPlan(view, await this.agentHostStore().read(), vscode.env.uriScheme, build); }
     catch (error) { if (error instanceof SettingsFileError) { await this.settingsFileProblem(target, error); return; } throw error; }
-    const plan = agentsWindowPlan(view, entries, vscode.env.uriScheme, options => this.core.agentsWindowSessionLink(options));
     if (plan.kind === 'unusable') throw new Error('The workbench returned a session the Agents window cannot open.');
     if (plan.kind === 'token-in-address') throw new Error(`Your chat.remoteAgentHosts entry for ${plan.address} has its connection token in the address. A link to it would carry the token, so none is opened. Move the token to the entry's connectionToken, or run Unfold: Connect VS Code Agents Window.`);
     if (plan.kind === 'connect') {

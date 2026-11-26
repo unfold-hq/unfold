@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { agentHostAuthority, carriesConnectionToken, agentsWindowSessionLink, agentsWindowSessionLinks, normalizedAgentHostAddress, parseSessionUri } from '../public/core/agents-window.js';
+import { agentHostAuthority, carriesConnectionToken, agentsWindowSessionLink, agentsWindowSessionLinks, normalizedAgentHostAddress, parseSessionUri, registeredAgentHostAddress } from '../public/core/agents-window.js';
 
 const hex = text => `hex-${Buffer.from(text, 'utf8').toString('hex')}`;
 
@@ -49,4 +49,20 @@ test('an address that carries a connection token never becomes a link, because V
     assert.equal(agentsWindowSessionLink({ session: 'ahp-session:/s1', address }), '', address);
   }
   assert.equal(carriesConnectionToken('wss://unfold.example'), false);
+});
+
+test('a registered host is keyed on the address as VS Code 1.148 canonicalises it, and its link names that address', () => {
+  assert.equal(registeredAgentHostAddress('https://Unfold.Example/'), 'wss://unfold.example');
+  assert.equal(registeredAgentHostAddress('wss://unfold.example:443/?tkn=secret'), 'wss://unfold.example');
+  assert.equal(registeredAgentHostAddress('http://127.0.0.1:4080/'), '127.0.0.1:4080');
+  assert.equal(registeredAgentHostAddress('ws://localhost:80'), 'localhost');
+  assert.equal(registeredAgentHostAddress('localhost:8081'), 'localhost:8081');
+  assert.equal(registeredAgentHostAddress('wss://unfold.example/ahp/?a=1&tkn=x'), 'wss://unfold.example/ahp/?a=1');
+  assert.equal(registeredAgentHostAddress('ftp://unfold.example'), '');
+  assert.equal(registeredAgentHostAddress(''), '');
+  assert.equal(registeredAgentHostAddress(registeredAgentHostAddress('https://Unfold.Example:443/')), 'wss://unfold.example', 'canonicalising twice changes nothing');
+  assert.equal(agentsWindowSessionLink({ session: 'ahp-session:/s1', address: 'https://Unfold.Example/', registered: true }), `vscode://agents/agent-host-session/ahp-session/s1?connectionAuthority=${hex('wss://unfold.example')}`);
+  assert.equal(agentsWindowSessionLink({ session: 'ahp-session:/s1', address: 'http://127.0.0.1:4080/', registered: true }), 'vscode://agents/agent-host-session/ahp-session/s1?connectionAuthority=127.0.0.1__4080');
+  assert.equal(agentsWindowSessionLink({ session: 'ahp-session:/s1', address: 'wss://unfold.example/?tkn=secret', registered: true }), `vscode://agents/agent-host-session/ahp-session/s1?connectionAuthority=${hex('wss://unfold.example')}`, 'VS Code drops the token from a registered address, so the link never holds it');
+  assert.equal(agentsWindowSessionLink({ session: 'ahp-session:/s1', address: 'wss://unfold.example/?tkn=secret' }), '', 'a settings entry keeps its token in the address, so it gives no link');
 });
