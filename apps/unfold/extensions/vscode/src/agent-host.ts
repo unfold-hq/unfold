@@ -346,6 +346,47 @@ export async function attachAgentHost(request: AttachRequest): Promise<AttachOut
   return { status: 'attached', minted: !reusable };
 }
 
+/** What VS Code did with a registration: registered it, already had it with this token, or refused the proposal. */
+export type RegistrationResult = 'registered' | 'unchanged' | 'unavailable';
+
+export type RegisterRequest = {
+  store(): AgentHostStore;
+  address: string;
+  storedToken: string | undefined;
+  probe(token: string): Promise<TokenProbe>;
+  mint(): Promise<IssuedAgentHost>;
+  remember(token: string): PromiseLike<void>;
+  retire(token: string): Promise<void>;
+  register(token: string): RegistrationResult;
+};
+
+export type RegisterOutcome = { result: RegistrationResult; minted: boolean; removedEntry: boolean };
+
+async function issuedEntryOf(request: RegisterRequest): Promise<AgentHostEntry | undefined> {
+  if (!request.storedToken) return undefined;
+  try { return (await request.store().read())?.find(item => sameHost(item, request.address) && item.connectionToken === request.storedToken); }
+  catch { return undefined; }
+}
+
+/**
+ * Registers the host through the `remoteAgentHost` proposal in place of a `chat.remoteAgentHosts` entry. When this editor wrote
+ * an entry for the host earlier, its token sat in `settings.json`: the registration gets a new token, and only once VS Code
+ * accepted it is that entry removed and its token retired. Entries this editor did not write stay. A registration VS Code
+ * refuses retires the token minted for it and leaves the entry and the stored token as they were.
+ */
+export async function registerAgentHostInPlaceOfEntry(request: RegisterRequest): Promise<RegisterOutcome> {
+  const written = await issuedEntryOf(request);
+  const reusable = request.storedToken && !written && (await request.probe(request.storedToken)) !== 'invalid' ? request.storedToken : undefined;
+  if (reusable) return { result: request.register(reusable), minted: false, removedEntry: false };
+  const issued = await request.mint();
+  const result = request.register(issued.token);
+  if (result === 'unavailable') { await request.retire(issued.token).catch(() => undefined); return { result, minted: false, removedEntry: false }; }
+  await request.remember(issued.token);
+  const removedEntry = written ? await detachAgentHost(request.store(), request.address, request.storedToken).catch(() => false) : false;
+  if (request.storedToken) await request.retire(request.storedToken).catch(() => undefined);
+  return { result, minted: true, removedEntry };
+}
+
 /** Removes the entry only when it carries the token this editor issued; an entry pasted from elsewhere stays. */
 export async function detachAgentHost(store: AgentHostStore, address: string, issuedToken: string | undefined): Promise<boolean> {
   if (!issuedToken) return false;
@@ -365,13 +406,18 @@ export type AgentsWindowState =
 
 const agentsWindowClient = 'vscode-agents-window';
 
+/** The client name of a VS Code 1.148 editor window that dials a host its extension registered. */
+const editorWindowClient = 'vscode-editor-window';
+
+const vscodeWindowClients: readonly string[] = [agentsWindowClient, editorWindowClient];
+
 /**
- * Whether a VS Code Agents window is attached with this editor's token. `unknown` means the workbench predates the
- * `attached` list, so nothing can be confirmed either way.
+ * Whether a VS Code window, the Agents window or an editor window, is attached with this editor's token; an Agents window
+ * is preferred. `unknown` means the workbench predates the `attached` list, so nothing can be confirmed either way.
  */
 export function agentsWindowState(attached: readonly AttachedClient[] | undefined, tokenId: string | undefined): AgentsWindowState {
   if (!Array.isArray(attached)) return { status: 'unknown' };
-  const windows = attached.filter(client => client.name === agentsWindowClient);
+  const windows = attached.filter(client => vscodeWindowClients.includes(client.name ?? '')).sort((a, b) => Number(b.name === agentsWindowClient) - Number(a.name === agentsWindowClient));
   const client = windows.find(item => tokenId && item.tokenId === tokenId) ?? (tokenId ? undefined : windows[0]);
   return client ? { status: 'connected', client } : { status: 'not-connected' };
 }
@@ -379,7 +425,7 @@ export function agentsWindowState(attached: readonly AttachedClient[] | undefine
 /** The status bar text, tooltip and command for an Agents window state; undefined hides the item. Once attached, the item starts a session there. */
 export function agentsWindowStatusText(state: AgentsWindowState, host: string): { text: string; tooltip: string; command: string } | undefined {
   if (state.status === 'unknown') return undefined;
-  if (state.status === 'connected') return { text: '$(unfold-mark) Start an Unfold session', tooltip: `Start an Unfold session in the Agents window. The Agents window is attached to Unfold at ${host}${state.client.version ? ` (VS Code ${state.client.version})` : ''}.`, command: 'unfold.startInAgentsWindow' };
+  if (state.status === 'connected') return { text: '$(unfold-mark) Start an Unfold session', tooltip: `Start an Unfold session in the Agents window. ${state.client.name === editorWindowClient ? 'A VS Code editor window' : 'The Agents window'} is attached to Unfold at ${host}${state.client.version ? ` (VS Code ${state.client.version})` : ''}.`, command: 'unfold.startInAgentsWindow' };
   return { text: '$(debug-disconnect) Unfold · Agents window not connected', tooltip: `No Agents window is attached to Unfold at ${host} with this editor's token. Click to troubleshoot.`, command: 'unfold.agentsWindowStatus' };
 }
 
@@ -432,11 +478,19 @@ export type AgentsWindowPlan =
  * the token into the authority and so into the link, so it opens nothing until the token moves to `connectionToken`. `build` is the shared link builder
  * (`public/core/agents-window.js`), `protocol` this editor's `vscode.env.uriScheme`.
  */
-export function agentsWindowPlan(view: AgentsWindowLinkView, entries: readonly AgentHostEntry[] | undefined, protocol: string, build: (options: { protocol: string; session: string; address: string }) => string): AgentsWindowPlan {
+export type SessionLinkBuilder = (options: { protocol: string; session: string; address: string; registered?: boolean }) => string;
+
+export function agentsWindowPlan(view: AgentsWindowLinkView, entries: readonly AgentHostEntry[] | undefined, protocol: string, build: SessionLinkBuilder): AgentsWindowPlan {
   const entry = agentHostEntry(entries, view.address);
   if (!entry?.address) return { kind: 'connect' };
   if (/[?&#]tkn=/i.test(entry.address)) return { kind: 'token-in-address', address: agentHostAddressKey(entry.address) ?? '' };
   const url = build({ protocol, session: view.session, address: entry.address });
+  return url ? { kind: 'open', url, attached: view.attached } : { kind: 'unusable' };
+}
+
+/** What opening a session does for a host this editor registered through the `remoteAgentHost` proposal: VS Code keys that host on the registered address as it canonicalises it, so the link does too. */
+export function registeredAgentsWindowPlan(view: AgentsWindowLinkView, registeredAddress: string, protocol: string, build: SessionLinkBuilder): AgentsWindowPlan {
+  const url = build({ protocol, session: view.session, address: registeredAddress, registered: true });
   return url ? { kind: 'open', url, attached: view.attached } : { kind: 'unusable' };
 }
 

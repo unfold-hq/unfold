@@ -31,6 +31,8 @@ test('Stable VS Code grants nothing to the Insiders build, so every declared par
   assert.match(notice, /code-insiders --enable-proposed-api unfold-hq\.unfold-workbench-insiders/);
   assert.match(notice, /The Agents window without editing settings\.json \(remoteAgentHost\)/);
   assert.match(notice, /argv\.json/);
+  assert.doesNotMatch(notice, /only in VS Code Insiders/, 'VS Code honours --enable-proposed-api in Stable too');
+  assert.match(notice, /--enable-proposed-api unfold-hq\.unfold-workbench-insiders, in Insiders .* and in Stable alike/);
 });
 
 test('a call VS Code refuses turns that part off and falls back, without throwing', () => {

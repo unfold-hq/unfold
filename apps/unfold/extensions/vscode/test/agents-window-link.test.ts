@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { agentsWindowPlan, agentsWindowSubject, type AgentsWindowLinkView } from '../src/agent-host.ts';
+import { agentsWindowPlan, agentsWindowSubject, registeredAgentsWindowPlan, type AgentsWindowLinkView } from '../src/agent-host.ts';
 import { loadCore } from '../src/core.ts';
 import { agentsWindowSessionLink } from '../../../public/core/agents-window.js';
 
@@ -27,6 +27,13 @@ test('the link names the host as this person\'s own chat.remoteAgentHosts entry 
   assert.deepEqual(legacy, { kind: 'open', attached: false, url: 'vscode://agents/agent-host-session/unfold/wi-205?connectionAuthority=127.0.0.1__4080' }, 'the 1.141 spelling and a ws:// host');
   const options = { protocol: 'vscode', session: 'ahp-session:/s1', address: 'wss://unfold.example' };
   assert.equal(core.agentsWindowSessionLink(options), agentsWindowSessionLink(options), 'the extension builds links with the browser\'s own module');
+});
+
+test('for a host this editor registered, the link names the address as VS Code 1.148 canonicalises it', () => {
+  const plan = registeredAgentsWindowPlan(view(), 'https://Unfold.Example/', 'vscode-insiders', core.agentsWindowSessionLink);
+  assert.deepEqual(plan, { kind: 'open', attached: true, url: `vscode-insiders://agents/agent-host-session/ahp-session/s1?connectionAuthority=${hex('wss://unfold.example')}` });
+  assert.deepEqual(registeredAgentsWindowPlan(view(), 'http://127.0.0.1:4080/', 'vscode', core.agentsWindowSessionLink), { kind: 'open', attached: true, url: 'vscode://agents/agent-host-session/ahp-session/s1?connectionAuthority=127.0.0.1__4080' });
+  assert.deepEqual(registeredAgentsWindowPlan(view({ session: 'copilotcli:/s1' }), 'wss://unfold.example', 'vscode', core.agentsWindowSessionLink), { kind: 'unusable' });
 });
 
 test('without this host in the settings the person connects first, and an unusable session opens nothing', () => {

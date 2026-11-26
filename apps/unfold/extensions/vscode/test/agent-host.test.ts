@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   SettingsFileError, agentHostStore, agentHostTokenId, agentsWindowFolder, agentsWindowState, agentsWindowStatusText, foldersByLastPick, attachAgentHost, connectionAddress, detachAgentHost, editSetting, editorWindowOf, fileStore, hasAgentHost, isAgentsWindowWorkspace,
-  agentHostsSyncIgnored, isUnfoldAgentHostName, probeAgentHostToken, userSettingsFile, withAgentHost, withAgentHostNames, withAgentHostsSyncIgnored, withoutIssuedAgentHost,
-  type AgentHostEntry, type AgentHostStore, type AttachRequest, type SettingsConfiguration, type TokenProbe,
+  agentHostsSyncIgnored, isUnfoldAgentHostName, probeAgentHostToken, registerAgentHostInPlaceOfEntry, userSettingsFile, withAgentHost, withAgentHostNames, withAgentHostsSyncIgnored, withoutIssuedAgentHost,
+  type AgentHostEntry, type AgentHostStore, type AttachRequest, type RegisterRequest, type RegistrationResult, type SettingsConfiguration, type TokenProbe,
 } from '../src/agent-host.ts';
 
 const address = 'wss://unfold.example';
@@ -349,4 +349,74 @@ test('the Agents window is recognised by the workspace file VS Code opens in it,
   assert.equal(isAgentsWindowWorkspace({ scheme: 'file', path: '/home/ryan/projects/unfold.code-workspace' }), false);
   assert.equal(isAgentsWindowWorkspace({ scheme: 'untitled', path: '/agent-sessions.code-workspace' }), false, 'an untitled workspace is an editor window');
   assert.equal(isAgentsWindowWorkspace({ scheme: 'file', path: '/home/ryan/agent-sessions.code-workspace.bak' }), false);
+});
+
+function registerRequest(store: AgentHostStore, overrides: Partial<RegisterRequest> & { probed?: TokenProbe; result?: RegistrationResult } = {}) {
+  const calls = { minted: 0, remembered: [] as string[], probed: [] as string[], retired: [] as string[], registered: [] as string[], order: [] as string[] };
+  const request: RegisterRequest = {
+    store: () => store,
+    address,
+    storedToken: undefined,
+    probe: async token => { calls.probed.push(token); return overrides.probed ?? 'valid'; },
+    mint: async () => { calls.minted++; return { token: `minted-${calls.minted}`, entry: { address, name: 'Unfold', connectionToken: `minted-${calls.minted}` } }; },
+    remember: async token => { calls.remembered.push(token); calls.order.push(`remember ${token}`); },
+    retire: async token => { calls.retired.push(token); calls.order.push(`retire ${token}`); },
+    register: token => { calls.registered.push(token); calls.order.push(`register ${token}`); return overrides.result ?? 'registered'; },
+    ...overrides,
+  };
+  return { request, calls };
+}
+
+test('once VS Code registers the host, the settings entry this editor wrote is removed and its token retired, and other entries stay', async t => {
+  const path = join(await folder(t), 'settings.json');
+  const mine = { address, name: 'Unfold', connectionToken: 'written' };
+  const pasted = { address, name: 'Unfold', connectionToken: 'pasted-elsewhere' };
+  const other = { address: 'ws://other', name: 'Other', connectionToken: 'kept' };
+  await writeFile(path, JSON.stringify({ 'chat.remoteAgentHosts': [other, mine] }));
+  const { request, calls } = registerRequest(fileStore(path), { storedToken: 'written' });
+  assert.deepEqual(await registerAgentHostInPlaceOfEntry(request), { result: 'registered', minted: true, removedEntry: true });
+  assert.deepEqual(calls.order, ['register minted-1', 'remember minted-1', 'retire written'], 'the token that sat in settings.json is retired only after the registration took a new one');
+  assert.deepEqual(calls.probed, [], 'a token that sat in settings.json is not reused');
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8'))['chat.remoteAgentHosts'], [other]);
+  await writeFile(path, JSON.stringify({ 'chat.remoteAgentHosts': [other, pasted] }));
+  const again = registerRequest(fileStore(path), { storedToken: 'minted-1' });
+  assert.deepEqual(await registerAgentHostInPlaceOfEntry(again.request), { result: 'registered', minted: false, removedEntry: false });
+  assert.deepEqual(again.calls.retired, []);
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8'))['chat.remoteAgentHosts'], [other, pasted], 'an entry with a token this editor did not issue is the person\'s');
+});
+
+test('a registration VS Code refuses retires the token minted for it and leaves the settings entry and the stored token', async t => {
+  const path = join(await folder(t), 'settings.json');
+  const mine = { address, name: 'Unfold', connectionToken: 'written' };
+  await writeFile(path, JSON.stringify({ 'chat.remoteAgentHosts': [mine] }));
+  const { request, calls } = registerRequest(fileStore(path), { storedToken: 'written', result: 'unavailable' });
+  assert.deepEqual(await registerAgentHostInPlaceOfEntry(request), { result: 'unavailable', minted: false, removedEntry: false });
+  assert.deepEqual(calls.retired, ['minted-1']);
+  assert.deepEqual(calls.remembered, []);
+  assert.deepEqual(JSON.parse(await readFile(path, 'utf8'))['chat.remoteAgentHosts'], [mine]);
+});
+
+test('without a settings entry the stored token is registered again, and an unreadable settings file does not stop the registration', async t => {
+  const path = join(await folder(t), 'settings.json');
+  const reused = registerRequest(fileStore(path), { storedToken: 'stored', result: 'unchanged' });
+  assert.deepEqual(await registerAgentHostInPlaceOfEntry(reused.request), { result: 'unchanged', minted: false, removedEntry: false });
+  assert.deepEqual(reused.calls.registered, ['stored']);
+  const rejected = registerRequest(fileStore(path), { storedToken: 'stored', probed: 'invalid' });
+  assert.deepEqual(await registerAgentHostInPlaceOfEntry(rejected.request), { result: 'registered', minted: true, removedEntry: false });
+  assert.deepEqual(rejected.calls.order, ['register minted-1', 'remember minted-1', 'retire stored']);
+  await writeFile(path, '{ not json');
+  const unreadable = registerRequest(fileStore(path), { storedToken: 'stored' });
+  assert.deepEqual(await registerAgentHostInPlaceOfEntry(unreadable.request), { result: 'registered', minted: false, removedEntry: false });
+  assert.equal(await readFile(path, 'utf8'), '{ not json');
+});
+
+test('an editor window VS Code 1.148 connects to a registered host counts as attached, and an Agents window is preferred', () => {
+  const mine = agentHostTokenId('mine');
+  const editor = { name: 'vscode-editor-window', version: '1.148.0', connectedAt: '2026-11-26T12:00:00.000Z', tokenId: mine };
+  const agents = { ...editor, name: 'vscode-agents-window' };
+  assert.deepEqual(agentsWindowState([editor], mine), { status: 'connected', client: editor });
+  assert.deepEqual(agentsWindowState([editor, agents], mine), { status: 'connected', client: agents });
+  assert.deepEqual(agentsWindowState([{ ...editor, tokenId: agentHostTokenId('laptop') }], mine), { status: 'not-connected' });
+  assert.match(agentsWindowStatusText({ status: 'connected', client: editor }, 'unfold.example')!.tooltip, /A VS Code editor window is attached to Unfold at unfold\.example \(VS Code 1\.148\.0\)/);
+  assert.match(agentsWindowStatusText({ status: 'connected', client: agents }, 'unfold.example')!.tooltip, /The Agents window is attached/);
 });
