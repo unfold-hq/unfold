@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { application, configuration, login, request } from './api-support.ts';
 import { action, connect, defaultChatOf, vscodeAgentsWindow, type Json } from './ahp-support.ts';
-import { repositoriesDirectory } from '../src/ahp/host.ts';
+import { authenticateRefusal, repositoriesDirectory } from '../src/ahp/host.ts';
 import { acceptSessionConfig, noRepositoryRefusal, repositoryFolderNames, resolveSessionConfig, sessionConfigState, startedConfigChange } from '../src/ahp/session-config.ts';
 import { testTimeout } from './timeframes.ts';
 import type { AgentRuntime, AppConfig, RuntimeKind, Session } from '../src/types.ts';
@@ -123,7 +125,7 @@ test('a folderless quick chat, also as N Compare Models drafts, is refused with 
   assert.equal((await client.rpc('subscribe', { channel: session })).snapshot.state.config.values.repository, 'order-service', 'picking the folder is enough');
 });
 
-test('authenticate with an MCP server target, and a changeset review carrying nonce and isEditing, are taken without a refusal', { timeout: testTimeout(60_000) }, async t => {
+test('authenticate with an MCP server target is refused because the host advertises no protected resource, and a changeset review carrying nonce and isEditing is taken without a refusal', { timeout: testTimeout(60_000) }, async t => {
   const { client, dispatch } = await attached(t);
   const id = randomUUID();
   const session = `ahp-session:/${id}`;
@@ -131,7 +133,7 @@ test('authenticate with an MCP server target, and a changeset review carrying no
   await client.rpc('createSession', { channel: session, provider: 'unfold', workingDirectories: [picked], config: { team: 'delivery', budgetUsd: '1' } });
   await client.rpc('subscribe', { channel: session });
   await client.rpc('subscribe', { channel: chat });
-  assert.deepEqual(await client.rpc('authenticate', { channel: 'ahp-root://', resource: 'https://mcp.example.test', token: 'opaque', target: { kind: 'mcpServer', session, customizationId: 'mcp-1' } }), {});
+  await assert.rejects(client.rpc('authenticate', { channel: 'ahp-root://', resource: 'https://mcp.example.test', token: 'opaque', target: { kind: 'mcpServer', session, customizationId: 'mcp-1' } }), (error: Json) => error.code === -32602 && error.message === authenticateRefusal);
   const started = await dispatch(chat, { type: 'chat/turnStarted', turnId: randomUUID(), startedAt: new Date().toISOString(), message: { text: objective, origin: { kind: 'user' } } });
   assert.equal(started.params.rejectionReason, undefined, started.params.rejectionReason);
   const changeset = `ahp-changeset:/${id}`;
@@ -140,6 +142,23 @@ test('authenticate with an MCP server target, and a changeset review carrying no
   assert.equal(reviewed.params.rejectionReason, undefined, reviewed.params.rejectionReason);
   assert.equal(reviewed.params.action.type, 'changeset/filesReviewChanged');
   assert.ok(action(reviewed, changeset, 'changeset/filesReviewChanged'));
+});
+
+test('authenticate carrying an ID token and an account is refused, and none of the token, the ID token or the account is logged or stored', { timeout: testTimeout(60_000) }, async t => {
+  const { server, client } = await attached(t);
+  const secrets = { token: `access-${randomUUID()}`, idToken: `eyJ${randomUUID()}.id-token`, accountId: `account-${randomUUID()}` };
+  const logged: string[] = [];
+  for (const method of ['log', 'info', 'warn', 'error'] as const) t.mock.method(console, method, (...line: unknown[]) => { logged.push(line.map(String).join(' ')); });
+  for (const resource of ['https://mcp.example.test', 'https://unfold.example.test']) {
+    await assert.rejects(client.rpc('authenticate', { channel: 'ahp-root://', resource, ...secrets }), (error: Json) => error.code === -32602 && error.message === authenticateRefusal, `${resource} was never advertised`);
+  }
+  assert.deepEqual(await client.rpc('ping', {}), {}, 'the connection stays open');
+  t.mock.restoreAll();
+  const stored = await Promise.all((await readdir(server.config.dataDir, { recursive: true, withFileTypes: true })).filter(entry => entry.isFile()).map(entry => readFile(join(entry.parentPath, entry.name))));
+  for (const [name, value] of Object.entries(secrets)) {
+    assert.ok(!logged.some(line => line.includes(value)), `${name} is not logged`);
+    assert.ok(!stored.some(content => content.includes(value)), `${name} is not stored`);
+  }
 });
 
 test('the no-repository refusal names the folders to pick, at most three, and points to the chat when there are none', () => {
