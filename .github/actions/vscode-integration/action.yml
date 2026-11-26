@@ -1,0 +1,25 @@
+name: Run the VS Code extension in a real VS Code
+description: Package both VSIX builds and run the regular one in VS Code Stable and the Insiders one in VS Code Insiders, each the current release @vscode/test-electron downloads, against the deterministic demo, headless
+inputs:
+  targets:
+    description: The VS Code builds to run in, as UNFOLD_VSCODE_TARGETS reads them
+    default: stable,insiders
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+      with:
+        version: 2026.10.25
+        install_args: node
+        cache: false
+    - name: Install Unfold's and the extension's packages
+      shell: bash
+      run: |
+        mise trust apps/unfold/mise.toml
+        mise -C apps/unfold exec -- npm ci --no-audit --no-fund
+        mise -C apps/unfold exec -- npm ci --no-audit --no-fund --prefix extensions/vscode
+    - name: Run the extension in VS Code against the deterministic demo, headless
+      shell: bash
+      env:
+        UNFOLD_VSCODE_TARGETS: ${{ inputs.targets }}
+      run: xvfb-run -a mise run vscode-integration
