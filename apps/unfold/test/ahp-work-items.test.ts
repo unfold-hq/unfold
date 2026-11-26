@@ -1438,3 +1438,17 @@ test('a Round that finishes between two reads reports its usage before the turn 
   assert.equal(chat[usage + 1].type, 'chat/turnComplete');
   assert.equal(chat.filter(action => action.type === 'chat/usage').length, 1, 'the Round still running reports none');
 });
+
+test('an initialize while Ploeg cannot be read leaves the Work Item channels out, answers with the root snapshot, and announces no removal', { timeout: testTimeout(20_000) }, async t => {
+  const f = await fixture(t);
+  await f.attach('op-1');
+  f.state.down = true;
+  const client = connect(`${f.server.url.replace(/^http/, 'ws')}/?tkn=${f.host.issueToken({ id: 'op-1', name: 'op-1', role: 'operator' })}`);
+  t.after(() => client.close());
+  await client.open;
+  const session = 'unfold:/wi-202';
+  const initialized = await client.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['0.9.0'], clientId: `op-1-${randomBytes(3).toString('hex')}`, clientInfo: { name: 'vscode-agents-window' }, initialSubscriptions: ['ahp-root://', session, defaultChatOf(session)] });
+  assert.deepEqual(initialized.snapshots.map((snapshot: Json) => snapshot.resource), ['ahp-root://']);
+  await settled(client);
+  assert.ok(!client.inbox.some(message => message.method === 'root/sessionRemoved'), 'a Work Item Ploeg cannot read now is not gone');
+});

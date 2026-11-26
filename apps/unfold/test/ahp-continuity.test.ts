@@ -95,6 +95,53 @@ test('across a restart serverSeq keeps rising, a client reconnects with its pre-
   assert.deepEqual(state.activeClients, [], 'the removal is kept across the next restart');
 });
 
+test('a reconnect or initialize after a restart that names a provisional session the host lost answers with the other snapshots and tells the client the session is gone', { timeout: testTimeout(90_000) }, async t => {
+  const server = await application();
+  t.after(() => server.close());
+  const token = (await request(server.url, '/api/agent-host/tokens', { method: 'POST', body: { label: 'lost channel' } })).body.token;
+  const clientId = randomUUID();
+  const first = await attach(server, t, token);
+  await first.rpc('initialize', initialize(clientId));
+  const session = `ahp-session:/${randomUUID()}`;
+  const chat = defaultChatOf(session);
+  await first.rpc('createSession', { channel: session, provider: 'unfold', config: { repository: 'order-service', team: 'delivery', budgetUsd: 1, title: 'Composing' } });
+  await first.rpc('subscribe', { channel: session });
+  await first.rpc('subscribe', { channel: chat });
+  first.close();
+  await server.restart();
+
+  const logged: string[] = [];
+  const log = t.mock.method(console, 'error', (line: unknown) => { logged.push(String(line)); });
+  const resumed = await attach(server, t, token);
+  const result = await resumed.rpc('reconnect', { channel: 'ahp-root://', clientId, lastSeenServerSeq: 0, subscriptions: ['ahp-root://', session, chat], _meta: { 'vscode.ahpSessionUris': true } });
+  assert.equal(result.type, 'snapshot');
+  assert.deepEqual(result.snapshots.map((snapshot: Json) => snapshot.resource), ['ahp-root://'], 'the lost channels are left out of the snapshots');
+  const notices = async (client: Awaited<ReturnType<typeof attach>>) => { await client.rpc('ping', {}); return client.inbox.filter(message => message.method === 'root/sessionRemoved').map(message => message.params); };
+  assert.deepEqual(await notices(resumed), [{ channel: 'ahp-root://', session }], 'the client hears once that the session is gone');
+  await assert.rejects(resumed.rpc('subscribe', { channel: session }), (error: any) => error.code === -32001, 'the lost session stays lost');
+
+  const fresh = await attach(server, t, token);
+  const initialized = await fresh.rpc('initialize', initialize(randomUUID(), { initialSubscriptions: ['ahp-root://', session, chat] }));
+  assert.deepEqual(initialized.snapshots.map((snapshot: Json) => snapshot.resource), ['ahp-root://']);
+  assert.deepEqual(await notices(fresh), [{ channel: 'ahp-root://', session }]);
+  log.mock.restore();
+  const unanswered = logged.map(line => { try { return JSON.parse(line); } catch { return undefined; } }).filter(entry => entry?.event === 'agent_host.unanswered_request');
+  assert.deepEqual(unanswered.filter(entry => entry.method === 'reconnect').map(entry => entry.path), [session, chat], 'each dropped channel is logged by its path');
+  assert.ok(!logged.some(line => line.includes(token)), 'no token is logged');
+
+  server.app.store.addUser({ id: 'bob-lost', name: 'bob-lost', role: 'operator', passwordHash: 'unused' });
+  const owned = `ahp-session:/${randomUUID()}`;
+  await fresh.rpc('createSession', { channel: owned, provider: 'unfold', config: { repository: 'order-service', team: 'delivery', budgetUsd: 1, title: 'Not Bob\'s' } });
+  const bob = connect(`${server.url.replace(/^http/, 'ws')}/?tkn=${server.app.agentHost.issueToken({ id: 'bob-lost', name: 'bob-lost', role: 'operator' })}`);
+  t.after(() => bob.close());
+  await bob.open;
+  const bobs = await bob.rpc('initialize', initialize(randomUUID(), { initialSubscriptions: ['ahp-root://', owned, defaultChatOf(owned)] }));
+  assert.deepEqual(bobs.snapshots.map((snapshot: Json) => snapshot.resource), ['ahp-root://'], 'another person\'s session never produces a snapshot');
+  assert.ok(!JSON.stringify(bobs).includes('Not Bob'), 'nor any of its state');
+  assert.deepEqual(await notices(bob), [{ channel: 'ahp-root://', session: owned }], 'he hears only what an error would have told him');
+  await assert.rejects(bob.rpc('subscribe', { channel: owned }), (error: any) => error.code === -32001);
+});
+
 test('disposing a session drops its projection, summary and active clients', { timeout: testTimeout(60_000) }, async t => {
   const server = await application();
   t.after(() => server.close());
