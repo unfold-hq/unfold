@@ -485,6 +485,21 @@ test('read and archived marks belong to the person who set them, survive summary
   assert.equal(await statusOf(await attach('admin', 'test-admin-password-314159')) & (read | archived), 0);
 });
 
+test('initialize names the host Unfold with its release version, and the demo says it is one', { timeout: testTimeout(30_000) }, async t => {
+  const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  for (const mode of ['live', 'demo'] as const) {
+    const server = await application(mode);
+    t.after(() => server.close());
+    const cookie = mode === 'live' ? (await login(server.url)).cookie : undefined;
+    const issued = await request(server.url, '/api/agent-host/tokens', { method: 'POST', cookie, body: { label: `server info ${mode}` } });
+    const client = connect(`${server.url.replace(/^http/, 'ws')}/?tkn=${issued.body.token}`);
+    t.after(() => client.close());
+    await client.open;
+    const initialized = await client.rpc('initialize', { channel: 'ahp-root://', protocolVersions: ['1.0.0', '0.9.0'], clientId: randomUUID(), clientInfo: vscodeAgentsWindow, initialSubscriptions: ['ahp-root://'] });
+    assert.deepEqual(initialized.serverInfo, { name: 'unfold', title: mode === 'demo' ? 'Unfold demo' : 'Unfold', version }, `VS Code's Troubleshoot page reads "Server version ${initialized.serverInfo.title} ${version}"`);
+  }
+});
+
 test('the host answers VS Code\'s getNetworkDiagnosticsInfo with its version, platform and architecture and no account', async t => {
   const server = await application();
   t.after(() => server.close());
