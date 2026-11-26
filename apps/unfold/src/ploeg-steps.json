@@ -12,56 +12,56 @@
       "stage": 2,
       "record": "Ploeg ADR-0195",
       "read": "forge-connections",
-      "release": null
+      "release": "0.2.0-rc.112"
     },
     {
       "id": "connect-gitlab",
       "stage": 2,
-      "record": "Ploeg ADR-0195",
+      "record": "Ploeg ADR-0203",
       "read": "forge-connections",
-      "release": null
+      "release": "0.2.0-rc.131"
     },
     {
       "id": "connect-gitlab-service-account",
       "stage": 2,
-      "record": "the release after 0.2.0-rc.130 that includes ploeg-hq/ploeg#464",
+      "record": "Ploeg ADR-0203",
       "read": null,
-      "release": null
+      "release": "0.2.0-rc.131"
     },
     {
       "id": "register-repositories",
       "stage": 3,
       "record": "Ploeg ADR-0193",
       "read": "targets",
-      "release": null
+      "release": "0.2.0-rc.115"
     },
     {
       "id": "connect-clickup",
       "stage": 4,
       "record": "Ploeg ADR-0195",
       "read": "tracker-connections",
-      "release": null
+      "release": "0.2.0-rc.112"
     },
     {
       "id": "read-scopes",
       "stage": 5,
       "record": "Ploeg ADR-0196",
       "read": null,
-      "release": null
+      "release": "0.2.0-rc.111"
     },
     {
       "id": "prepare-repository",
       "stage": 7,
       "record": "Ploeg ADR-0194",
       "read": null,
-      "release": null
+      "release": "0.2.0-rc.113"
     },
     {
       "id": "bind-lists",
       "stage": 9,
       "record": "Ploeg ADR-0186",
       "read": "tracker-bindings",
-      "release": null
+      "release": "0.2.0-rc.114"
     },
     {
       "id": "connect-claude",
@@ -80,8 +80,8 @@
     "forgeName": "GitLab",
     "instance": "gitlab",
     "mint": {
-      "record": "the release after 0.2.0-rc.130 that includes ploeg-hq/ploeg#464",
-      "release": null
+      "record": "Ploeg ADR-0203",
+      "release": "0.2.0-rc.131"
     }
   }
 }

@@ -18,7 +18,6 @@ const admin: User = { id: 'admin-1', name: 'Ada Admin', role: 'admin' };
 const operator: User = { id: 'op-1', name: 'Op', role: 'operator' };
 const clock = () => new Date('2026-11-18T10:00:00.000Z');
 const at = '2026-11-18T09:00:00.000Z';
-const servedSteps = { ...ploegSteps, steps: ploegSteps.steps.map(step => step.id === 'prepare-repository' ? { ...step, release: '0.2.0' } : step) };
 
 type Repository = { key: string; owner: string; repo: string; readiness: 'ready' | 'not_ready'; reason: string; prepareAvailable?: boolean };
 type WorkItem = { id: string; state: string; pullRequest: string | null; requestId: string };
@@ -82,7 +81,7 @@ async function fakePloeg(t: TestContext, initial: Partial<Fake> = {}) {
   return { fake, config: { url: `http://127.0.0.1:${address.port}`, tokenEnv: env } };
 }
 
-async function setup(t: TestContext, initial: Partial<Fake> = {}, steps = servedSteps, config: Partial<AppConfig> = {}) {
+async function setup(t: TestContext, initial: Partial<Fake> = {}, pinned = ploegSteps.steps.find(step => step.id === 'prepare-repository')!.release!, config: Partial<AppConfig> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'unfold-prepare-'));
   const store = new Store(join(directory, 'prepare.sqlite'));
   t.after(async () => { try { store.close(); } catch {} await rm(directory, { recursive: true, force: true }); });
@@ -91,7 +90,7 @@ async function setup(t: TestContext, initial: Partial<Fake> = {}, steps = served
   const insight = new InsightService(store, { mode: 'live' } as AppConfig, '9.9.9', clock, { schedule: false });
   t.after(() => insight.stop());
   const build = () => {
-    const onboarding = new Onboarding({ store, ploeg, insight, now: clock, pinned: '0.2.0', steps, config: { repositories: [], taskSources: [], ...config } });
+    const onboarding = new Onboarding({ store, ploeg, insight, now: clock, pinned, config: { repositories: [], taskSources: [], ...config } });
     const prepare = new ReadinessPrepare({ store, ploeg, onboarding, now: clock });
     onboarding.useReadiness(prepare);
     return { onboarding, prepare };
@@ -160,10 +159,10 @@ test('a changed cap asks again and sends nothing; a step Ploeg does not serve is
   await assert.rejects(prepare.start(admin, { target: 'site', team: 'delivery', usd: 20 }), refusedWith(409, 'spend_cap_changed'), 'the button of the old cap is refused');
   await assert.rejects(prepare.start(operator, { target: 'site', team: 'delivery', usd: 25 }), refusedWith(403, 'forbidden'));
   assert.equal(admissions(fake).length, 0);
-  const unserved = await setup(t, {}, ploegSteps);
+  const unserved = await setup(t, {}, '0.2.0-rc.112');
   await assert.rejects(unserved.prepare.start(admin, { target: 'site', team: 'delivery', usd: 20 }), refusedWith(503, 'ploeg_step_unavailable'));
   assert.equal(unserved.fake.posts.length, 0);
-  assert.equal(line((await unserved.onboarding.checklist(admin, true)).stages, 'prepare-repository')?.status, 'unavailable', 'until Ploeg ships ADR-0194 the line stays the S1 refusal');
+  assert.equal(line((await unserved.onboarding.checklist(admin, true)).stages, 'prepare-repository')?.status, 'unavailable', 'below the Ploeg release that ships ADR-0194 the line stays the S1 refusal');
 });
 
 test('a repository Ploeg does not offer, or one that is ready, gets no Work Item', async t => {
@@ -293,7 +292,7 @@ test('without readiness work, stage 8 keeps the connections-read line: green whe
 
 test('a read by someone who does not manage the Tenant follows the Work Item without writing the store or recording an event', async t => {
   const owner: User = { ...admin, memberships: [{ kind: 'tenant', tenant: 'default', role: 'admin' }] } as User;
-  const { store, fake, onboarding, prepare } = await setup(t, {}, servedSteps, { tenancy: { enforce: true } } as Partial<AppConfig>);
+  const { store, fake, onboarding, prepare } = await setup(t, {}, undefined, { tenancy: { enforce: true } } as Partial<AppConfig>);
   await onboarding.confirmCap(owner, { team: 'delivery', usd: 20, period: 'day' });
   await prepare.start(owner, { target: 'site', team: 'delivery', usd: 20 });
   fake.workItems[0].pullRequest = 'https://github.com/acme/site/pull/7';
