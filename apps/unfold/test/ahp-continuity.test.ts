@@ -153,7 +153,7 @@ test('an ended session nobody subscribes to is evicted after the idle period and
   assert.ok(['systemNotification', 'toolCall', 'markdown'].every(kind => kinds.includes(kind)), 'the worst-case history is rebuilt in full');
 });
 
-test('a chat snapshot longer than 200 turns tells the client there are older turns, one of 200 does not, and asking for them answers an empty page', { timeout: testTimeout(60_000) }, async t => {
+test('a chat snapshot longer than 200 turns tells the client there are older turns and one of 200 does not', { timeout: testTimeout(60_000) }, async t => {
   const server = await application();
   t.after(() => server.close());
   const operator = { id: 'demo-operator', name: 'Demo operator', role: 'operator' as const };
@@ -174,7 +174,62 @@ test('a chat snapshot longer than 200 turns tells the client there are older tur
   const whole = (await client.rpc('subscribe', { channel: withTurns(200) })).snapshot.state;
   assert.equal(whole.turns.length, 200);
   assert.equal('turnsNextCursor' in whole, false, 'a whole history names no older turns');
-  assert.deepEqual(await client.rpc('fetchTurns', { channel: withTurns(201), cursor: cut.turnsNextCursor }), {});
+});
+
+test('fetchTurns pages a cut chat back to its first turn before it answers, and refuses a cursor it never gave and another person\'s chat', { timeout: testTimeout(60_000) }, async t => {
+  const server = await application();
+  t.after(() => server.close());
+  const operator = { id: 'demo-operator', name: 'Demo operator', role: 'operator' as const };
+  const created = server.app.engine.create({ title: '450 turns', objective, repositoryId: 'order-service', teamId: 'delivery', runtime: 'demo', budgetUsd: 1 }, operator);
+  server.app.store.saveSession({ ...created, status: 'cancelled', placement: undefined, approval: undefined });
+  for (let index = 1; index < 450; index++) server.app.store.appendEvent(created.id, 'message', 'demo-operator', { role: 'operator', text: `Message ${index}`, turnId: `turn-${index}` });
+  const channel = defaultChatOf(`ahp-session:/${created.id}`);
+  const token = (await request(server.url, '/api/agent-host/tokens', { method: 'POST', body: { label: 'paging' } })).body.token;
+  const client = await attach(server, t, token);
+  await client.rpc('initialize', initialize('paging'));
+
+  const snapshot = (await client.rpc('subscribe', { channel })).snapshot.state;
+  let turns: Json[] = snapshot.turns;
+  let cursor: string | undefined = snapshot.turnsNextCursor;
+  const pages: number[] = [];
+  while (cursor !== undefined) {
+    const before = client.inbox.length;
+    assert.deepEqual(await client.rpc('fetchTurns', { channel, cursor }), {});
+    const loaded = client.inbox.slice(before).filter(message => message.method === 'action' && message.params.action.type === 'chat/turnsLoaded');
+    assert.equal(loaded.length, 1, 'the page reaches the client before the answer');
+    assert.equal(loaded[0].params.channel, channel);
+    const { turns: older, turnsNextCursor } = loaded[0].params.action;
+    const held = new Set(turns.map(turn => turn.id));
+    assert.ok(older.every((turn: Json) => !held.has(turn.id)), 'a page repeats no turn the client holds');
+    pages.push(older.length);
+    turns = [...older, ...turns];
+    cursor = turnsNextCursor;
+    assert.ok(pages.length <= 3, 'the cursor clears at the start of the transcript');
+  }
+  assert.deepEqual(pages, [200, 50]);
+  assert.equal(turns.length, 450);
+  assert.equal(new Set(turns.map(turn => turn.id)).size, 450);
+  assert.deepEqual(turns.slice(1).map(turn => turn.id), Array.from({ length: 449 }, (_, index) => `turn-${index + 1}`), 'the whole history arrives in order');
+  assert.match(JSON.stringify(turns[0]), /rounding regression/, 'the objective is the first turn');
+
+  const before = client.inbox.length;
+  await client.rpc('fetchTurns', { channel, cursor: snapshot.turnsNextCursor, limit: 10 });
+  const limited = client.inbox.slice(before).find(message => message.params?.action?.type === 'chat/turnsLoaded')!.params.action;
+  assert.deepEqual(limited.turns.map((turn: Json) => turn.id), Array.from({ length: 10 }, (_, index) => `turn-${index + 240}`), 'a smaller limit gives a smaller page');
+  assert.equal(limited.turnsNextCursor, 'turn-240');
+
+  await assert.rejects(client.rpc('fetchTurns', { channel, cursor: 'turn-never-given' }), (error: Json) => error.code === -32602, 'a cursor the host never gave is invalid');
+  await assert.rejects(client.rpc('fetchTurns', { channel: `ahp-session:/${created.id}`, cursor: snapshot.turnsNextCursor }), (error: Json) => error.code === -32602, 'only a chat has turns');
+  assert.deepEqual(await client.rpc('fetchTurns', { channel }), {}, 'without a cursor there is nothing this host loads on its own');
+
+  server.app.store.addUser({ id: 'bob-paging', name: 'bob-paging', role: 'operator', passwordHash: 'unused' });
+  const bob = await attach(server, t, server.app.agentHost.issueToken({ id: 'bob-paging', name: 'bob-paging', role: 'operator' }));
+  await bob.rpc('initialize', initialize('bob-paging'));
+  const refused = await bob.rpc('fetchTurns', { channel, cursor: snapshot.turnsNextCursor }).catch((error: Json) => error);
+  const missing = await bob.rpc('fetchTurns', { channel: defaultChatOf(`ahp-session:/${randomUUID()}`), cursor: snapshot.turnsNextCursor }).catch((error: Json) => error);
+  assert.equal(refused.code, -32001, 'another person\'s chat is refused');
+  assert.deepEqual([refused.code, refused.message], [missing.code, missing.message], 'the refusal does not tell another person the chat exists');
+  assert.ok(!bob.inbox.some(message => message.params?.action?.type === 'chat/turnsLoaded'), 'another person receives no turns');
 });
 
 test('a peer that stops answering is silent within 90 seconds of its last answer, an answering one is pinged at most every 30 seconds for an hour', () => {
