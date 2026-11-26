@@ -3,13 +3,31 @@ type: design
 status: proposed
 audience: [contributor, agent, owner]
 owner: unfold
-last_verified: 2026-11-20
-verified_by: "Proposal only; nothing in it is built. API facts read on 2026-11-20 from src/vscode-dts/vscode.proposed.*.d.ts on microsoft/vscode main and from the vsce publish check in apps/unfold/extensions/vscode/node_modules/@vscode/vsce/out/publish.js; phone facts from apps/unfold/docs/browser-ui.md, apps/unfold/public/sw.js, apps/unfold/src/notify/web-push.ts and the notifications.push entry of src/flag-registry.json. Nothing was installed or run against VS Code Insiders."
+last_verified: 2026-11-26
+verified_by: "Status note of 2026-11-26: round 1 checked as built against the commits 8c22d7e8, 790038eb, 68b9d4e1, dd224a68 and 94297b19 (VS Code) and 0b7f5d73, 19d02dd0 and 9b04a1ee (phone), all of 2026-11-20 and on development, and against apps/unfold/extensions/vscode/README.md and CHANGELOG.md, scripts/insiders.mjs, src/flag-registry.json (notifications.push defaults to on) and docs/browser-ui.md (Take on, the phone notifications offer); the remoteAgentHost proposal against the 1.148 dossier apps/unfold/docs/research/2026-11-26-vscode-1-148-fit.md. No part was opened in a running VS Code Insiders or on a phone for this note. Written as a proposal on 2026-11-20: API facts read on 2026-11-20 from src/vscode-dts/vscode.proposed.*.d.ts on microsoft/vscode main and from the vsce publish check in apps/unfold/extensions/vscode/node_modules/@vscode/vsce/out/publish.js; phone facts from apps/unfold/docs/browser-ui.md, apps/unfold/public/sw.js, apps/unfold/src/notify/web-push.ts and the notifications.push entry of src/flag-registry.json. Nothing was installed or run against VS Code Insiders."
 ---
 
 # Unfold Insiders and the phone: be in charge of your work and your agents
 
-This is a design record for a proposed change. Nothing in it is built.
+This is a design record. It was written on 2026-11-20 as a proposal, and round 1 was built the same day.
+
+## Status on 2026-11-26
+
+**Built**, on `development` since 2026-11-20:
+
+- Unfold Insiders itself: a second VSIX from the same source, with every proposed call behind one guard, attached to each GitHub release and published to no registry (8c22d7e8).
+- In VS Code Insiders, every row of the [round 1 table](#round-1-in-vs-code-insiders-take-on-work-see-what-to-decide): the notice above the chat input, the line at the top of **Now**, bold rows and the status bar hover, and the chat status menu (790038eb); the **Unfold** group in the Sessions list, with taking on a proposed Work Item through the confirmation of **Approve Work Item** (68b9d4e1, fixed in 94297b19 so a session from the list answers); the pills for Work Item and pull request links in chat (dd224a68); registering the workbench through `remoteAgentHost` (8c22d7e8); and **Unfold Insiders: Send Feedback**. The [extension README](../../extensions/vscode/README.md#unfold-insiders) describes what each does.
+- On the phone, all three round 1 items: `notifications.push` defaults to on and Now offers notifications once on a phone (0b7f5d73), a notice opens the decision's own page (19d02dd0), and **Take on** lists proposed, taken-over and running work with Approve, Hand back and Stop (9b04a1ee); see the [browser UI](../browser-ui.md#take-on).
+
+**Differs from the table:**
+
+- The Sessions list offers only the proposed work a person may take on by default. Work Items and sessions that need the person or wait for review are listed only with `unfold.insiders.sessionsList: all`, because the agent host lists the same work and whether VS Code then shows it twice is still not verified, the first open question below.
+- Taking on work shows the Team and that its Runs spend from the Team's budget, but no amount and no typical cost: Ploeg does not report that budget to Unfold yet.
+- `remoteAgentHost` was not in VS Code 1.147, so there Unfold Insiders fell back to writing `chat.remoteAgentHosts`. VS Code 1.148 has the call, and the registered workbench gets a row in Remote Environments (the VS Code 1.148 dossier of 2026-11-26, item M31, lists what is left).
+
+**Still proposed:** the experiment with VS Code's phone Agents window, round 2 (steering in the diff), and the re-read of the proposals at each Insiders release, which has no check of its own yet. The second open question below was answered by the build: a new session from the list hands over to the **Approve Work Item** confirmation.
+
+Not verified for this note: no part was opened in a running VS Code Insiders or on a phone. The extension's integration suite calls each proposal in VS Code Insiders without a refusal; what the parts draw on screen is not checked.
 
 ## The test every part must pass
 
