@@ -152,6 +152,8 @@ export const chatConfigRefusal = 'Unfold sets configuration per session, not per
 export const resourceWriteRefusal = 'This host does not let a client write, copy, move, delete or create files: a Run\'s workspace changes only through its Team, and its result is the candidate you review.';
 /** Why `vscode/collectAgentHostDebugLogs` is refused: the host's logs cover every person's sessions, so they stay with the workbench's administrator. */
 export const debugLogsRefusal = 'This host keeps its logs on the workbench, where they cover every person\'s sessions; ask its administrator for them. VS Code exports its own logs without them.';
+/** Why `authenticate` is refused with `-32602` for every resource: no agent advertises a protected resource, so the host takes no token, ID token or account from a client beyond its connection token. */
+export const authenticateRefusal = 'Unfold advertises no protected resource to sign in to: your connection token already identifies you, so this host takes no other token.';
 const resourceWrites = new Set(['resourceWrite', 'resourceCopy', 'resourceDelete', 'resourceMove', 'resourceMkdir']);
 const codes = { parse: -32700, invalidRequest: -32600, methodNotFound: -32601, invalidParams: -32602, internal: -32603, sessionNotFound: -32001, providerNotFound: -32002, sessionExists: -32003, turnInProgress: -32004, unsupportedVersion: -32005, authRequired: -32007, notFound: -32008, permissionDenied: -32009, conflict: -32011 };
 
@@ -1694,7 +1696,7 @@ export class AgentHost {
         if ('refused' in answer) throw new RpcError(codes[answer.code], answer.refused);
         return answer.result;
       }
-      case 'authenticate': return {};
+      case 'authenticate': throw new RpcError(codes.invalidParams, authenticateRefusal);
       case 'getNetworkDiagnosticsInfo': return { version: applicationVersion, os: process.platform, arch: process.arch, proxySettings: {}, proxyEnv: {}, endpoints: [] };
       case 'vscode/stopBackgroundWork':
         if (typeof params.chat !== 'string' || typeof params.id !== 'string') throw new RpcError(codes.invalidParams, 'chat and id are required');
