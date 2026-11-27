@@ -20,7 +20,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | System | [0001](../adr/adr-0001-unfold-contains-independent-applications.md) | Unfold contains independently deployable applications | 2026-09-12 | — |
 | System | [0002](../adr/adr-0002-ploeg-is-the-only-engine.md) | Ploeg is the only execution engine and Unfold is its front end | 2026-09-22 | — |
 | System | [0003](../adr/adr-0003-the-unit-of-work-is-the-work-item.md) | The unit of work is the Work Item, and work can create work | 2026-09-22 | — |
-| System | [0005](../adr/adr-0005-unfold-is-offered-to-agencies.md) | Unfold is offered to agencies, and delivery ends at a reviewed pull request with a preview | 2026-09-29 | — |
+| System | [0005](../adr/adr-0005-unfold-is-offered-to-agencies.md) | Unfold is offered to agencies, and delivery ends at a reviewed pull request with a preview | 2026-11-27 | — |
 | System | [0006](../adr/adr-0006-the-ticket-is-the-billing-unit.md) | The ticket is the billing unit: a quoted, capped Shift budget charged on delivery | 2026-09-29 | — |
 | System | [0007](../adr/adr-0007-clients-approve-ready-work.md) | Clients approve Ready work, and each client sets its own definitions of Ready and Done | 2026-09-29 | — |
 | System | [0008](../adr/adr-0008-every-pull-request-gets-a-preview-environment.md) | Every pull request gets a preview environment; production stays with the agency | 2026-09-29 | — |
@@ -58,6 +58,7 @@ An accepted record states why a rule exists. A proposed record is an open questi
 | System | [0058](../adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md) | People sign in through one Zitadel broker on the production cluster, with an organisation per Tenant | 2026-11-17 | — |
 | System | [0060](../adr/adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) | Ploeg owns every tracker and forge connection, and Unfold holds none | 2026-11-18 | — |
 | System | [0061](../adr/adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md) | `development` merges through a merge queue, with no bypass | 2026-11-19 | — |
+| System | [0063](../adr/adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md) | Unfold goes hosted first for a handful of agencies; self-hosted stays the trust proof | 2026-11-27 | — |
 | Ploeg | [0001](../../apps/ploeg/docs/adrs/0001-adrs-are-the-decision-ledger.md) | ADRs in docs/adrs/ are the single decision ledger | 2026-07-29 | — |
 | Ploeg | [0002](../../apps/ploeg/docs/adrs/0002-go-as-the-implementation-language.md) | Go is the implementation language | 2026-07-29 | — |
 | Ploeg | [0003](../../apps/ploeg/docs/adrs/0003-apache-2-0-license.md) | Ploeg ships under Apache-2.0 | 2026-07-29 | — |

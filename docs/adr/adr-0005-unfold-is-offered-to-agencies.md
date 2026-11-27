@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-09-29
+date: 2026-11-27
 decision-makers: Ryan Grippeling
 ---
 
@@ -105,3 +105,4 @@ This record is confirmed when one agency, other than webgrip, runs a client requ
 * 2026-09-29 — Wording aligned with the domain model (Agency, Client, Acceptance, Budget); no decision changed.
 * 2026-09-30 — The owner renamed the Agency edition to Studio, because Agency names every business that uses Unfold.
 * 2026-10-01 — Wording follows ADR-0006's flat markup (no markup tiers); no decision in this record changed.
+* 2026-11-27 — The phasing is amended by [ADR-0063](adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md): the hosted service for a handful of agencies comes first and no longer waits for the self-hosted phase to work and fund it; self-hosting stays supported as the trust proof.
