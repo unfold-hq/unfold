@@ -2,28 +2,32 @@
 type: explanation
 audience: [owner, contributor, agent]
 owner: unfold
-last_verified: 2026-09-30
-verified_by: "read against Unfold ADRs 0005 to 0010 and docs/domain/model.yaml on docs/agency-offering; no code implements the agency offering yet, so nothing was run"
+last_verified: 2026-11-27
+verified_by: "read against Unfold ADRs 0005 to 0010 and 0063 and docs/domain/model.yaml; no code implements the agency offering or the hosted service yet, so nothing was run"
 ---
 
 # Who Unfold is for
 
 Unfold is for developers and agencies who do not want to bill by the hour. It turns an **Agency**'s Work Items into pull requests that a developer reviews, and it tells the Agency up front what each one may cost ([ADR-0005](../adr/adr-0005-unfold-is-offered-to-agencies.md)).
 
-**None of the agency offering is implemented yet.** Today Unfold runs self-hosted for its owner's own backlog. This page explains the direction, so that work on Unfold moves toward it and not away from it. The [glossary](../reference/glossary.md) defines each **bold** term.
+**None of the agency offering is implemented yet.** Today Unfold runs self-hosted for its owner's own backlog. The first commercial step is the hosted service for a handful of agencies; self-hosting stays supported as the proof that Unfold's claims hold ([ADR-0063](../adr/adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md)). This page explains the direction, so that work on Unfold moves toward it and not away from it. The [glossary](../reference/glossary.md) defines each **bold** term.
 
-## Two phases
+## Two ways to run Unfold
 
-| | Phase 1: self-hosted | Phase 2: hosted |
+Older records call self-hosting phase 1 and the hosted service phase 2. Since [ADR-0063](../adr/adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md) the numbers no longer give the order.
+
+| | Self-hosted (phase 1) | Hosted (phase 2) |
 | --- | --- | --- |
-| Who uses it | The owner, on their own backlog, and the owner's employer, an agency that self-hosts Unfold with ClickUp as its tracker | Agencies that pay for hosted Unfold, starting with Dutch agencies of 5 to 80 people |
+| Who uses it | The owner, on their own backlog, and the owner's employer, an agency that self-hosts Unfold with ClickUp as its tracker | Agencies that pay for hosted Unfold: first a handful of Dutch agencies of 5 to 80 people, design partners first |
 | Who pays for models | Each user pays its own Model Provider (Fireworks today) | The Agency pays Unfold a **Token Charge** per attempt |
 | What Unfold charges | Nothing | A **Delivery Fee** in **Credits** on **Acceptance**, plus a monthly platform fee set by the Agency's **Edition** |
 | Where it runs | The user's own cluster | A rented EU cluster, one **Tenant** per Agency |
 
-To run phase 1 on your own cluster, follow [Self-host the whole stack in the EU](../how-to/self-host-the-whole-stack.md).
+To run Unfold on your own cluster, follow [Self-host the whole stack in the EU](../how-to/self-host-the-whole-stack.md).
 
-Phase 2 starts when phase 1 works and there is money to fund it. Unfold stays open source in both phases: self-hosting is encouraged, and no feature is held back from the open-source code.
+The hosted service comes first commercially, because the agencies likely to pay soon do not run Kubernetes, so a self-hosted offering sells them nothing. It no longer waits for self-hosting to work and fund it ([ADR-0063](../adr/adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md), which amends [ADR-0005](../adr/adr-0005-unfold-is-offered-to-agencies.md)). Self-hosting stays supported as the trust and sovereignty proof, for the public sector and the self-hosting community. Unfold stays open source either way: self-hosting is encouraged, and no feature is held back from the open-source code.
+
+The owner re-evaluates this order if no agency has paid for hosted Runs by 2027-05-27.
 
 ## The loop
 
@@ -34,7 +38,7 @@ Phase 2 starts when phase 1 works and there is money to fund it. Unfold stays op
 5. The Shift ends with a small, explained pull request and a **Preview Environment** ([ADR-0008](../adr/adr-0008-every-pull-request-gets-a-preview-environment.md), [ADR-0010](../adr/adr-0010-pull-requests-are-small-whole-and-explained.md)).
 6. The Agency's developer reviews it. Approving or merging is **Acceptance**, and makes the Work Item a **Delivery**. The Client's feedback on the preview is input to that decision.
 
-Phase 1 uses the same loop without the portal, the Quote or any charge.
+Self-hosted Unfold uses the same loop without the portal, the Quote or any charge.
 
 ## Where Unfold's responsibility ends
 

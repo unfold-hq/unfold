@@ -8,7 +8,7 @@ verified_by: "Read docs/concepts/who-unfold-is-for.md, system ADRs 0005, 0006, 0
 
 # Hosted Unfold for agencies
 
-**Not built.** Hosted Unfold is phase 2 of [Who Unfold is for](../concepts/who-unfold-is-for.md). Everything on this page is proposed. Today the only way to use Unfold is to [run your own installation](self-host.md).
+**Not built.** Hosted Unfold is the first commercial step of [Who Unfold is for](../concepts/who-unfold-is-for.md), for a handful of agencies first ([ADR-0063](../adr/adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md)). Everything on this page is proposed. Today the only way to use Unfold is to [run your own installation](self-host.md).
 
 ## What an Agency would get
 

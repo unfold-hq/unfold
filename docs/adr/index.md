@@ -18,7 +18,7 @@ Use MADR 4.0 for new system decisions. Application decisions remain in their exi
 | [ADR-0002](adr-0002-ploeg-is-the-only-engine.md) | Ploeg is the only execution engine and Unfold is its front end | accepted | 2026-09-22 |
 | [ADR-0003](adr-0003-the-unit-of-work-is-the-work-item.md) | The unit of work is the Work Item, and work can create work | accepted | 2026-09-22 |
 | [ADR-0004](adr-0004-unfold-releases-one-version.md) | Unfold releases its application and Ploeg under one version | superseded by ADR-0019 | 2026-10-03 |
-| [ADR-0005](adr-0005-unfold-is-offered-to-agencies.md) | Unfold is offered to agencies, and delivery ends at a reviewed pull request with a preview | accepted | 2026-09-29 |
+| [ADR-0005](adr-0005-unfold-is-offered-to-agencies.md) | Unfold is offered to agencies, and delivery ends at a reviewed pull request with a preview | accepted | 2026-11-27 |
 | [ADR-0006](adr-0006-the-ticket-is-the-billing-unit.md) | The ticket is the billing unit: a quoted, capped Shift budget charged on delivery | accepted | 2026-09-29 |
 | [ADR-0007](adr-0007-clients-approve-ready-work.md) | Clients approve Ready work, and each client sets its own definitions of Ready and Done | accepted | 2026-09-29 |
 | [ADR-0008](adr-0008-every-pull-request-gets-a-preview-environment.md) | Every pull request gets a preview environment; production stays with the agency | accepted | 2026-09-29 |
@@ -76,3 +76,4 @@ Use MADR 4.0 for new system decisions. Application decisions remain in their exi
 | [ADR-0060](adr-0060-ploeg-owns-every-tracker-and-forge-connection-and-unfold-holds-none.md) | Ploeg owns every tracker and forge connection, and Unfold holds none | accepted | 2026-11-18 |
 | [ADR-0061](adr-0061-development-merges-through-a-merge-queue-with-no-bypass.md) | `development` merges through a merge queue, with no bypass | accepted | 2026-11-19 |
 | [ADR-0062](adr-0062-hosted-unfold-reaches-github-through-one-public-app-the-customer-installs-and-other-forges-through-a-bot-account-the-customer-creates.md) | Hosted Unfold reaches GitHub through one public App the customer installs, and other forges through a bot account the customer creates | proposed | 2026-11-19 |
+| [ADR-0063](adr-0063-unfold-goes-hosted-first-for-a-handful-of-agencies-and-self-hosted-stays-the-trust-proof.md) | Unfold goes hosted first for a handful of agencies; self-hosted stays the trust proof | accepted | 2026-11-27 |
