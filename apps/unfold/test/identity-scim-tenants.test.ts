@@ -196,9 +196,60 @@ test('a Tenant\'s User linked only by email never turns the account off: deactiv
   assert.deepEqual(server.app.store.getUser(personId)!.memberships, []);
 });
 
+test('a Tenant with its own SCIM token takes its memberships from SCIM only, so a removal stays removed at the next sign-in', async t => {
+  const { server, idp, accounts, personId } = await tenantBench(t, { groups: ['unfold-operators', 'unfold/acme/admin', 'unfold/initech/viewer'] });
+  await signIn(server, idp);
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, [{ kind: 'tenant', tenant: 'initech', role: 'viewer' }], 'acme has a SCIM token, so the sign-in\'s acme group grants nothing');
+  const user = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'pat', emails: [{ value: 'person@example.com', primary: true }] } })).body;
+  const group = (await scim(server.url, '/Groups', { method: 'POST', token: acmeToken, body: { schemas: [groupSchema], displayName: 'unfold/acme/member', members: [{ value: user.id }] } })).body;
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'developer' }, { kind: 'tenant', tenant: 'initech', role: 'viewer' }]);
+  await scim(server.url, `/Groups/${group.id}`, { method: 'PATCH', token: acmeToken, body: { schemas: [patchSchema], Operations: [{ op: 'remove', path: `members[value eq "${user.id}"]` }] } });
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, [{ kind: 'tenant', tenant: 'initech', role: 'viewer' }]);
+
+  const again = await signIn(server, idp);
+  assert.equal(again.callback.headers.get('location'), '/');
+  const bootstrap = await request(server.url, '/api/bootstrap', { cookie: cookieOf(again.callback) });
+  assert.deepEqual(bootstrap.body.user.memberships, [{ kind: 'tenant', tenant: 'initech', role: 'viewer' }], 'the acme membership SCIM removed stays removed though the sign-in names acme; initech, without a token, keeps its sign-in group');
+
+  accounts.deleteToken('acme');
+  const handedBack = await signIn(server, idp);
+  assert.deepEqual((await request(server.url, '/api/bootstrap', { cookie: cookieOf(handedBack.callback) })).body.user.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'admin' }, { kind: 'tenant', tenant: 'initech', role: 'viewer' }], 'withdrawing the token hands acme back to the sign-in groups');
+});
+
+test('a person a Tenant\'s SCIM token provisioned signs in as viewer when the sign-in entitles no role, and reaches only that Tenant', async t => {
+  const { server, idp, accounts, personId } = await tenantBench(t, { groups: [], configure: config => {
+    enforced(config);
+    config.repositories = [...config.repositories, { id: 'acme-site', name: 'Acme site', description: 'Owned by Tenant acme', url: 'https://forge.example/acme/site.git', baseBranch: 'main', verify: [], tenant: 'acme' }, { id: 'globex-site', name: 'Globex site', description: 'Owned by Tenant globex', url: 'https://forge.example/globex/site.git', baseBranch: 'main', verify: [], tenant: 'globex' }];
+  } });
+  assert.equal((await signIn(server, idp)).callback.headers.get('location'), '/?login_error=oidc_not_entitled', 'without provisioning the sign-in entitles nothing');
+  const user = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'pat', emails: [{ value: 'person@example.com', primary: true }] } })).body;
+  await scim(server.url, '/Groups', { method: 'POST', token: acmeToken, body: { schemas: [groupSchema], displayName: 'unfold/acme/admin', members: [{ value: user.id }] } });
+  const admitted = await signIn(server, idp);
+  assert.equal(admitted.callback.headers.get('location'), '/', 'a provisioned person is admitted');
+  assert.equal(accounts.user('acme', user.id)?.userId, personId);
+  const bootstrap = await request(server.url, '/api/bootstrap', { cookie: cookieOf(admitted.callback) });
+  assert.equal(bootstrap.body.user.role, 'viewer', 'the installation-wide role is viewer, never admin, though the Tenant made them its Admin');
+  assert.deepEqual(bootstrap.body.user.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'admin' }]);
+  assert.deepEqual(bootstrap.body.repositories.map((repository: { id: string }) => repository.id), ['acme-site'], 'they reach nothing outside their Tenant');
+  assert.equal((await request(server.url, '/api/admin/scim', { cookie: cookieOf(admitted.callback) })).status, 403, 'a viewer manages no installation-wide or Tenant administration');
+
+  await scim(server.url, `/Users/${user.id}`, { method: 'PATCH', token: acmeToken, body: { schemas: [patchSchema], Operations: [{ op: 'replace', path: 'active', value: false }] } });
+  assert.equal((await signIn(server, idp)).callback.headers.get('location'), '/?login_error=oidc_not_entitled', 'a deactivated User entitles nothing');
+});
+
+test('the viewer fallback never lowers or raises a role the sign-in entitles', async t => {
+  const { server, idp, personId } = await tenantBench(t, { groups: ['unfold-operators'] });
+  const user = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'pat', emails: [{ value: 'person@example.com', primary: true }] } })).body;
+  assert.equal(user.active, true);
+  await signIn(server, idp);
+  assert.equal(server.app.store.getUser(personId)!.role, 'operator');
+});
+
 test('a Tenant maps its own group names to Access Roles and Client memberships, and unfold/ names keep working', async t => {
-  const { server, idp, accounts } = await tenantBench(t, { groups: ['unfold-admins', 'unfold/acme/admin'] });
+  const { server, idp, accounts } = await tenantBench(t, { groups: ['unfold-admins'] });
   const cookie = cookieOf((await signIn(server, idp)).callback);
+  const admin = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'person@example.com' } })).body;
+  await scim(server.url, '/Groups', { method: 'POST', token: acmeToken, body: { schemas: [groupSchema], displayName: 'unfold/acme/admin', members: [{ value: admin.id }] } });
   server.app.store.upsertUser({ id: 'oidc-other', name: 'other@corp.example', role: 'operator', passwordHash: '' });
   const other = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'other@corp.example' } })).body;
   assert.equal(accounts.user('acme', other.id)?.userId, 'oidc-other');
@@ -208,7 +259,7 @@ test('a Tenant maps its own group names to Access Roles and Client memberships, 
 
   const mapped = await request(server.url, '/api/admin/scim/tenants/acme/group-mappings', { method: 'PUT', cookie, body: { mappings: [{ match: 'displayName', value: 'engineering', role: 'developer', clients: ['shop'] }] } });
   assert.equal(mapped.status, 200, mapped.text);
-  assert.equal(mapped.body.applied, 1);
+  assert.equal(mapped.body.applied, 2, 'the administrator and the other person');
   assert.deepEqual(server.app.store.getUser('oidc-other')!.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'developer' }, { kind: 'client', tenant: 'acme', client: 'shop' }], 'a mapping applies at once, matched without regard to case');
 
   await request(server.url, '/api/admin/scim/tenants/acme/group-mappings', { method: 'PUT', cookie, body: { mappings: [{ match: 'externalId', value: 'grp-0042', role: 'admin' }] } });

@@ -114,9 +114,14 @@ export function reconciledMemberships(accounts: IdentityAccounts, userId: string
   return unionMemberships(stored.filter(entry => entry.tenant !== scope), granted.filter(entry => entry.tenant === scope));
 }
 
-/** The memberships a person signs in with: what the sign-in's groups grant, and what every Tenant's SCIM Users of the person grant. */
+/**
+ * The memberships a person signs in with: what the sign-in's groups grant in each Tenant without a SCIM token of its
+ * own, and what every Tenant's SCIM Users of the person grant. A Tenant with its own SCIM token takes its memberships
+ * from SCIM only, so a membership its SCIM removed stays removed whatever the sign-in's groups say.
+ */
 export function signInMemberships(accounts: IdentityAccounts, userId: string, claimed: readonly Membership[]): Membership[] {
-  return unionMemberships(claimed, ...accounts.usersOf(userId).filter(record => record.tenant !== null).map(record => grantedMemberships(accounts, record)));
+  const scimOwned = new Set(accounts.tokenHashes().map(entry => entry.tenant));
+  return unionMemberships(claimed.filter(entry => !scimOwned.has(entry.tenant)), ...accounts.usersOf(userId).filter(record => record.tenant !== null).map(record => grantedMemberships(accounts, record)));
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {

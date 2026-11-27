@@ -91,6 +91,8 @@ export class Oidc {
   private readonly pending = new Map<string, Pending>();
   private discovery?: { at: number; value: Discovery };
   private keys?: { at: number; value: Map<string, KeyObject> };
+  /** Whether a person whose claims entitle no role was provisioned through a Tenant's SCIM token, which entitles them to `viewer`. */
+  provisioned?: (person: { id: string; email?: string; idpUserId?: string }) => boolean;
 
   constructor(config: AppConfig, fetchImpl: typeof fetch = fetch) { this.config = config; this.fetchImpl = fetchImpl; }
 
@@ -260,13 +262,13 @@ export class Oidc {
     const settings = this.required();
     const subject = String(claims.sub);
     const email = typeof claims.email === 'string' && /^[^\s@]{1,200}@[^\s@]{1,200}$/.test(claims.email) ? claims.email.toLowerCase() : undefined;
-    const role = entitledRole(settings, claims);
-    if (!role) throw new OidcError(403, 'oidc_not_entitled', `${email ?? subject} signed in, but holds none of the groups this workbench admits.`);
-    const preferred = [claims.preferred_username, claims.name, email, subject].find((value): value is string => typeof value === 'string' && value.trim().length > 0)!;
-    const name = preferred.trim().slice(0, 100);
     const id = subjectUserId(settings.subjectNamespace ?? settings.issuer, subject);
     const userIdClaim = this.config.identity?.scim?.userIdClaim;
     const idpUserId = userIdClaim && typeof claims[userIdClaim] === 'string' && /^[!-~]{1,256}$/.test(claims[userIdClaim] as string) ? claims[userIdClaim] as string : undefined;
+    const role = entitledRole(settings, claims) ?? (this.provisioned?.({ id, ...(email ? { email } : {}), ...(idpUserId ? { idpUserId } : {}) }) ? 'viewer' as const : undefined);
+    if (!role) throw new OidcError(403, 'oidc_not_entitled', `${email ?? subject} signed in, but holds none of the groups this workbench admits.`);
+    const preferred = [claims.preferred_username, claims.name, email, subject].find((value): value is string => typeof value === 'string' && value.trim().length > 0)!;
+    const name = preferred.trim().slice(0, 100);
     return { id, name, role, subject, ...(email ? { email } : {}), ...(idpUserId ? { idpUserId } : {}), memberships: membershipsFromGroups(claims[settings.groupsClaim]) };
   }
 }

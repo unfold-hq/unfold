@@ -392,6 +392,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const claudeRoutines = new ClaudeRoutines({ ploeg, steps: onboarding, store });
   onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...gitlab.lines(github.lines(manage, context), manage), 'connect-claude': claudeRoutines.line(context.user) }));
   const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: (flag, tenant = defaultTenant) => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }) });
+  if (oidc) oidc.provisioned = person => lifecycle.tenantProvisioned(person);
   const scimAdmin = new ScimAdministration({ accounts: identityAccounts(store.db), store, configured: Boolean(config.identity?.scim && config.auth.oidc), installationToken: Boolean(config.identity?.scim?.tokenEnv), ...(config.identity?.scim?.userIdClaim ? { userIdClaim: config.identity.scim.userIdClaim } : {}), enforced: tenants.enforced, enabled: tenant => flags.getBooleanValue('identity.scim', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), location: `${(config.baseUrl ?? '').replace(/\/+$/, '')}${scimBase}` });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);

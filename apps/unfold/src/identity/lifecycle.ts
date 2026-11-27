@@ -85,6 +85,18 @@ export class IdentityLifecycle {
     return signInMemberships(this.accounts, userId, claimed);
   }
 
+  /**
+   * Whether a Tenant's SCIM token provisioned the person signing in: an active Tenant SCIM User names their account, or
+   * waits for them by the identity provider's user id or email. Such a person gets the role `viewer` when their sign-in
+   * entitles none; what they may do in the Tenant comes from its memberships.
+   */
+  tenantProvisioned(person: { id: string; email?: string; idpUserId?: string }): boolean {
+    const active = (records: ScimUserRecord[], waiting: boolean) => records.some(record => record.tenant !== null && record.active && (waiting ? record.userId === null : record.userId === person.id));
+    if (active(this.accounts.usersOf(person.id), false)) return true;
+    if (person.idpUserId && active(this.accounts.users(undefined, { field: 'externalId', value: person.idpUserId }, 0, 50).items, true)) return true;
+    return Boolean(person.email && (active(this.accounts.users(undefined, { field: 'email', value: person.email }, 0, 50).items, true) || active(this.accounts.users(undefined, { field: 'userName', value: person.email }, 0, 50).items, true)));
+  }
+
   /** Ends one sign-in, for sign-out: its session or editor credential, its Agents-window tokens and kept sign-in tokens. */
   signOut(signIn: string, userId: string | undefined): RevocationCounts {
     const counts = this.revocation.signIn(signIn);
