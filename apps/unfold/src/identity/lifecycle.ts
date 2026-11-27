@@ -127,7 +127,7 @@ export class IdentityLifecycle {
       const tenant = record.tenant!;
       const linked = this.accounts.saveUser({ ...record, userId: identity.id });
       const elsewhere = signInMemberships(this.accounts, identity.id, identity.memberships ?? []).some(entry => entry.tenant !== tenant);
-      if (!linked.active && !elsewhere && !this.accounts.disabled(identity.id)) this.accounts.disable(identity.id, disabledBy(tenant), `SCIM of Tenant ${tenant} set active to false`);
+      if (!linked.active && linkedBy === 'idpUserId' && !elsewhere && !this.accounts.disabled(identity.id)) this.accounts.disable(identity.id, disabledBy(tenant), `SCIM of Tenant ${tenant} set active to false`);
       this.provisioned({ userId: identity.id, change: 'updated', detail: { tenant, linkedBy } });
     }
   }

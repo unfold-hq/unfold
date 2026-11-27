@@ -138,10 +138,11 @@ test('a Tenant\'s SCIM token reaches only that Tenant: it never reads, changes o
   assert.ok(refusal, 'each refused cross-Tenant request is an Action Record of that Tenant\'s SCIM');
 });
 
-test('deactivating a Tenant\'s SCIM User ends every credential of a person in no other Tenant, and otherwise only that Tenant\'s memberships', async t => {
-  const { server, idp, accounts, personId } = await tenantBench(t);
+test('deactivating a Tenant\'s SCIM User linked by the identity provider\'s user id ends every credential of a person in no other Tenant, and otherwise only that Tenant\'s memberships', async t => {
+  const { server, idp, accounts, personId } = await tenantBench(t, { userIdClaim: 'idp_user_id', claims: { idp_user_id: 'entra-oid-42' } });
   const cookie = cookieOf((await signIn(server, idp)).callback);
-  const user = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'pat', emails: [{ value: 'person@example.com', primary: true }] } })).body;
+  const user = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'pat', externalId: 'entra-oid-42', emails: [{ value: 'pat@corp.example', primary: true }] } })).body;
+  assert.equal(accounts.user('acme', user.id)?.userId, personId, 'linked by the identity provider\'s user id');
   await scim(server.url, '/Groups', { method: 'POST', token: acmeToken, body: { schemas: [groupSchema], displayName: 'unfold/acme/member', members: [{ value: user.id }] } });
   assert.deepEqual((await request(server.url, '/api/bootstrap', { cookie })).body.user.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'developer' }]);
 
@@ -167,6 +168,32 @@ test('deactivating a Tenant\'s SCIM User ends every credential of a person in no
   assert.equal(kept.status, 200, 'globex still vouches for the person, so acme cannot sign them out');
   assert.deepEqual(kept.body.user.memberships, [{ kind: 'tenant', tenant: 'globex', role: 'viewer' }], 'only acme\'s membership went');
   assert.equal(accounts.disabled(personId), undefined);
+});
+
+test('a Tenant\'s User linked only by email never turns the account off: deactivating or deleting it removes only that Tenant\'s membership', async t => {
+  const { server, idp, accounts, personId } = await tenantBench(t);
+  const cookie = cookieOf((await signIn(server, idp)).callback);
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, [], 'the person holds no other membership');
+  const user = (await scim(server.url, '/Users', { method: 'POST', token: acmeToken, body: { schemas: [userSchema], userName: 'pat', emails: [{ value: 'person@example.com', primary: true }] } })).body;
+  assert.equal(accounts.user('acme', user.id)?.userId, personId, 'linked by email');
+  await scim(server.url, '/Groups', { method: 'POST', token: acmeToken, body: { schemas: [groupSchema], displayName: 'unfold/acme/member', members: [{ value: user.id }] } });
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'developer' }]);
+
+  const off = await scim(server.url, `/Users/${user.id}`, { method: 'PATCH', token: acmeToken, body: { schemas: [patchSchema], Operations: [{ op: 'replace', path: 'active', value: false }] } });
+  assert.equal(off.status, 200, JSON.stringify(off.body));
+  assert.equal(accounts.disabled(personId), undefined, 'the account stays on');
+  const kept = await request(server.url, '/api/bootstrap', { cookie });
+  assert.equal(kept.status, 200, 'the browser session survives');
+  assert.deepEqual(kept.body.user.memberships, [], 'only acme\'s membership is gone');
+  assert.equal((await signIn(server, idp)).callback.headers.get('location'), '/', 'sign-in still works');
+  assert.equal(server.app.store.actionRecords({ channel: 'scim', limit: 50 }).some(record => record.action.startsWith('REVOKE')), false, 'nothing was revoked');
+
+  await scim(server.url, `/Users/${user.id}`, { method: 'PATCH', token: acmeToken, body: { schemas: [patchSchema], Operations: [{ op: 'replace', path: 'active', value: true }] } });
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, [{ kind: 'tenant', tenant: 'acme', role: 'developer' }], 'reactivating gives the membership back');
+  assert.equal((await scim(server.url, `/Users/${user.id}`, { method: 'DELETE', token: acmeToken })).status, 204);
+  assert.equal(accounts.disabled(personId), undefined, 'a delete does not turn the account off either');
+  assert.equal((await request(server.url, '/api/bootstrap', { cookie })).status, 200);
+  assert.deepEqual(server.app.store.getUser(personId)!.memberships, []);
 });
 
 test('a Tenant maps its own group names to Access Roles and Client memberships, and unfold/ names keep working', async t => {

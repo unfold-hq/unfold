@@ -74,7 +74,7 @@ The owner decided the identity architecture on 2026-11-27: people sign in throug
 * **Isolation.** A Tenant's token sees, changes and deactivates only the Users and Groups it pushed, and grants memberships only in its own Tenant, never the installation-wide account role. Another Tenant's User or Group is 404 to it, and a Group named `unfold/<other tenant>/…` grants nothing.
 * **Group mapping.** A Tenant administrator maps the customer's own group names or externalIds to an Access Role and Client memberships in the Tenant, so customers need not rename their groups. `unfold/<tenant>/…` names keep working.
 * **Linking.** A Tenant's SCIM User links to a person by the customer identity provider's user id, carried in the sign-in claim `identity.scim.userIdClaim` names and matched to the User's `externalId`, and otherwise by email. The broker is to add that claim through an Action; that part is proposed and not built. A Tenant's token never creates an account.
-* **Deprovisioning.** A Tenant's deactivation or deletion turns the account off and ends every credential, as before, when the person holds no membership of another Tenant. When they do, it removes only that Tenant's memberships, so one Agency's identity provider cannot sign a person out of another Agency.
+* **Deprovisioning.** A Tenant's deactivation or deletion turns the account off and ends every credential, as before, only when the User is linked by the customer identity provider's user id (its `externalId` is the id the person's sign-in carried) and the person holds no membership of another Tenant. Otherwise it removes only that Tenant's memberships. A User linked only by email proves nothing about who the account is, so it never reaches beyond its Tenant, and one Agency's identity provider cannot sign a person out of Unfold or out of another Agency.
 * **Google Workspace** can push SCIM only through its beta [custom SCIM profiles](https://knowledge.workspace.google.com/admin/users/advanced/automated-user-provisioning-with-custom-scim-profiles), for SAML apps and limited participants. The fallback, Unfold reading the Directory API, is not built.
 * **Deprovisioning at the broker** is to reach Unfold through a broker event until the broker transmits Shared Signals itself. Neither is built.
 
@@ -82,12 +82,12 @@ Consequences of the amendment:
 
 * Good, because an Agency's own identity provider provisions its people, independent of the broker.
 * Good, because a Tenant's token cannot read or change another Tenant's people.
-* Bad, because a person who belongs to no Tenant yet can be linked by email, and so turned off, by any Tenant whose identity provider names that email. The broker's claim, carrying an organisation-scoped user id, is meant to close that.
+* Bad, because a Tenant whose people are linked only by email can remove their memberships but cannot turn their accounts off or end their credentials. That takes the identity provider's user id in the sign-in, which the broker is to add.
 * Bad, because a membership a Tenant's SCIM grants and one the sign-in's groups grant are merged at sign-in, so a Tenant's removal stands only until a sign-in whose groups name the Tenant again.
 
-Confirmation: `test/identity-scim-tenants.test.ts` checks a token per Tenant shown once and kept as a hash, a wrong and a rotated-out token refused, a cross-Tenant read, change, grant and membership refused, deactivation ending every credential of a person in one Tenant and only that Tenant's memberships of a person in two, mappings by display name and externalId, and linking by the identity provider's user id with email as fallback.
+Confirmation: `test/identity-scim-tenants.test.ts` checks a token per Tenant shown once and kept as a hash, a wrong and a rotated-out token refused, a cross-Tenant read, change, grant and membership refused, deactivation of a User linked by the identity provider's user id ending every credential of a person in one Tenant and only that Tenant's memberships of a person in two, deactivation and deletion of a User linked only by email leaving the account on and removing only that Tenant's membership, mappings by display name and externalId, and linking by the identity provider's user id with email as fallback.
 
 ### History
 
 * 2026-10-30: proposed with the implementation.
-* 2026-11-27: amended with SCIM per Tenant, pushed by the customer's identity provider independent of the broker; implemented with the amendment. Google Workspace's Directory API fallback and broker-driven deprovisioning are not built.
+* 2026-11-27: amended with SCIM per Tenant, pushed by the customer's identity provider independent of the broker; implemented with the amendment. The same day, a User linked only by email was limited to its own Tenant's memberships, so it can no longer turn an account off. Google Workspace's Directory API fallback and broker-driven deprovisioning are not built.

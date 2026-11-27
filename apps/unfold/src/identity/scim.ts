@@ -72,6 +72,14 @@ export type ScimCaller = { tenant: ScimScope };
 /** What turns a person's account off for a SCIM scope: `scim` for the installation token, `scim:<tenant>` for a Tenant's. */
 export function disabledBy(scope: ScimScope): DisabledBy { return scope === null ? 'scim' : `scim:${scope}`; }
 
+/**
+ * Whether a Tenant's SCIM User names the account `userId` by the customer identity provider's user id: its externalId
+ * is the id that account's last sign-in carried. Only such a User may turn the account off.
+ */
+export function linkedByIdpUserId(accounts: IdentityAccounts, record: ScimUserRecord, userId: string): boolean {
+  return record.externalId !== null && accounts.userByIdpUserId(record.externalId) === userId;
+}
+
 /** The memberships a Tenant's group mappings grant for the SCIM Groups a person is in, all inside that Tenant. */
 export function mappedMemberships(tenant: string, mappings: readonly GroupMapping[], groups: readonly { displayName: string; externalId: string | null }[]): Membership[] {
   const matched = mappings.filter(mapping => groups.some(group => mapping.match === 'displayName' ? group.displayName.toLowerCase() === mapping.value.toLowerCase() : group.externalId !== null && group.externalId === mapping.value));
@@ -259,8 +267,8 @@ export class ScimService {
  * the email. A Group's display name grants the membership `unfold/<tenant>/<role>` or `unfold/<tenant>/client/<client>`
  * names, a Tenant's mapped Groups grant what the Tenant mapped, and under the installation token a Group named in the
  * sign-in role lists sets the account's role. Deactivating or deleting a User turns its account off and ends every
- * credential it holds; under a Tenant's token only when the person holds no membership of another Tenant, and otherwise
- * it removes that Tenant's memberships. A Group change applies to the members' memberships at once.
+ * credential it holds; under a Tenant's token only for a User linked by the identity provider's user id whose person
+ * holds no membership of another Tenant, and otherwise it removes that Tenant's memberships. A Group change applies to the members' memberships at once.
  */
 class ScopedScim {
   private readonly deps: ScimDependencies;
@@ -396,7 +404,7 @@ class ScopedScim {
     const groups = this.deps.accounts.groupNamesOf(existing.id);
     this.deps.accounts.deleteUser(existing.id);
     if (!existing.userId) return;
-    if (this.scope !== null) return this.endInTenant(existing.userId, this.scope, 'deleted');
+    if (this.scope !== null) return this.endInTenant(existing, existing.userId, this.scope, 'deleted');
     this.deps.accounts.disable(existing.userId, 'scim', 'SCIM deleted the User');
     const stored = this.deps.store.getUser(existing.userId);
     if (groups.length && stored) this.deps.store.setMemberships(existing.userId, reconciledMemberships(this.deps.accounts, existing.userId, stored.memberships ?? [], null));
@@ -405,16 +413,17 @@ class ScopedScim {
   }
 
   /**
-   * Ends a person's place in `tenant` after its SCIM deactivated or deleted them: that Tenant's memberships go. When the
-   * person holds no membership of another Tenant, the account is turned off and every credential ends, as the
-   * installation token does; otherwise another Tenant's identity provider still vouches for them and they keep it.
+   * Ends a person's place in `tenant` after its SCIM deactivated or deleted them: that Tenant's memberships go. The
+   * account is turned off and every credential ends, as the installation token does, only when the User is linked by
+   * the customer identity provider's user id and the person holds no membership of another Tenant. A User linked only
+   * by email proves nothing about who the account is, so it never reaches beyond its own Tenant.
    */
-  private endInTenant(userId: string, tenant: string, change: 'deactivated' | 'deleted'): void {
+  private endInTenant(record: ScimUserRecord, userId: string, tenant: string, change: 'deactivated' | 'deleted'): void {
     const stored = this.deps.store.getUser(userId);
     if (!stored) return;
     const memberships = reconciledMemberships(this.deps.accounts, userId, stored.memberships ?? [], tenant);
     this.deps.store.setMemberships(userId, memberships);
-    if (memberships.some(entry => entry.tenant !== tenant)) {
+    if (!linkedByIdpUserId(this.deps.accounts, record, userId) || memberships.some(entry => entry.tenant !== tenant)) {
       this.deps.effect({ userId, change: 'memberships', detail: { tenant, ended: change, memberships } });
       return;
     }
@@ -453,7 +462,7 @@ class ScopedScim {
     const tenant = this.scope!;
     const stored = this.deps.store.getUser(userId);
     if (!stored) return;
-    if (!user.active) return this.endInTenant(userId, tenant, 'deactivated');
+    if (!user.active) return this.endInTenant(user, userId, tenant, 'deactivated');
     const reactivated = this.deps.accounts.enable(userId, disabledBy(tenant));
     const memberships = reconciledMemberships(this.deps.accounts, userId, stored.memberships ?? [], tenant);
     this.deps.store.setMemberships(userId, memberships);
