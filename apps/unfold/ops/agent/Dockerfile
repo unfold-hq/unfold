@@ -2,7 +2,7 @@ ARG REGISTRY_CHAINGUARD=cgr.dev
 # renovate: datasource=docker depName=cgr.dev/chainguard/wolfi-base versioning=docker
 ARG WOLFI_BASE_IMAGE=${REGISTRY_CHAINGUARD}/chainguard/wolfi-base:latest@sha256:2c12da5496e21e99003b3db3b9246f025e53d533c4df334205391260f1e8f85b
 # renovate: datasource=npm depName=opencode-ai
-ARG OPENCODE_VERSION=1.19.5
+ARG OPENCODE_VERSION=1.19.6
 # renovate: datasource=npm depName=brace-expansion
 ARG NPM_BRACE_EXPANSION_VERSION=5.0.12
 # renovate: datasource=npm depName=undici
