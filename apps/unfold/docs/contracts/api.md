@@ -75,7 +75,16 @@ The `token` is an editor credential, `vle_` followed by 43 base64url characters,
 | `GET, PUT, PATCH, DELETE /scim/v2/Users/{id}`, `/Groups/{id}` | Read, replace, patch (`PatchOp`) and delete → 200 or 204. `active: false` or `DELETE` on a User turns its account off and ends every credential it holds |
 | `POST /ssf/events` | One SET as `application/secevent+jwt` (RFC 8935) → 202 empty, or 400 `{err, description}` (401 for `authentication_failed`) |
 
-Every SCIM call needs `Authorization: Bearer <token>` with the token `identity.scim.tokenEnv` names, and answers 401 with a SCIM Error otherwise. Each change, refusal, SET event and revocation leaves an Action Record with channel `scim` or `ssf`, role `system` and a `person` or `group` target. `POST /api/logout` ends its sign-in through the same revocation: the session or editor credential, the Agents-window connection tokens it issued and the sign-in tokens kept for it.
+Every SCIM call needs `Authorization: Bearer <token>` with the token `identity.scim.tokenEnv` names or a Tenant's own token, and answers 401 with a SCIM Error otherwise. A Tenant's token sees, changes and grants only that Tenant's Users, Groups and memberships; another Tenant's User or Group is 404 to it, and the `identity.scim` flag is evaluated for that Tenant. Each change, refusal, SET event and revocation leaves an Action Record with channel `scim` or `ssf`, role `system` and a `person` or `group` target; its person is `scim`, `scim:<tenant>` for a Tenant's token, or `ssf:<transmitter>`.
+
+Tenant administrators manage their Tenant's SCIM under `/api/admin/scim`. Every route needs a browser session of an administrator (403 `forbidden`, 403 `browser_only`); while `tenancy.enforce` is on, a Tenant answers only to an Admin of it (404 `tenant_not_found`), and while it is off only `default` exists. Each change is an Action Record and an Entity Management audit record in the Tenant.
+
+| Method and path | Response |
+| --- | --- |
+| `GET /api/admin/scim` | `{configured, scimUrl, installationToken, userIdClaim, tenants}`: each Tenant the caller administers as `{tenant, enabled, token, mappings}`, where `enabled` is the `identity.scim` flag's value for it and `token` is `{issuedAt, issuedBy}` or null. The token itself is never shown here |
+| `POST /api/admin/scim/tenants/:tenant/token` | 201 `{tenant, token, issued, replaced}` for the Tenant's first token, 200 when it replaces one, which stops working at once. `token` (`unfold_scim_…`) is shown this once; Unfold keeps its SHA-256 hash. 409 `scim_unconfigured` without an `identity.scim` block |
+| `DELETE /api/admin/scim/tenants/:tenant/token` | `{tenant, deleted}`. 404 `scim_token_not_found` when the Tenant has none |
+| `PUT /api/admin/scim/tenants/:tenant/group-mappings` | `{mappings}` → `{tenant, mappings, applied}`. Replaces the Tenant's mappings, each `{match, value, role, clients}`: `match` is `displayName` (the default, without regard to case) or `externalId`, `role` is `viewer`, `developer`, `admin` or null, and `clients` lists Client ids; a mapping grants at least one of them. Applied at once to the `applied` people the Tenant's SCIM Users name. 400 `scim_mappings` for an invalid list | `POST /api/logout` ends its sign-in through the same revocation: the session or editor credential, the Agents-window connection tokens it issued and the sign-in tokens kept for it.
 
 ## Status
 

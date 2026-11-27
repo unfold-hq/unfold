@@ -55,13 +55,16 @@ const downloads: Array<{ pattern: RegExp; resource: (match: RegExpExecArray, que
   { pattern: /^\/api\/ploeg\/cost-export$/, resource: (_match, query) => ({ type: 'FOCUS cost export', name: `FOCUS cost export (${query.get('format') ?? 'csv'})` }) },
 ];
 
-type EntityRule = { method: string; pattern: RegExp; entity: string; action: 'create' | 'update' | 'delete' | 'deactivate'; change?: string; tenant?: 'body' | 'query' | 'owner'; owner?: true; uid?: number | 'location' };
+type EntityRule = { method: string; pattern: RegExp; entity: string; action: 'create' | 'update' | 'delete' | 'deactivate'; change?: string; tenant?: 'body' | 'query' | 'owner' | 'path'; owner?: true; uid?: number | 'location' };
 
 const entityRules: readonly EntityRule[] = [
   { method: 'POST', pattern: /^\/api\/admin\/webhooks$/, entity: 'Webhook subscription', action: 'create', tenant: 'body' },
   { method: 'PATCH', pattern: /^\/api\/admin\/webhooks\/([^/]+)$/, entity: 'Webhook subscription', action: 'update' },
   { method: 'DELETE', pattern: /^\/api\/admin\/webhooks\/([^/]+)$/, entity: 'Webhook subscription', action: 'delete' },
   { method: 'POST', pattern: /^\/api\/admin\/webhooks\/([^/]+)\/rotate-secret$/, entity: 'Webhook subscription', action: 'update', change: 'secret_rotated' },
+  { method: 'POST', pattern: /^\/api\/admin\/scim\/tenants\/([^/]+)\/token$/, entity: 'SCIM token', action: 'update', change: 'token_issued', tenant: 'path' },
+  { method: 'DELETE', pattern: /^\/api\/admin\/scim\/tenants\/([^/]+)\/token$/, entity: 'SCIM token', action: 'delete', tenant: 'path' },
+  { method: 'PUT', pattern: /^\/api\/admin\/scim\/tenants\/([^/]+)\/group-mappings$/, entity: 'SCIM group mapping', action: 'update', tenant: 'path' },
   { method: 'POST', pattern: /^\/api\/intake\/sources$/, entity: 'Intake source', action: 'create', tenant: 'body' },
   { method: 'DELETE', pattern: /^\/api\/intake\/sources\/([^/]+)$/, entity: 'Intake source', action: 'delete' },
   { method: 'POST', pattern: /^\/api\/intake\/sources\/([^/]+)\/secret$/, entity: 'Intake source', action: 'update', change: 'secret_replaced' },
@@ -105,7 +108,7 @@ function entityChange(request: TapRequest, user: User): Captured | undefined {
     const owner = rule.owner ? [named('tenant') ?? defaultTenant, named('client')].filter(Boolean).join('/') : undefined;
     const uid = rule.uid === 'location' ? createdId(request) : rule.uid === 0 ? undefined : match[rule.uid ?? 1] ?? owner;
     const data = rule.change ? { change: rule.change } : undefined;
-    const tenants = rule.tenant === 'owner' ? (request.owner ? [request.owner] : undefined) : rule.tenant ? namedTenant(request, rule.tenant) : undefined;
+    const tenants = rule.tenant === 'owner' ? (request.owner ? [request.owner] : undefined) : rule.tenant === 'path' ? (outcome(request.status) === 'success' && validTenancyId(match[1]) ? [match[1]] : undefined) : rule.tenant ? namedTenant(request, rule.tenant) : undefined;
     return { actor: user, ...(tenants ? { tenants } : {}), fact: { kind: 'entity', action: rule.action, entity: { type: rule.entity, ...(uid ? { uid } : {}), ...(data ? { data } : {}) }, outcome: outcome(request.status), ...(reason(request.status) ? { reason: reason(request.status) } : {}) } };
   }
   return undefined;

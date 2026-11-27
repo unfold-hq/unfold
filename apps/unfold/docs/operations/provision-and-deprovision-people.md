@@ -2,8 +2,8 @@
 type: how-to
 audience: [owner, operator, integrator]
 owner: unfold
-last_verified: 2026-10-30
-verified_by: "Written with the implementation on branch feat/scim-and-shared-signals: src/identity/ (settings.ts, accounts.ts, revocation.ts, scim.ts, shared-signals.ts, lifecycle.ts), src/auth.ts, src/ahp/host.ts and src/http.ts; test/identity-scim.test.ts, test/identity-shared-signals.test.ts and test/identity-revocation.test.ts passed. The specifications were read at the URLs cited on 2026-10-30. The identity provider rows were read in each vendor's documentation on 2026-10-30; none was run against a real Authentik, Okta or Entra ID tenant, and the rows marked unverified were not confirmed at all."
+last_verified: 2026-11-27
+verified_by: "SCIM per Tenant written with its implementation on branch feat/scim-per-tenant: src/identity/scim.ts, scim-admin.ts, accounts.ts, lifecycle.ts and public/views/scim.js; test/identity-scim-tenants.test.ts passed. Earlier written with the implementation on branch feat/scim-and-shared-signals: src/identity/ (settings.ts, accounts.ts, revocation.ts, scim.ts, shared-signals.ts, lifecycle.ts), src/auth.ts, src/ahp/host.ts and src/http.ts; test/identity-scim.test.ts, test/identity-shared-signals.test.ts and test/identity-revocation.test.ts passed. The specifications were read at the URLs cited on 2026-10-30. The identity provider rows were read in each vendor's documentation on 2026-10-30; none was run against a real Authentik, Okta or Entra ID tenant, and the rows marked unverified were not confirmed at all."
 ---
 
 # Provision and deprovision people (SCIM and Shared Signals)
@@ -53,8 +53,9 @@ Memberships and roles read from the store on every request, so a Group change ap
 
 | Setting | Meaning |
 | --- | --- |
-| `scim.tokenEnv` | The `UNFOLD_` environment variable holding the bearer token. Unfold refuses to start when it is unset or shorter than 32 characters |
-| `scim.linkBy` | Which SCIM attribute names the person single sign-on signs in: `externalId` (the default) or `userName` when that attribute carries the identity provider's OIDC `sub`, or `email` to link by the email the person signs in with |
+| `scim.tokenEnv` | The `UNFOLD_` environment variable holding the installation-wide bearer token. Unfold refuses to start when it names a variable that is unset or shorter than 32 characters. Leave it out to accept only [Tenant tokens](#scim-per-tenant) |
+| `scim.linkBy` | For Users the installation token pushes: which SCIM attribute names the person single sign-on signs in: `externalId` (the default) or `userName` when that attribute carries the identity provider's OIDC `sub`, or `email` to link by the email the person signs in with |
+| `scim.userIdClaim` | For Users a Tenant's token pushes: the sign-in claim that carries the customer identity provider's user id, matched to the User's `externalId`. Without it, or when a sign-in lacks it, they link by email |
 | `sharedSignals.audience` | The `aud` every SET must name. Defaults to `baseUrl` |
 | `sharedSignals.maxAgeHours` | How old a SET's `iat` may be, 1 to 168 hours, default 24 |
 | `transmitters[].name` | A short name for records and logs |
@@ -75,7 +76,7 @@ Memberships and roles read from the store on every request, so a Group change ap
 | `POST /scim/v2/Users`, `/Groups` | 201 with `Location`; 409 `uniqueness` for a `userName` or `displayName` already held, without regard to case |
 | `GET`, `PUT`, `PATCH`, `DELETE /scim/v2/Users/{id}`, `/Groups/{id}` | `PATCH` takes `add`, `replace` and `remove` in any case, with or without a path; `remove` on `members[value eq "…"]` or on `members` with a list; booleans also as `"True"` and `"False"` |
 
-A User keeps `userName`, `externalId`, `displayName` (or `name.formatted`, or given and family name), `emails` and `active`, and shows its `groups`. Unfold ignores other attributes. Errors are SCIM Error responses (`urn:ietf:params:scim:api:messages:2.0:Error`) with a `scimType` where RFC 7644 defines one. Every request without the right `Authorization: Bearer <token>` is 401.
+A User keeps `userName`, `externalId`, `displayName` (or `name.formatted`, or given and family name), `emails` and `active`, and shows its `groups`. Unfold ignores other attributes. Errors are SCIM Error responses (`urn:ietf:params:scim:api:messages:2.0:Error`) with a `scimType` where RFC 7644 defines one. Every request without the right `Authorization: Bearer <token>`, the installation token or a Tenant's, is 401.
 
 ### How a User becomes an Unfold account
 
@@ -90,6 +91,28 @@ A Group's `displayName` grants what a sign-in group grants:
 - a group in `auth.oidc.roles` (such as `unfold-admins`): that role.
 
 When a Group changes, each member whose Groups changed gets their memberships recomputed from all their SCIM Groups, and their role set from the role groups. A member who loses the last role group a SCIM Group gave them is signed out everywhere, so their next sign-in asks the identity provider again. Push every `unfold/…` group the identity provider grants: a group it does not push is a membership Unfold removes at the next Group change.
+
+### SCIM per Tenant
+
+An Agency's own identity provider, such as Entra ID or Okta, pushes its people straight to Unfold with a token of its Tenant, without going through the sign-in broker ([ADR 0059](../adrs/0059-the-identity-provider-provisions-and-deprovisions-people-through-scim-and-pushed-shared-signals.md#amendment-2026-11-27-each-tenants-identity-provider-pushes-scim-straight-to-unfold)). The URL is the same `/scim/v2`; the token decides the Tenant.
+
+1. The operator configures `identity.scim` (a `tokenEnv` is optional) and turns on the `identity.scim` flag for the Tenant. A Tenant's token is evaluated against the flag for its own Tenant.
+2. A Tenant administrator opens **Settings → SCIM provisioning** (`#settings/scim`) and chooses **Issue token**, or calls `POST /api/admin/scim/tenants/{tenant}/token` from a browser session. Unfold shows the token (`unfold_scim_…`) once and keeps only its SHA-256 hash. **New token** replaces it, and the old one stops working at once; **Withdraw** removes it.
+3. The administrator pastes the SCIM base URL and the token into the identity provider.
+
+What a Tenant's token can do:
+
+* It lists, reads, changes and deletes only the Users and Groups it pushed. Another Tenant's User or Group is 404, and a Group never takes another Tenant's User as a member. A `userName` or Group `displayName` is unique within the Tenant only.
+* Its Groups grant memberships only in its own Tenant: `unfold/<tenant>/…` names for that Tenant, and the groups the Tenant mapped. A Group named after another Tenant, or after a sign-in role list such as `unfold-admins`, grants nothing. It never sets the installation-wide account role, which the sign-in decides.
+* It never creates an account. A User links to an account whose sign-in carried the customer identity provider's user id equal to the User's `externalId` (`scim.userIdClaim`), else to the account named by the User's email. A User that names nobody waits and links at that person's first sign-in, by the same two rules.
+* Deactivating or deleting a User turns the account off and ends every credential, exactly as above, when the person holds no membership of another Tenant. When they do, only this Tenant's memberships go. Only the same Tenant's SCIM turns the account back on.
+* A Tenant's memberships survive the person's next sign-in, even when the sign-in's groups do not name the Tenant.
+
+**Group mappings.** Under **Map a group**, or with `PUT /api/admin/scim/tenants/{tenant}/group-mappings`, the administrator maps one of the customer's groups, by display name (without regard to case) or by externalId, to an Access Role (viewer, developer, admin), Client memberships, or both. A change applies at once to everyone the Tenant's SCIM Users name.
+
+Issuing, rotating and withdrawing a token and changing the mappings are Action Records and Entity Management records in the Tenant's audit trail. A Tenant's SCIM calls are recorded with the person `scim:<tenant>`.
+
+Not built: Google Workspace pushes SCIM only through its beta [custom SCIM profiles](https://knowledge.workspace.google.com/admin/users/advanced/automated-user-provisioning-with-custom-scim-profiles), for SAML apps and limited participants, and the fallback of reading its Directory API does not exist. Nor does a broker event that deprovisions a person removed at the broker, or the broker Action that adds the user id claim.
 
 ### Set up the identity provider
 
@@ -163,4 +186,4 @@ No identity provider above sends RISC `account-disabled` or the RFC 9967 SCIM ev
 
 ## Audit
 
-Every SCIM call that changes something, every refused SCIM call, every SET event and every revocation is an Action Record, readable at `GET /api/actions` with channel `scim` or `ssf` ([HTTP contract](../contracts/api.md#provisioning-and-shared-signals)). Its person is `scim` (SCIM provisioning) or `ssf:<transmitter>`, its role `system`, and its target the Unfold account (`person`) or SCIM Group (`group`). A revocation is recorded as `REVOKE <cause>` with what it ended. Each also writes a log line: `identity.provisioned`, `identity.updated`, `identity.deactivated`, `identity.reactivated`, `identity.deleted`, `identity.memberships`, `identity.reauthenticate`, `identity.revoked`, `identity.signed_out`, `login.refused`, `ssf.event`, `ssf.duplicate`, `ssf.event_ignored`, `ssf.event_acknowledged`, `ssf.subject_unknown` and `ssf.refused`.
+Every SCIM call that changes something, every refused SCIM call, every SET event and every revocation is an Action Record, readable at `GET /api/actions` with channel `scim` or `ssf` ([HTTP contract](../contracts/api.md#provisioning-and-shared-signals)). Its person is `scim` (SCIM provisioning), `scim:<tenant>` (a Tenant's token) or `ssf:<transmitter>`, its role `system`, and its target the Unfold account (`person`) or SCIM Group (`group`). A revocation is recorded as `REVOKE <cause>` with what it ended. Each also writes a log line: `identity.provisioned`, `identity.updated`, `identity.deactivated`, `identity.reactivated`, `identity.deleted`, `identity.memberships`, `identity.reauthenticate`, `identity.revoked`, `identity.signed_out`, `login.refused`, `ssf.event`, `ssf.duplicate`, `ssf.event_ignored`, `ssf.event_acknowledged`, `ssf.subject_unknown` and `ssf.refused`.

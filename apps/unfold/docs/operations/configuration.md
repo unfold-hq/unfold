@@ -720,9 +720,10 @@ SCIM provisioning and the Shared Signals receiver; both need auth.oidc.
 
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `identity.scim` | object |  | The SCIM service provider. |
-| `identity.scim.tokenEnv` | string |  | UNFOLD_ environment variable holding the bearer token the identity provider sends, at least 32 characters. |
-| `identity.scim.linkBy` | one of `externalId`, `userName`, `email` | `externalId` | SCIM User attribute that names the person who signs in. |
+| `identity.scim` | object |  | The SCIM service provider. Tenant administrators issue each Tenant its own token besides the installation token. |
+| `identity.scim.tokenEnv` | string |  | UNFOLD_ environment variable holding the installation-wide bearer token, at least 32 characters. Without it only Tenant tokens reach SCIM. |
+| `identity.scim.linkBy` | one of `externalId`, `userName`, `email` | `externalId` | SCIM User attribute that names the person who signs in, for Users the installation token pushes. |
+| `identity.scim.userIdClaim` | string |  | Sign-in claim carrying the customer identity provider's user id, which links a Tenant's SCIM User whose externalId equals it; email otherwise. |
 | `identity.sharedSignals` | object |  | The Shared Signals push receiver. |
 | `identity.sharedSignals.audience` | string |  | Audience a Security Event Token must name; baseUrl when absent. |
 | `identity.sharedSignals.maxAgeHours` | integer, 1–168 | `24` | Oldest Security Event Token accepted, in hours. |

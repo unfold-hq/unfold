@@ -6,7 +6,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { application } from './api-support.ts';
 import type { AppConfig } from '../src/types.ts';
 
-export async function provider(options: { groups?: string[]; role?: string; wrongNonce?: boolean; wrongAudience?: boolean; issParameter?: boolean } = {}) {
+export async function provider(options: { groups?: string[]; role?: string; wrongNonce?: boolean; wrongAudience?: boolean; issParameter?: boolean; claims?: Record<string, unknown> } = {}) {
   const { publicKey, privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const jwk = { ...(publicKey.export({ format: 'jwk' }) as Record<string, unknown>), kid: 'k1', use: 'sig', alg: 'RS256' };
   let issuer = '';
@@ -24,6 +24,7 @@ export async function provider(options: { groups?: string[]; role?: string; wron
       const now = Math.floor(Date.now() / 1000);
       const claims: Record<string, unknown> = { iss: issuer, aud: options.wrongAudience ? 'someone-else' : 'unfold', sub: 'person@example.com', email: 'Person@example.com', name: 'Ryan Grippeling', preferred_username: 'r.grippeling', groups: options.groups ?? ['unfold-operators', 'team-platform'], exp: now + 300, iat: now, nonce: options.wrongNonce ? 'other' : params.nonce ?? '' };
       if (options.role) claims.unfold_role = options.role;
+      Object.assign(claims, options.claims ?? {});
       res.end(JSON.stringify({ access_token: 'at', id_token: `${await sealed(claims, params)}`, token_type: 'Bearer' }));
       return;
     }

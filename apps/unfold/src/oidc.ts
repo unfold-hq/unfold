@@ -6,7 +6,7 @@ import { membershipsFromGroups, type Membership } from './tenancy.ts';
 /** Which identity-provider tokens an editor may trade for an editor credential, how their person is found, and whether a person without an account gets one. */
 export type OidcExchange = { audiences: string[]; match: 'subject' | 'email'; provision: boolean };
 export type OidcSettings = { issuer: string; subjectNamespace?: string; clientId: string; clientSecret?: string; scopes: string[]; displayName: string; roleClaim: string; groupsClaim: string; roles: Record<UserRole, string[]>; exchange?: OidcExchange };
-export type OidcIdentity = { id: string; name: string; role: UserRole; subject: string; email?: string; memberships: Membership[] };
+export type OidcIdentity = { id: string; name: string; role: UserRole; subject: string; email?: string; idpUserId?: string; memberships: Membership[] };
 type Discovery = { issuer: string; authorization_endpoint: string; token_endpoint: string; jwks_uri: string; authorization_response_iss_parameter_supported?: boolean };
 type Pending = { verifier: string; nonce: string; createdAt: number; browserBinding: string; editor?: string };
 
@@ -265,6 +265,8 @@ export class Oidc {
     const preferred = [claims.preferred_username, claims.name, email, subject].find((value): value is string => typeof value === 'string' && value.trim().length > 0)!;
     const name = preferred.trim().slice(0, 100);
     const id = subjectUserId(settings.subjectNamespace ?? settings.issuer, subject);
-    return { id, name, role, subject, ...(email ? { email } : {}), memberships: membershipsFromGroups(claims[settings.groupsClaim]) };
+    const userIdClaim = this.config.identity?.scim?.userIdClaim;
+    const idpUserId = userIdClaim && typeof claims[userIdClaim] === 'string' && /^[!-~]{1,256}$/.test(claims[userIdClaim] as string) ? claims[userIdClaim] as string : undefined;
+    return { id, name, role, subject, ...(email ? { email } : {}), ...(idpUserId ? { idpUserId } : {}), memberships: membershipsFromGroups(claims[settings.groupsClaim]) };
   }
 }
