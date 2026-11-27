@@ -32,14 +32,14 @@ export async function transmitter() {
 }
 
 /** A live workbench with single sign-on, SCIM and the Shared Signals receiver configured and their flags as given. */
-export async function identityBench(t: test.TestContext, options: { scim?: boolean; signals?: boolean; linkBy?: 'externalId' | 'userName' | 'email'; configure?: (config: AppConfig) => void } = {}) {
-  const idp = await provider({ groups: ['unfold-operators'] });
+export async function identityBench(t: test.TestContext, options: { scim?: boolean; signals?: boolean; linkBy?: 'externalId' | 'userName' | 'email'; userIdClaim?: string; groups?: string[]; claims?: Record<string, unknown>; configure?: (config: AppConfig) => void } = {}) {
+  const idp = await provider({ groups: options.groups ?? ['unfold-operators'], ...(options.claims ? { claims: options.claims } : {}) });
   const sender = await transmitter();
   const audience = 'https://unfold.test';
   const server = await application('live', config => {
     config.baseUrl = undefined;
     config.auth.oidc = { issuer: idp.issuer, clientId: 'unfold', scopes: ['openid', 'email', 'profile'], displayName: 'Authentik', roleClaim: 'unfold_role', groupsClaim: 'groups', roles: { admin: ['unfold-admins'], operator: ['unfold-operators'], viewer: ['unfold-viewers'] } };
-    config.identity = { scim: { tokenEnv: 'UNFOLD_SCIM_TEST_TOKEN', linkBy: options.linkBy ?? 'externalId' }, sharedSignals: { audience, maxAgeHours: 24, transmitters: [{ name: 'test-idp', issuer: sender.issuer, jwksUri: sender.jwksUri }] } };
+    config.identity = { scim: { tokenEnv: 'UNFOLD_SCIM_TEST_TOKEN', linkBy: options.linkBy ?? 'externalId', ...(options.userIdClaim ? { userIdClaim: options.userIdClaim } : {}) }, sharedSignals: { audience, maxAgeHours: 24, transmitters: [{ name: 'test-idp', issuer: sender.issuer, jwksUri: sender.jwksUri }] } };
     config.flags = { document: { flags: { 'identity.scim': { defaultVariant: options.scim === false ? 'off' : 'on' }, 'identity.shared-signals': { defaultVariant: options.signals === false ? 'off' : 'on' } } }, unknown: [] };
     options.configure?.(config);
   });

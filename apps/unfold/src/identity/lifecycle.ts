@@ -5,10 +5,10 @@ import type { PersonProof } from '../person-proof.ts';
 import type { AppConfig } from '../types.ts';
 import { recordedInputs, type ActionTarget } from '../action-records.ts';
 import { subjectUserId } from '../oidc.ts';
-import { membershipsFromGroups } from '../tenancy.ts';
-import { identityAccounts, type IdentityAccounts } from './accounts.ts';
+import { defaultTenant, membershipsFromGroups, type Membership } from '../tenancy.ts';
+import { identityAccounts, type IdentityAccounts, type ScimScope, type ScimUserRecord } from './accounts.ts';
 import { Revocation, type AgentsWindowTokens, type RevocationCounts } from './revocation.ts';
-import { ScimService, scimBase, type ScimEffect, type ScimTarget } from './scim.ts';
+import { ScimService, disabledBy, scimBase, signInMemberships, type ScimEffect, type ScimTarget } from './scim.ts';
 import { SetError, SetVerifier, eventName, readSet, refuseSet, sharedSignalsPath, type Subject, type VerifiedEvent, type VerifiedSet } from './shared-signals.ts';
 import { normalIssuer } from './settings.ts';
 
@@ -19,12 +19,20 @@ export type LifecycleDependencies = {
   auth: Auth;
   agentHost?: AgentsWindowTokens;
   proof?: PersonProof;
-  /** Whether a flag is on for the default Tenant: `identity.scim` and `identity.shared-signals` turn each part on, both off by default. */
-  enabled(flag: string): Promise<boolean>;
+  /**
+   * Whether a flag is on for a Tenant, the default Tenant when none is named: `identity.scim` and
+   * `identity.shared-signals` turn each part on, both off by default. A Tenant's SCIM token asks for its own Tenant.
+   */
+  enabled(flag: string, tenant?: string): Promise<boolean>;
   fetch?: typeof fetch;
 };
 
+/** Who signed in, as the lifecycle needs it: the account, the email, the customer identity provider's user id and the sign-in's memberships. */
+export type SigningIn = { id: string; email?: string; idpUserId?: string; memberships?: readonly Membership[] };
+
 type Actor = { id: string; name: string; channel: string };
+
+const scimActor = (scope: ScimScope): Actor => scope === null ? { id: 'scim', name: 'SCIM provisioning', channel: 'scim' } : { id: `scim:${scope}`, name: `SCIM provisioning: ${scope}`, channel: 'scim' };
 
 /**
  * Provisioning and deprovisioning from the identity provider: the SCIM service provider at `/scim/v2`, the Shared
@@ -43,13 +51,12 @@ export class IdentityLifecycle {
     this.accounts = identityAccounts(deps.store.db);
     this.revocation = new Revocation(deps.store, deps.auth, deps.agentHost, deps.proof);
     const { identity, auth, baseUrl } = deps.config;
-    const scimActor: Actor = { id: 'scim', name: 'SCIM provisioning', channel: 'scim' };
     this.scim = identity?.scim && auth.oidc ? new ScimService({
       accounts: this.accounts,
       store: deps.store,
       oidc: auth.oidc,
       settings: identity.scim,
-      revoke: (userId, cause) => this.revoke(userId, cause, scimActor),
+      revoke: (userId, cause, scope) => this.revoke(userId, cause, scimActor(scope)),
       effect: effect => this.provisioned(effect),
       location: `${(baseUrl ?? '').replace(/\/+$/, '')}${scimBase}`,
     }) : undefined;
@@ -62,10 +69,32 @@ export class IdentityLifecycle {
   /** Serves a SCIM or Shared Signals request. Either part answers 404 while it is unconfigured or its flag is off. */
   async handle(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
     if (url.pathname === sharedSignalsPath) return this.receive(req, res);
-    if (!this.scim || !await this.deps.enabled('identity.scim')) return notFound(res, 'application/scim+json');
+    if (!this.scim) return notFound(res, 'application/scim+json');
+    const caller = this.scim.authenticate(req);
+    if (!await this.deps.enabled('identity.scim', caller?.tenant ?? defaultTenant)) return notFound(res, 'application/scim+json');
     let target: ScimTarget | undefined;
-    res.once('finish', () => this.record({ id: 'scim', name: 'SCIM provisioning', channel: 'scim' }, `${req.method ?? 'GET'} ${scimBase}${routeShape(url.pathname.slice(scimBase.length))}`, req.method ?? 'GET', target ? { kind: target.kind, id: target.id } : null, { ...(url.search ? { query: Object.fromEntries(url.searchParams) } : {}) }, res.statusCode, req.method !== 'GET'));
-    await this.scim.handle(req, res, url, value => { target = value; });
+    res.once('finish', () => this.record(scimActor(caller?.tenant ?? null), `${req.method ?? 'GET'} ${scimBase}${routeShape(url.pathname.slice(scimBase.length))}`, req.method ?? 'GET', target ? { kind: target.kind, id: target.id } : null, { ...(url.search ? { query: Object.fromEntries(url.searchParams) } : {}) }, res.statusCode, req.method !== 'GET'));
+    await this.scim.handle(req, res, url, caller, value => { target = value; });
+  }
+
+  /**
+   * The memberships a person signs in with: what the sign-in's groups grant, and what every Tenant's SCIM Users of the
+   * person grant, so a Tenant's provisioning survives a sign-in whose groups do not name that Tenant.
+   */
+  signInMemberships(userId: string, claimed: readonly Membership[]): Membership[] {
+    return signInMemberships(this.accounts, userId, claimed);
+  }
+
+  /**
+   * Whether a Tenant's SCIM token provisioned the person signing in: an active Tenant SCIM User names their account, or
+   * waits for them by the identity provider's user id or email. Such a person gets the role `viewer` when their sign-in
+   * entitles none; what they may do in the Tenant comes from its memberships.
+   */
+  tenantProvisioned(person: { id: string; email?: string; idpUserId?: string }): boolean {
+    const active = (records: ScimUserRecord[], waiting: boolean) => records.some(record => record.tenant !== null && record.active && (waiting ? record.userId === null : record.userId === person.id));
+    if (active(this.accounts.usersOf(person.id), false)) return true;
+    if (person.idpUserId && active(this.accounts.users(undefined, { field: 'externalId', value: person.idpUserId }, 0, 50).items, true)) return true;
+    return Boolean(person.email && (active(this.accounts.users(undefined, { field: 'email', value: person.email }, 0, 50).items, true) || active(this.accounts.users(undefined, { field: 'userName', value: person.email }, 0, 50).items, true)));
   }
 
   /** Ends one sign-in, for sign-out: its session or editor credential, its Agents-window tokens and kept sign-in tokens. */
@@ -77,12 +106,16 @@ export class IdentityLifecycle {
 
   /**
    * Whether a person who just signed in with single sign-on may have a session: false when the provider turned their
-   * account off. A SCIM User waiting to be linked by email is linked to them first, with its state and Groups.
+   * account off. A SCIM User of the installation token waiting to be linked by email is linked to them first, with its
+   * state and Groups. So is each Tenant's waiting SCIM User whose externalId is the customer identity provider's user
+   * id the sign-in carries, or else whose email is the sign-in's, one per Tenant.
    */
-  admit(identity: { id: string; email?: string }): boolean {
+  admit(identity: SigningIn): boolean {
+    if (identity.idpUserId) this.accounts.rememberIdpUserId(identity.id, identity.idpUserId);
+    this.linkTenantUsers(identity);
     if (identity.email) {
-      const waiting = this.accounts.users({ field: 'email', value: identity.email }, 0, 5).items.find(user => user.userId === null) ?? this.accounts.users({ field: 'userName', value: identity.email }, 0, 1).items.find(user => user.userId === null);
-      if (waiting && !this.accounts.usersOf(identity.id).length) {
+      const waiting = this.accounts.users(null, { field: 'email', value: identity.email }, 0, 5).items.find(user => user.userId === null) ?? this.accounts.users(null, { field: 'userName', value: identity.email }, 0, 1).items.find(user => user.userId === null);
+      if (waiting && !this.accounts.usersOf(identity.id).some(record => record.tenant === null)) {
         const linked = this.accounts.saveUser({ ...waiting, userId: identity.id });
         if (!linked.active) this.accounts.disable(identity.id, 'scim', 'SCIM set active to false');
         const names = this.accounts.groupNamesOf(linked.id);
@@ -93,6 +126,22 @@ export class IdentityLifecycle {
     const off = this.accounts.disabled(identity.id);
     if (off) console.error(JSON.stringify({ level: 'warn', event: 'login.refused', user: identity.id, disabledBy: off.by }));
     return !off;
+  }
+
+  private linkTenantUsers(identity: SigningIn): void {
+    const waiting = (records: ScimUserRecord[]) => records.filter(record => record.tenant !== null && record.userId === null);
+    const byIdp = identity.idpUserId ? waiting(this.accounts.users(undefined, { field: 'externalId', value: identity.idpUserId }, 0, 50).items) : [];
+    const byEmail = identity.email ? waiting([...this.accounts.users(undefined, { field: 'email', value: identity.email }, 0, 50).items, ...this.accounts.users(undefined, { field: 'userName', value: identity.email }, 0, 50).items]) : [];
+    const linkedTenants = new Set(this.accounts.usersOf(identity.id).map(record => record.tenant));
+    for (const [record, linkedBy] of [...byIdp.map(item => [item, 'idpUserId'] as const), ...byEmail.map(item => [item, 'email'] as const)]) {
+      if (linkedTenants.has(record.tenant)) continue;
+      linkedTenants.add(record.tenant);
+      const tenant = record.tenant!;
+      const linked = this.accounts.saveUser({ ...record, userId: identity.id });
+      const elsewhere = signInMemberships(this.accounts, identity.id, identity.memberships ?? []).some(entry => entry.tenant !== tenant);
+      if (!linked.active && linkedBy === 'idpUserId' && !elsewhere && !this.accounts.disabled(identity.id)) this.accounts.disable(identity.id, disabledBy(tenant), `SCIM of Tenant ${tenant} set active to false`);
+      this.provisioned({ userId: identity.id, change: 'updated', detail: { tenant, linkedBy } });
+    }
   }
 
   /** Ends every credential `userId` holds and records it. */
@@ -167,7 +216,7 @@ export class IdentityLifecycle {
     const byEmail = (email: string) => {
       const user = this.deps.store.getUserByName(email);
       if (user) found.add(user.id);
-      for (const record of this.accounts.users({ field: 'email', value: email }, 0, 10).items) if (record.userId) found.add(record.userId);
+      for (const record of this.accounts.users(undefined, { field: 'email', value: email }, 0, 10).items) if (record.userId) found.add(record.userId);
     };
     const format = subject.format;
     if (format === 'iss_sub') {
@@ -184,7 +233,7 @@ export class IdentityLifecycle {
     } else if (format === 'scim') {
       const externalId = text(subject.externalId);
       const userName = text(subject.userName);
-      for (const record of [...(externalId ? this.accounts.users({ field: 'externalId', value: externalId }, 0, 5).items : []), ...(userName ? this.accounts.users({ field: 'userName', value: userName }, 0, 5).items : [])]) if (record.userId) found.add(record.userId);
+      for (const record of [...(externalId ? this.accounts.users(undefined, { field: 'externalId', value: externalId }, 0, 5).items : []), ...(userName ? this.accounts.users(undefined, { field: 'userName', value: userName }, 0, 5).items : [])]) if (record.userId) found.add(record.userId);
       const emails = Array.isArray(subject.emails) ? subject.emails : [];
       for (const entry of emails.slice(0, 5)) { const email = text(typeof entry === 'string' ? entry : (entry as { value?: unknown })?.value); if (email) byEmail(email.toLowerCase()); }
     }

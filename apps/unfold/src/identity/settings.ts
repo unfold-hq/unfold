@@ -1,8 +1,12 @@
 /** Which SCIM User attribute names the person a SCIM User is: one that equals the OIDC `sub` claim, or the email they sign in with. */
 export type ScimLink = 'externalId' | 'userName' | 'email';
 
-/** The SCIM service provider: the environment variable holding the bearer token the identity provider sends, and how SCIM Users link to sign-ins. */
-export type ScimSettings = { tokenEnv: string; linkBy: ScimLink };
+/**
+ * The SCIM service provider: the environment variable holding the installation-wide bearer token, how SCIM Users the
+ * installation token pushes link to sign-ins, and the sign-in claim that carries the customer identity provider's user
+ * id, which links the SCIM Users a Tenant's own token pushes.
+ */
+export type ScimSettings = { tokenEnv?: string; linkBy: ScimLink; userIdClaim?: string };
 
 /** One Shared Signals transmitter whose Security Event Tokens Unfold accepts. */
 export type TransmitterSettings = { name: string; issuer: string; jwksUri: string; audience?: string; authorizationEnv?: string };
@@ -14,6 +18,7 @@ export type SharedSignalsSettings = { audience: string; maxAgeHours: number; tra
 export type IdentitySettings = { scim?: ScimSettings; sharedSignals?: SharedSignalsSettings };
 
 const envName = /^UNFOLD_[A-Z0-9_]{1,100}$/;
+const claimName = /^[A-Za-z][A-Za-z0-9_.:-]{0,99}$/;
 const minimumTokenLength = 32;
 
 function object(raw: unknown, label: string, keys: string[]): Record<string, unknown> {
@@ -40,18 +45,24 @@ function secretEnv(value: unknown, label: string, env: NodeJS.ProcessEnv): strin
 
 /**
  * Reads the `identity` block. `scim.tokenEnv` and each transmitter's `authorizationEnv` name environment variables that
- * must be set, so a secret never sits in the configuration file. Both parts need single sign-on, because SCIM Users and
- * SET subjects are matched to the people single sign-on creates. `baseUrl` is the default SET audience.
+ * must be set, so a secret never sits in the configuration file. Without `scim.tokenEnv`, only the tokens Tenant
+ * administrators issue reach SCIM. Both parts need single sign-on, because SCIM Users and SET subjects are matched to
+ * the people single sign-on creates. `baseUrl` is the default SET audience.
  */
 export function identitySettings(raw: unknown, context: { oidc: boolean; baseUrl?: string }, env: NodeJS.ProcessEnv = process.env): IdentitySettings {
   const value = object(raw, 'identity', ['scim', 'sharedSignals']);
   if (!context.oidc && (value.scim !== undefined || value.sharedSignals !== undefined)) throw new Error('identity needs auth.oidc: SCIM Users and Shared Signals subjects are matched to the people single sign-on signs in');
   const settings: IdentitySettings = {};
   if (value.scim !== undefined) {
-    const scim = object(value.scim, 'identity.scim', ['tokenEnv', 'linkBy']);
+    const scim = object(value.scim, 'identity.scim', ['tokenEnv', 'linkBy', 'userIdClaim']);
     const linkBy = scim.linkBy ?? 'externalId';
     if (linkBy !== 'externalId' && linkBy !== 'userName' && linkBy !== 'email') throw new Error('identity.scim.linkBy must be externalId, userName or email');
-    settings.scim = { tokenEnv: secretEnv(scim.tokenEnv, 'identity.scim.tokenEnv', env), linkBy };
+    if (scim.userIdClaim !== undefined && (typeof scim.userIdClaim !== 'string' || !claimName.test(scim.userIdClaim))) throw new Error('identity.scim.userIdClaim must be a claim name of letters, digits, _ . : and -');
+    settings.scim = {
+      ...(scim.tokenEnv !== undefined ? { tokenEnv: secretEnv(scim.tokenEnv, 'identity.scim.tokenEnv', env) } : {}),
+      linkBy,
+      ...(scim.userIdClaim !== undefined ? { userIdClaim: scim.userIdClaim as string } : {}),
+    };
   }
   if (value.sharedSignals !== undefined) {
     const signals = object(value.sharedSignals, 'identity.sharedSignals', ['audience', 'maxAgeHours', 'transmitters']);

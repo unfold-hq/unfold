@@ -186,7 +186,7 @@
         "owner": "Ryan Grippeling",
         "created": "2026-10-30",
         "title": "SCIM provisioning",
-        "description": "Serves the SCIM 2.0 service provider at /scim/v2 for the identity provider, with the bearer token identity.scim.tokenEnv names: Users and Groups, where a Group named unfold/<tenant>/<role> or unfold/<tenant>/client/<client> grants that membership. Deactivating or deleting a User turns the account off and ends every browser session, editor credential, Agents-window token and kept sign-in at once. While off, /scim/v2 answers 404. Evaluated for the default Tenant.",
+        "description": "Serves the SCIM 2.0 service provider at /scim/v2 for the identity provider, with the bearer token identity.scim.tokenEnv names or a token a Tenant administrator issued for one Tenant: Users and Groups, where a Group named unfold/<tenant>/<role> or unfold/<tenant>/client/<client>, or one the Tenant mapped, grants that membership. A Tenant's token reaches only that Tenant; while a Tenant has one, its memberships come from SCIM only, not from sign-in groups, and a person it provisioned whose sign-in entitles no role signs in as viewer. Deactivating or deleting a User turns the account off and ends every browser session, editor credential, Agents-window token and kept sign-in at once; under a Tenant's token only for a User linked by the identity provider's user id whose person is in no other Tenant, and otherwise only that Tenant's memberships go. While off, /scim/v2 answers 404. Evaluated for the default Tenant with the installation token, and for the token's Tenant otherwise.",
         "client": false,
         "labs": false
       }

@@ -8641,6 +8641,128 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/admin/scim:
+    get:
+      tags: [Administration]
+      operationId: getScimProvisioning
+      summary: 'SCIM provisioning of each Tenant the caller administers'
+      description: |
+        Each Tenant's `identity.scim` flag value, who issued its SCIM token and when (never the token), and its group
+        mappings. While `tenancy.enforce` is off only `default` is listed; while it is on, each Tenant the caller is an
+        Admin of. A browser session only (403 `browser_only`).
+      x-unfold-role: admin
+      security:
+        - sessionCookie: []
+      responses:
+        '200':
+          description: '`{configured, scimUrl, installationToken, userIdClaim, tenants}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured: { type: boolean }
+                  scimUrl: { type: string }
+                  installationToken: { type: boolean }
+                  userIdClaim: { type: [string, 'null'] }
+                  tenants:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tenant: { type: string }
+                        enabled: { type: boolean }
+                        token: { type: [object, 'null'], properties: { issuedAt: { type: string, format: date-time }, issuedBy: { type: string } } }
+                        mappings: { type: array, items: { $ref: '#/components/schemas/ScimGroupMapping' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/admin/scim/tenants/{tenant}/token:
+    parameters:
+      - $ref: '#/components/parameters/ScimTenant'
+    post:
+      tags: [Administration]
+      operationId: issueScimToken
+      summary: 'Issue or rotate a Tenant''s SCIM bearer token'
+      description: |
+        `token` (`unfold_scim_…`) is shown this once; Unfold keeps only its SHA-256 hash. 201 for a Tenant's first
+        token, 200 when it replaces one, which stops working at once. A request with the token reaches only that
+        Tenant's SCIM Users, Groups and memberships at `/scim/v2`. 404 `tenant_not_found` unless the caller is an Admin
+        of the Tenant, 409 `scim_unconfigured` without an `identity.scim` block. A browser session only (403
+        `browser_only`).
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+      requestBody: { $ref: '#/components/requestBodies/Empty' }
+      responses:
+        '200': { $ref: '#/components/responses/ScimTokenIssued' }
+        '201': { $ref: '#/components/responses/ScimTokenIssued' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    delete:
+      tags: [Administration]
+      operationId: withdrawScimToken
+      summary: 'Withdraw a Tenant''s SCIM bearer token'
+      description: '404 `scim_token_not_found` when the Tenant has none. A browser session only (403 `browser_only`).'
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+      responses:
+        '200':
+          description: '`{tenant, deleted}`'
+          content:
+            application/json:
+              schema: { type: object, properties: { tenant: { type: string }, deleted: { type: boolean } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /api/admin/scim/tenants/{tenant}/group-mappings:
+    parameters:
+      - $ref: '#/components/parameters/ScimTenant'
+    put:
+      tags: [Administration]
+      operationId: setScimGroupMappings
+      summary: 'Replace the customer groups a Tenant maps to Access Roles and Clients'
+      description: |
+        Each mapping matches a SCIM Group the Tenant's token pushed by `displayName` (without regard to case) or
+        `externalId`, and grants its members `role` in the Tenant, Client memberships in it, or both. Groups named
+        `unfold/<tenant>/<role>` keep working without a mapping. Applied at once to every person the Tenant's SCIM Users
+        name; `applied` counts them. 400 `scim_mappings` for an invalid list. A browser session only (403 `browser_only`).
+      x-unfold-role: admin
+      security:
+        - { sessionCookie: [], unfoldRequest: [] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mappings]
+              properties:
+                mappings: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/ScimGroupMapping' } }
+      responses:
+        '200':
+          description: '`{tenant, mappings, applied}`'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenant: { type: string }
+                  mappings: { type: array, items: { $ref: '#/components/schemas/ScimGroupMapping' } }
+                  applied: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
 
   /api/relay/pool/claim:
     get:
@@ -8902,6 +9024,12 @@ components:
       required: true
       schema: { type: string, pattern: '^[0-9a-f]{32}$' }
       example: 0123456789abcdef0123456789abcdef
+    ScimTenant:
+      name: tenant
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' }
+      example: acme
   requestBodies:
     Empty:
       description: 'An action without input sends `{}`.'
@@ -9499,6 +9627,14 @@ components:
         rows: { type: [integer, 'null'] }
         error: { type: [string, 'null'] }
         downloadUrl: { type: [string, 'null'] }
+    ScimGroupMapping:
+      type: object
+      required: [value]
+      properties:
+        match: { type: string, enum: [displayName, externalId], default: displayName }
+        value: { type: string, maxLength: 256 }
+        role: { type: [string, 'null'], enum: [viewer, developer, admin, null] }
+        clients: { type: array, maxItems: 50, items: { type: string } }
   responses:
     Ok:
       description: 'The JSON answer; [HTTP contract](api.md) lists its fields.'
@@ -9666,6 +9802,17 @@ components:
       content:
         application/json:
           schema: { type: object, properties: { export: { $ref: '#/components/schemas/TenantExport' } } }
+    ScimTokenIssued:
+      description: '`{tenant, token, issued, replaced}`; `token` is shown this once.'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              tenant: { type: string }
+              token: { type: string }
+              issued: { type: object, properties: { tenant: { type: string }, issuedAt: { type: string, format: date-time }, issuedBy: { type: string } } }
+              replaced: { type: boolean }
     BadRequest:
       description: 'Invalid input; `code` names the field rule, such as `invalid_input` or `invalid_json`.'
       content:

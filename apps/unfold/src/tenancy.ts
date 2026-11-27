@@ -43,6 +43,11 @@ export function membershipsFromGroups(groups: unknown): Membership[] {
   return canonical(groups.map(membershipFromGroup));
 }
 
+/** Every membership of the given lists together, sorted and without duplicates; a Tenant held twice keeps the higher role. */
+export function unionMemberships(...lists: ReadonlyArray<readonly Membership[]>): Membership[] {
+  return canonical(lists.flat());
+}
+
 /** The memberships a local password account or the demo account holds: its role in the default Tenant. */
 export function defaultMemberships(role: UserRole): Membership[] {
   return [{ kind: 'tenant', tenant: defaultTenant, role: accountRoles[role] }];

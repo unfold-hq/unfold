@@ -95,6 +95,9 @@ import type { AddressInfo } from 'node:net';
 import { SnoozeError, maxNowSnoozes, parseSnooze, snoozeKey, snoozeRetentionDays } from './now-snoozes.ts';
 import { AuditTrail } from './audit/service.ts';
 import { TenantExports, isTenantExportRoute, tenantExportRoute } from './tenant-export-jobs.ts';
+import { ScimAdministration, isScimAdminRoute, scimAdminRoute } from './identity/scim-admin.ts';
+import { identityAccounts } from './identity/accounts.ts';
+import { scimBase } from './identity/scim.ts';
 import { Notifications } from './notify/service.ts';
 import { IdentityLifecycle } from './identity/lifecycle.ts';
 import { clientAddress } from './client-address.ts';
@@ -388,7 +391,9 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   });
   const claudeRoutines = new ClaudeRoutines({ ploeg, steps: onboarding, store });
   onboarding.useStepLines((manage, context) => ({ ...clickup.lines(manage), ...gitlab.lines(github.lines(manage, context), manage), 'connect-claude': claudeRoutines.line(context.user) }));
-  const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: flag => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${defaultTenant}`, tenantId: defaultTenant, mode: config.mode }) });
+  const lifecycle = new IdentityLifecycle({ config, store, auth, agentHost, proof, enabled: (flag, tenant = defaultTenant) => flags.getBooleanValue(flag, false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }) });
+  if (oidc) oidc.provisioned = person => lifecycle.tenantProvisioned(person);
+  const scimAdmin = new ScimAdministration({ accounts: identityAccounts(store.db), store, configured: Boolean(config.identity?.scim && config.auth.oidc), installationToken: Boolean(config.identity?.scim?.tokenEnv), ...(config.identity?.scim?.userIdClaim ? { userIdClaim: config.identity.scim.userIdClaim } : {}), enforced: tenants.enforced, enabled: tenant => flags.getBooleanValue('identity.scim', false, { targetingKey: `tenant:${tenant}`, tenantId: tenant, mode: config.mode }), location: `${(config.baseUrl ?? '').replace(/\/+$/, '')}${scimBase}` });
   const flagContext = (user: User): FlagContext => {
     const choices = store.flagChoices(user.id);
     return { targetingKey: user.id, userId: user.id, role: user.role, tenantId: defaultTenant, mode: config.mode, teams: config.ploeg?.userTeams?.[user.id] ?? [], labs: Object.keys(choices).filter(key => choices[key]), labsOff: Object.keys(choices).filter(key => !choices[key]) };
@@ -417,6 +422,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
   const signOffs = config.ploeg && !ploeg.isDemo ? new ClientSignOffs(ploeg, new ClientSignOffStore(store.db), { jobs, enabled: team => flags.getBooleanValue('client.sign-off', false, { targetingKey: `team:${team}`, tenantId: defaultTenant, mode: config.mode, team }), commentEnabled: team => flags.getBooleanValue('client.sign-off-comment', false, { targetingKey: `team:${team}`, tenantId: defaultTenant, mode: config.mode, team }) }) : undefined;
   const admittedAccount = (identity: OidcIdentity, disabled: () => never): string => {
     if (!lifecycle.admit(identity)) disabled();
+    identity.memberships = lifecycle.signInMemberships(identity.id, identity.memberships);
     const claimedName = identity.email ?? identity.name;
     const name = store.upsertUser({ id: identity.id, name: claimedName, role: identity.role, passwordHash: '', memberships: identity.memberships });
     if (name !== claimedName) console.error(JSON.stringify({ level: 'warn', event: 'login.name_taken', method: 'oidc', user: identity.id, name }));
@@ -792,6 +798,7 @@ export function buildServer(config: AppConfig, store: Store, engine: Engine, run
           console.log(JSON.stringify({ level: 'info', event: override ? 'flag.override_set' : 'flag.override_cleared', actor: user.id, 'feature_flag.key': flagOverride[1], variant }));
           return json(res, 200, await adminFlags(user));
         }
+        if (isScimAdminRoute(path)) { const answer = await scimAdminRoute(scimAdmin, { method, path, user, scope: auth.scope(req), body: () => body(req) }); return json(res, answer.status, answer.body); }
         if (isTenantExportRoute(path)) {
           const answer = await tenantExportRoute(tenantExports, { method, path, user, scope: auth.scope(req), body: () => body(req), res });
           return answer ? json(res, answer.status, answer.body) : undefined;

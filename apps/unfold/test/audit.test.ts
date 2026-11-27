@@ -307,6 +307,19 @@ test('webhook, intake source, billing and Tenant export administration are Entit
   }
 });
 
+test('issuing, rotating and withdrawing a Tenant\'s SCIM token and mapping its groups are Entity Management records in that Tenant', () => {
+  const signedIn = { id: 'u-ada', name: 'ada', role: 'admin' as const, memberships: [{ kind: 'tenant' as const, tenant: 'acme', role: 'admin' as const }] };
+  const tap = (method: string, path: string, status: number, inputs: Record<string, unknown> = {}) => capture({ method, path, query: new URLSearchParams(), status, user: () => signedIn, inputs: () => inputs, userByName: () => undefined, signedInByResponse: () => undefined, editorLabel: () => undefined });
+  const entity = (captured: ReturnType<typeof capture>) => captured?.fact.kind === 'entity' ? [captured.fact.action, captured.fact.entity.type, captured.fact.entity.uid ?? null, captured.fact.entity.data?.change ?? null, captured.fact.outcome, captured.tenants ?? null] : captured?.fact.kind;
+  assert.deepEqual(entity(tap('POST', '/api/admin/scim/tenants/acme/token', 201)), ['update', 'SCIM token', 'acme', 'token_issued', 'success', ['acme']]);
+  assert.deepEqual(entity(tap('POST', '/api/admin/scim/tenants/acme/token', 200)), ['update', 'SCIM token', 'acme', 'token_issued', 'success', ['acme']]);
+  assert.deepEqual(entity(tap('POST', '/api/admin/scim/tenants/globex/token', 404)), ['update', 'SCIM token', 'globex', 'token_issued', 'failure', null], 'a refused request never writes into the Tenant it named');
+  assert.deepEqual(entity(tap('DELETE', '/api/admin/scim/tenants/acme/token', 200)), ['delete', 'SCIM token', 'acme', null, 'success', ['acme']]);
+  assert.deepEqual(entity(tap('PUT', '/api/admin/scim/tenants/acme/group-mappings', 200, { mappings: [{ value: 'Engineering', role: 'developer' }] })), ['update', 'SCIM group mapping', 'acme', null, 'success', ['acme']]);
+  const event = ocsfEvent({ fact: tap('POST', '/api/admin/scim/tenants/acme/token', 201)!.fact, actor: { user: ada }, at });
+  assert.deepEqual(ocsfErrors({ ...event, metadata: { ...event.metadata, uid: 'x', tenant_uid: 'acme', sequence: 1 } }), []);
+});
+
 test('a readiness pull request confirmation names the person, the repository and the cap, and a cancel is a deactivation', () => {
   const signedIn = { id: 'u-ada', name: 'ada', role: 'admin' as const };
   const tap = (path: string, status: number, inputs: Record<string, unknown>) => capture({ method: 'POST', path, query: new URLSearchParams(), status, user: () => signedIn, inputs: () => inputs, userByName: () => undefined, signedInByResponse: () => undefined, editorLabel: () => undefined });

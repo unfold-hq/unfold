@@ -1,6 +1,6 @@
 ---
 status: proposed
-date: 2026-10-30
+date: 2026-11-27
 decision-makers: Ryan Grippeling
 review-by: 2027-01-31
 ---
@@ -65,3 +65,31 @@ Chosen option: "**A SCIM 2.0 service provider, a Shared Signals receiver for pus
 * OpenSpec change: `openspec/changes/scim-and-shared-signals/`.
 * Specifications: [OpenID Shared Signals Framework 1.0](https://openid.net/specs/openid-sharedsignals-framework-1_0-final.html), [CAEP 1.0](https://openid.net/specs/openid-caep-1_0-final.html), [RISC 1.0](https://openid.net/specs/openid-risc-1_0-final.html), [RFC 9493](https://www.rfc-editor.org/rfc/rfc9493.html).
 * Builds on [ADR 0037](0037-an-editor-signs-in-only-after-its-person-approves-it-and-gets-its-own-credential.md) (editor credentials) and [ADR 0055](0055-unfold-proves-the-person-to-ploeg-with-a-token-exchanged-from-their-sign-in.md) (kept sign-in tokens).
+
+## Amendment 2026-11-27: each Tenant's identity provider pushes SCIM straight to Unfold
+
+The owner decided the identity architecture on 2026-11-27: people sign in through one broker with an organisation per Agency ([system ADR-0058](../../../../docs/adr/adr-0058-people-sign-in-through-one-zitadel-broker-with-an-organisation-per-tenant.md), Zitadel pending a spike), and **the customer's own identity provider, such as Entra ID or Okta, pushes SCIM directly to Unfold**. Provisioning does not depend on the broker: a broker outage or a broker without a SCIM client does not stop an Agency from adding and removing its people.
+
+* **A token per Tenant.** A Tenant administrator issues and rotates the Tenant's own SCIM bearer token at `POST /api/admin/scim/tenants/{tenant}/token`. Unfold shows it once and keeps only its SHA-256 hash; a presented token is compared in constant time against every hash. The URL stays `/scim/v2`: the token decides the Tenant. The installation-wide token `identity.scim.tokenEnv` names works as before, for the installation's own identity provider.
+* **Isolation.** A Tenant's token sees, changes and deactivates only the Users and Groups it pushed, and grants memberships only in its own Tenant, never the installation-wide account role. Another Tenant's User or Group is 404 to it, and a Group named `unfold/<other tenant>/…` grants nothing.
+* **Group mapping.** A Tenant administrator maps the customer's own group names or externalIds to an Access Role and Client memberships in the Tenant, so customers need not rename their groups. `unfold/<tenant>/…` names keep working.
+* **SCIM owns a Tenant with a token.** While a Tenant has its own SCIM token, SCIM is the only source of that Tenant's memberships: the memberships the sign-in's groups name in that Tenant are ignored, so a membership its SCIM removed stays removed. A Tenant without a token keeps taking its memberships from the sign-in's groups, as before. Withdrawing a Tenant's token hands that authority back to the sign-in's groups at the next sign-in.
+* **A role for provisioned people.** A person a Tenant's token provisioned (an active Tenant SCIM User names them or waits for them) whose sign-in entitles no installation-wide role signs in as `viewer` instead of being refused. What they may do inside the Tenant comes from its memberships. The fallback never applies when the sign-in entitles a role, so it never lowers or raises one, and it never grants `admin`.
+* **Linking.** A Tenant's SCIM User links to a person by the customer identity provider's user id, carried in the sign-in claim `identity.scim.userIdClaim` names and matched to the User's `externalId`, and otherwise by email. The broker is to add that claim through an Action; that part is proposed and not built. A Tenant's token never creates an account.
+* **Deprovisioning.** A Tenant's deactivation or deletion turns the account off and ends every credential, as before, only when the User is linked by the customer identity provider's user id (its `externalId` is the id the person's sign-in carried) and the person holds no membership of another Tenant. Otherwise it removes only that Tenant's memberships. A User linked only by email proves nothing about who the account is, so it never reaches beyond its Tenant, and one Agency's identity provider cannot sign a person out of Unfold or out of another Agency.
+* **Google Workspace** can push SCIM only through its beta [custom SCIM profiles](https://knowledge.workspace.google.com/admin/users/advanced/automated-user-provisioning-with-custom-scim-profiles), for SAML apps and limited participants. The fallback, Unfold reading the Directory API, is not built.
+* **Deprovisioning at the broker** is to reach Unfold through a broker event until the broker transmits Shared Signals itself. Neither is built.
+
+Consequences of the amendment:
+
+* Good, because an Agency's own identity provider provisions its people, independent of the broker.
+* Good, because a Tenant's token cannot read or change another Tenant's people.
+* Bad, because a Tenant whose people are linked only by email can remove their memberships but cannot turn their accounts off or end their credentials. That takes the identity provider's user id in the sign-in, which the broker is to add.
+* Bad, because a Tenant with a SCIM token must provision its own administrators through SCIM: a sign-in group naming them Admin of that Tenant no longer counts.
+
+Confirmation: `test/identity-scim-tenants.test.ts` checks a token per Tenant shown once and kept as a hash, a wrong and a rotated-out token refused, a cross-Tenant read, change, grant and membership refused, deactivation of a User linked by the identity provider's user id ending every credential of a person in one Tenant and only that Tenant's memberships of a person in two, deactivation and deletion of a User linked only by email leaving the account on and removing only that Tenant's membership, mappings by display name and externalId, linking by the identity provider's user id with email as fallback, a SCIM removal surviving a sign-in whose groups name the Tenant until the token is withdrawn, and a provisioned person without a role signing in as `viewer` and reaching only their Tenant.
+
+### History
+
+* 2026-10-30: proposed with the implementation.
+* 2026-11-27: amended with SCIM per Tenant, pushed by the customer's identity provider independent of the broker; implemented with the amendment. The same day, a User linked only by email was limited to its own Tenant's memberships, so it can no longer turn an account off; and the owner decided that a Tenant with a SCIM token takes its memberships from SCIM only, and that a person it provisioned whose sign-in entitles no role signs in as `viewer`. Google Workspace's Directory API fallback and broker-driven deprovisioning are not built.

@@ -974,11 +974,11 @@
         "scim": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["tokenEnv"],
-          "description": "The SCIM service provider.",
+          "description": "The SCIM service provider. Tenant administrators issue each Tenant its own token besides the installation token.",
           "properties": {
-            "tokenEnv": { "$ref": "#/$defs/unfoldEnvName", "description": "UNFOLD_ environment variable holding the bearer token the identity provider sends, at least 32 characters." },
-            "linkBy": { "type": "string", "enum": ["externalId", "userName", "email"], "default": "externalId", "description": "SCIM User attribute that names the person who signs in." }
+            "tokenEnv": { "$ref": "#/$defs/unfoldEnvName", "description": "UNFOLD_ environment variable holding the installation-wide bearer token, at least 32 characters. Without it only Tenant tokens reach SCIM." },
+            "linkBy": { "type": "string", "enum": ["externalId", "userName", "email"], "default": "externalId", "description": "SCIM User attribute that names the person who signs in, for Users the installation token pushes." },
+            "userIdClaim": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,99}$", "description": "Sign-in claim carrying the customer identity provider's user id, which links a Tenant's SCIM User whose externalId equals it; email otherwise." }
           }
         },
         "sharedSignals": {
